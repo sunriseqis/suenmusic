@@ -6,6 +6,11 @@ cd "$DIR"
 
 if command -v hvigor >/dev/null 2>&1; then
   exec hvigor "$@"
+elif command -v hvigorw >/dev/null 2>&1; then
+  # command-line-tools（CI 用的那套）只提供 hvigorw，不提供 hvigor。
+  # 少了这一分支，下面那个 npx 回落是死的：@ohos/hvigor-cli 在
+  # repo.harmonyos.com 与 npmmirror 上都 404（实测），构建必然失败。
+  exec hvigorw "$@"
 elif [ -f "./node_modules/.bin/hvigor" ]; then
   exec ./node_modules/.bin/hvigor "$@"
 else
