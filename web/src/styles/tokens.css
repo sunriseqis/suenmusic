@@ -1,0 +1,135 @@
+/* ==========================================================================
+   设计令牌
+   --------------------------------------------------------------------------
+   颜色部分**继承已定稿的方向稿**（.workbuddy/artifacts/软拟物-界面方向稿.html），
+   已通过 WCAG 对比度审计。三条铁律，改动前务必先读 PLAN.md 3.2：
+
+     1. 文字灰只能两级（--t1 / --t2）—— 加第三级必有一级掉到 3.x:1 以下
+     2. 强调色拆「填充用」(--accent) 与「文字用」(--accent-text)
+        —— --accent 当文字只有 3.74:1
+     3. 柔和感来自阴影，不是把文字调浅
+
+   非颜色令牌（间距 / 圆角 / 字号 / 层级）是本轮新增的，与颜色无关，可自由调整。
+   ========================================================================== */
+
+:root {
+  /* ---- 间距阶梯（软拟物的留白要略大，否则阴影会挤在一起） ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+
+  /* ---- 圆角：整体偏大，是软拟物的观感来源之一 ---- */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* ---- 字号 ---- */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-lg: 16px;
+  --fs-xl: 20px;
+  --fs-2xl: 26px;
+  --fs-3xl: 34px;
+
+  --lh-tight: 1.25;
+  --lh-normal: 1.55;
+
+  --fw-normal: 400;
+  --fw-medium: 500;
+  --fw-bold: 600;
+
+  /* ---- 层级 ---- */
+  --z-content: 1;
+  --z-sticky: 10;
+  --z-player: 20;
+  --z-nav: 30;
+  --z-overlay: 40;
+  --z-toast: 50;
+
+  /* ---- 动效：软拟物的"按下去"要快，"弹起来"可以稍慢 ---- */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 120ms;
+  --dur-mid: 220ms;
+  --dur-slow: 380ms;
+
+  /* ---- 布局尺寸 ---- */
+  --sidebar-w: 232px;
+  --playerbar-h: 76px;
+  --mobile-nav-h: 62px;
+  /**
+   * 安全区（状态栏 / 手势条）。
+   *
+   * ⚠️ 安卓侧 `env(safe-area-inset-*)` 不可靠：Capacitor 只在 iOS 注入，
+   * 安卓 WebView 在 edge-to-edge（Android 15 起强制）下内容会画到状态栏
+   * 底下，而 env() 常为 0 —— 表现就是"所有 tab 页顶部按钮被状态栏遮挡"
+   * （真机实测，模拟器复现不出）。
+   *
+   * 因此由原生侧（MainActivity）把窗口 insets 注入为 `--inset-top/bottom`
+   * （CSS px），这里的 token 优先取它，取不到再退回 env()（iOS / 浏览器）。
+   */
+  --safe-top: var(--inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--inset-bottom, env(safe-area-inset-bottom, 0px));
+
+  /* ---- 阴影强度系数：1 = 标准。紧凑列表里调到 .7 可以少糊一点 ---- */
+  --neu-depth: 1;
+}
+
+/* -------- 浅色 -------- */
+:root[data-theme='light'] {
+  --bg: #e7ecf3;
+  --sd: rgba(148, 166, 190, 0.58); /* 暗侧阴影 */
+  --sl: rgba(255, 255, 255, 0.95); /* 亮侧高光 */
+  --t1: #3a4557; /* 主文字 */
+  --t2: #586476; /* 次级文字 */
+  --accent: #e0783c; /* 强调色 —— 仅用于填充 */
+  --accent-text: #a84c17; /* 强调色 —— 仅用于文字（对比度达标） */
+
+  /* 半透明遮罩：用于全屏播放页、抽屉 */
+  --scrim: rgba(58, 69, 87, 0.34);
+  /* 仅在极少数需要"比背景再深一点点"的地方使用（如滑块轨道） */
+  --track: rgba(148, 166, 190, 0.36);
+}
+
+/* -------- 深色 -------- */
+:root[data-theme='dark'] {
+  --bg: #2b313c;
+  /* 深色下必须压到 ~7%，否则立体感全失（铁律 3 的推论） */
+  --sd: rgba(0, 0, 0, 0.62);
+  --sl: rgba(255, 255, 255, 0.07);
+  --t1: #e9edf4;
+  --t2: #a5b0c2;
+  --accent: #ff8b4a;
+  --accent-text: #ff8b4a;
+
+  --scrim: rgba(0, 0, 0, 0.58);
+  --track: rgba(0, 0, 0, 0.32);
+}
+
+/*
+ * 字体栈（包 E）：首选本地托管的思源黑体（Noto Sans SC，@fontsource 分片
+ * 按需加载，见 main.ts），气质与软拟物匹配；后面是原降级栈。
+ * 中文观感各设备不一的问题由首选字体统一。
+ */
+:root {
+  --font-sans:
+    'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', 'Source Han Sans SC', 'Noto Sans CJK SC', sans-serif;
+  /* 时长 / 码率这类数字用等宽，避免播放时数字跳动 */
+  --font-mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
+}
+
+/*
+ * 音源标识色（用户拍板：红 = 网易云，粉 = B 站 —— 与品牌直觉相反，以拍板为准）。
+ * 两个都是高饱和品牌色，浅/深主题下无需分别微调。
+ */
+:root {
+  --src-netease: #e60026;
+  --src-bili: #fb7299;
+}

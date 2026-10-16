@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="SuenMusic">
+  <title>SuenMusic</title>
+  <!-- 固定品牌色（图标不能跟随用户强调色）；网页图标用默认暖橙 -->
+  <rect x="2" y="2" width="60" height="60" rx="19" fill="#e0783c"/>
+  <path d="M12 32C18.67 41.33 25.33 41.33 32 32C38.67 22.67 45.33 22.67 52 32"
+        fill="none" stroke="#ffffff" stroke-width="6.2" stroke-linecap="round"/>
+</svg>

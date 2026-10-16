@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no"
+    />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="theme-color" content="#e7ecf3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#2b313c" media="(prefers-color-scheme: dark)" />
+    <!-- 图标：SVG 优先，PNG 兜底；apple-touch-icon 是满幅方形（系统自己加圆角） -->
+    <link rel="icon" href="/favicon.ico" sizes="any" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <title>SuenMusic</title>
+    <script>
+      /*
+       * 主题必须在首帧之前定下，否则会先闪一帧浅色再切深色。
+       * 这段内联脚本刻意不放进 main.ts —— 模块加载是异步的，来不及。
+       */
+      (function () {
+        try {
+          var saved = localStorage.getItem('suenmusic.theme') || 'system';
+          var dark =
+            saved === 'dark' ||
+            (saved === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+          if (window.SuenNativeTheme && typeof window.SuenNativeTheme.setDarkMode === 'function') {
+            window.SuenNativeTheme.setDarkMode(dark);
+          }
+        } catch (e) {
+          /* localStorage 被禁用时退回浅色，不影响可用性 */
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

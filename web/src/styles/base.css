@@ -1,0 +1,187 @@
+/* ==========================================================================
+   Reset + 全局排版
+   --------------------------------------------------------------------------
+   刻意用一个精简版 reset，不引 normalize.css：
+   本项目没有表单/表格/富文本等复杂原生控件，用不到的规则只会增加审查成本。
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+html {
+  /* 移动端旋转屏幕时不要自作主张放字号 */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--t1);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* 软拟物整页同色，禁止整页横向滚动条 */
+  overflow-x: hidden;
+}
+
+/* 主题切换时整页渐变，避免生硬跳变 */
+body,
+.neu-bg,
+.neu-raised,
+.neu-raised-md,
+.neu-raised-lg,
+.neu-inset,
+.neu-inset-deep {
+  transition:
+    background-color var(--dur-mid) var(--ease),
+    box-shadow var(--dur-mid) var(--ease);
+}
+
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote {
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--fs-2xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+}
+h2 {
+  font-size: var(--fs-xl);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-bold);
+}
+h3 {
+  font-size: var(--fs-lg);
+  line-height: var(--lh-tight);
+  font-weight: var(--fw-medium);
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+img {
+  display: block;
+  max-width: 100%;
+  border-radius: var(--r-md);
+  /* 软拟物里图片也是一个"凸起的面"，给它一点圆角与背景占位 */
+  background: var(--track);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  /* 原生控件在软拟物里太"实"，全部剥掉默认外观 */
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 数字类（时长、进度）用等宽，避免播放时宽度跳动 */
+.neu-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-xs);
+}
+
+/* 滚动条：软拟物风格，细且与底色同源 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--sd) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--sd);
+  border-radius: var(--r-pill);
+  /* 用透明边框把滑块"变细"，同时保留可点区域 */
+  border: 3px solid var(--bg);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--t2);
+}
+
+/* --------------------------------------------------------------------------
+   应用级布局基元
+   -------------------------------------------------------------------------- */
+
+/* 页面滚动区：底部要留出播放条的高度，否则最后一行被常驻条盖住 */
+.neu-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 内容最大宽度，超宽屏下不让列表被拉成一条 */
+.neu-container {
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 var(--sp-5);
+}
+
+@media (max-width: 767px) {
+  .neu-container {
+    padding: 0 var(--sp-4);
+  }
+}
+
+/* 网格：卡片自适应列数 */
+.neu-grid {
+  display: grid;
+  gap: var(--sp-5);
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+}
+@media (max-width: 767px) {
+  .neu-grid {
+    gap: var(--sp-4);
+    grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  }
+}

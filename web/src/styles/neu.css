@@ -1,0 +1,232 @@
+/* ==========================================================================
+   软拟物（neumorphism）基础工具类
+   --------------------------------------------------------------------------
+   核心约定：**容器与页面同底色**，分层只靠双向阴影 —— 不用边框、不用背景色差。
+   全局只有三种状态：凸起 / 凹陷 / 按下（按下 = 凹陷 + 轻微缩放）。
+
+   为什么不用边框：一旦加了 1px 边框，视觉重心立刻从"阴影体积"变成"描边线条"，
+   整个软拟物的柔和感就没了。状态区分必须靠明暗关系，不靠描边。
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   基础表面
+   -------------------------------------------------------------------------- */
+
+/* 页面底色。所有壳层容器都用它，保证与凸起元素同色 */
+.neu-bg {
+  background: var(--bg);
+}
+
+/**
+ * 凸起：元素浮出页面。
+ * 阴影是"外扩"的：右下暗、左上亮，模拟光从左上来。
+ */
+.neu-raised {
+  background: var(--bg);
+  box-shadow:
+    calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
+    calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+}
+
+/* 中等凸起：卡片、面板一级。深度加大，仍保持同底色 */
+.neu-raised-md {
+  background: var(--bg);
+  box-shadow:
+    calc(3px * var(--neu-depth)) calc(3px * var(--neu-depth)) calc(7px * var(--neu-depth)) var(--sd),
+    calc(-3px * var(--neu-depth)) calc(-3px * var(--neu-depth)) calc(7px * var(--neu-depth)) var(--sl);
+}
+
+/* 大凸起：全屏播放页封面、模态框 */
+.neu-raised-lg {
+  background: var(--bg);
+  box-shadow:
+    calc(6px * var(--neu-depth)) calc(6px * var(--neu-depth)) calc(14px * var(--neu-depth)) var(--sd),
+    calc(-6px * var(--neu-depth)) calc(-6px * var(--neu-depth)) calc(14px * var(--neu-depth)) var(--sl);
+}
+
+/**
+ * 凹陷：元素被压进页面。
+ * 阴影改为 `inset`，方向反转 —— 暗侧跑到左上，亮侧跑到右下。
+ */
+.neu-inset {
+  background: var(--bg);
+  box-shadow:
+    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
+    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+}
+
+/* 深凹陷：输入框、滑块轨道、进度槽 */
+.neu-inset-deep {
+  background: var(--bg);
+  box-shadow:
+    inset calc(2px * var(--neu-depth)) calc(2px * var(--neu-depth)) calc(5px * var(--neu-depth)) var(--sd),
+    inset calc(-2px * var(--neu-depth)) calc(-2px * var(--neu-depth)) calc(5px * var(--neu-depth)) var(--sl);
+}
+
+/**
+ * 分界线。软拟物里没有边框，但偶尔需要一条极淡的分隔
+ * （例如侧边栏与主区之间）。用阴影而不是 border，避免撑开盒模型。
+ */
+.neu-divide-b {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+:root[data-theme='dark'] .neu-divide-b {
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* --------------------------------------------------------------------------
+   交互态
+   -------------------------------------------------------------------------- */
+
+/**
+ * 可点击的凸起元素。
+ *
+ * 用 `:active` 而不是 JS 类：触摸与鼠标都被覆盖，也不会因为
+ * 拖动时丢失 mouseup 而卡在按下态。
+ */
+.neu-clickable {
+  cursor: pointer;
+  transition:
+    box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease),
+    opacity var(--dur-fast) var(--ease);
+  /* 移动端不要 300ms 点击延迟与高亮块 */
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.neu-clickable:hover:not(:disabled):not(.neu-disabled) {
+  /* 悬停只提亮文字，不改阴影 —— 改阴影会让整页都在动，很吵 */
+  color: var(--t1);
+}
+
+.neu-clickable:active:not(:disabled):not(.neu-disabled) {
+  box-shadow:
+    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
+    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+  transform: scale(0.98);
+}
+
+/* 选中/激活态：凹陷。用于列表当前项、开关、标签页 ——
+   **不给每行加凸起**，密集列表里那样会糊成一片（PLAN.md 3.4） */
+.neu-selected {
+  background: var(--bg);
+  box-shadow:
+    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
+    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+}
+
+/* 禁用：只降透明度 + 换光标。不要改阴影，否则看起来像"另一种尺寸的按钮" */
+.neu-disabled,
+.neu-clickable:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  /* 禁用的按钮不该在按下时缩 */
+  transform: none !important;
+}
+
+/* 键盘可达性：软拟物没有边框，focus 环必须显式给 */
+.neu-focusable:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+}
+
+/* --------------------------------------------------------------------------
+   文字
+   -------------------------------------------------------------------------- */
+
+/* 只有两级灰 —— 铁律 1 */
+.neu-t1 {
+  color: var(--t1);
+}
+.neu-t2 {
+  color: var(--t2);
+}
+.neu-accent-text {
+  color: var(--accent-text);
+}
+
+/* 单行省略 */
+.neu-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* 两行省略 */
+.neu-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* --------------------------------------------------------------------------
+   排版辅助
+   -------------------------------------------------------------------------- */
+
+.neu-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.neu-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.neu-spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 视觉隐藏但屏幕阅读器可读 */
+.neu-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 骨架屏：凸起 + 呼吸动画 */
+.neu-skeleton {
+  background: var(--bg);
+  border-radius: var(--r-md);
+  box-shadow:
+    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
+    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+  animation: neu-breathe 1.6s var(--ease) infinite;
+}
+
+@keyframes neu-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+/* 尊重系统的"减少动态效果" */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

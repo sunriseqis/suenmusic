@@ -1,0 +1,77 @@
+# ==============================================================================
+# SuenMusic 单仓 .gitignore（2026-10-16 由 suenmusic-server + suenmusic-mobile 合并）
+# 合并前两仓各自的忽略规则都在这里，注意别漏掉任何一条 —— 尤其是签名文件那条。
+# ==============================================================================
+
+# ---- 统一产物目录：只保留占位文件 ----
+# APK / IPA / HAP / server+web 镜像 / 飞牛 .fpk 一律不入库
+output/*
+!output/.gitkeep
+
+# ---- 依赖 ----
+node_modules/
+.oh_modules/
+oh_modules/
+.pnp
+.pnp.js
+
+# ---- 运行时数据 ----
+# SQLite 与用户长期记忆属运行期单机数据，绝不入库
+data/
+server/data/
+*.db
+*.db-wal
+*.db-shm
+.*test-*.db*
+
+# ---- 前端构建产物 ----
+web/dist/
+dist/
+.vite/
+
+# ---- 本地密钥与机密配置 ----
+.env
+.env.local
+.env.*.local
+*.jks
+
+# ⚠️ 这里**故意不写** `*.keystore`。
+# android/app/suenmusic.keystore 就是安卓永久签名，必须随仓库走
+# （CI 靠它签名，gradle 里的回退口令是 suenmusic/suenmusic）。
+# android/.gitignore 是 Android Studio 模板，其中 *.keystore 两行本身是注释掉的，
+# 所以 keystore 能被正常跟踪 —— 别去把那两行放开。
+
+# ---- HarmonyOS 构建产物与同步目录 ----
+hw/.hvigor/
+hw/build/
+hw/entry/build/
+hw/.cxx/
+hw/.preview/
+hw/local.properties
+hw/hvigorw.bat
+hw/entry/src/main/resources/rawfile/*
+!hw/entry/src/main/resources/rawfile/.gitkeep
+
+# ---- 各端目录内的规则（沿用 Android Studio / Xcode 模板） ----
+# android/.gitignore  ios/.gitignore  hw/.gitignore
+
+# ---- 日志与报告 ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+report.html
+problems-report.html
+
+# ---- 系统与编辑器缓存 ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.sw?
+*.iml
+
+# ---- Python 编译缓存 ----
+__pycache__/
+*.py[cod]
