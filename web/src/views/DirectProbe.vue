@@ -19,6 +19,7 @@ import {
   biliResolveAudio,
   audioCdnProbeAll,
   getBuvid,
+  transportName,
   type HttpProbe,
   type QqSong,
   type BiliCandidate,
@@ -34,7 +35,7 @@ interface Item {
 const items = ref<Item[]>([
   { name: '① 取游客标识 buvid3/buvid4', state: 'idle', detail: '' },
   { name: '① QQ音乐 搜索（元数据）', state: 'idle', detail: '' },
-  { name: '① B站 搜索（请求头组合对照）', state: 'idle', detail: '' },
+  { name: '① B站 搜索（search/all/v2）', state: 'idle', detail: '' },
   { name: '② 本地存储读写', state: 'idle', detail: '' },
   { name: '③ 解析音频地址', state: 'idle', detail: '' },
   { name: '③ 音频 CDN 是否要 Referer', state: 'idle', detail: '' },
@@ -61,6 +62,7 @@ const env = computed(() => {
     platform: cap?.getPlatform?.() ?? 'web',
     nativeAudio: isNativeAudio,
     origin: location.origin,
+    transport: transportName,
   };
 });
 
@@ -184,6 +186,7 @@ const color = (s: Item['state']): string =>
       平台 <b>{{ env.platform }}</b> · 原生音频 <b>{{ env.nativeAudio ? '可用' : '不可用' }}</b>
       · 页面源 <code>{{ env.origin }}</code>
     </p>
+    <p class="sub">传输通道：<code>{{ env.transport }}</code></p>
 
     <button :disabled="running" @click="run">
       {{ running ? '执行中…' : '开始诊断' }}
