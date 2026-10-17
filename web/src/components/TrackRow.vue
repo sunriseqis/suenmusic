@@ -361,7 +361,8 @@ onMounted(() => {
   /* 必须有底色：否则滑动时下层动作区会从整行透出来 */
   position: relative;
   z-index: 1;
-  background: transparent;
+  /* ⚠️ 必须不透明：下面就是右滑动作区，透明会让整行变成那条橙色 */
+  background: var(--bg);
   display: grid;
   grid-template-columns: 32px 40px minmax(0, 1.6fr) minmax(0, 1fr) 52px 56px;
   align-items: center;

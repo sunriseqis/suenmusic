@@ -65,7 +65,8 @@ const blocked = computed(() => props.disabled || props.loading);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  /* 与设计稿一致：圆角键（不是圆形，也不是直角） */
+  border-radius: var(--r-md);
   padding: 0;
   background: var(--panel);
   border: 1px solid var(--line);
@@ -75,6 +76,7 @@ const blocked = computed(() => props.disabled || props.loading);
 }
 
 .neu-icon-btn.square { border-radius: var(--r-md); }
+
 
 .neu-icon-btn:active:not(:disabled) {
   transform: translateY(1px);

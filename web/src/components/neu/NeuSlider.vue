@@ -91,18 +91,20 @@ function onChange(ev: Event) {
 .track {
   position: relative;
   width: 100%;
-  height: 4px;
-  border-radius: 2px;
+  height: 2px;
+  border-radius: 1px;
   overflow: hidden;
   padding: 0;
-  background: var(--bg);
-  border: 1px solid var(--line);
-  box-shadow: inset 0 1px 3px var(--lo);
+  /* 不要 border：1px 边框会把 2px 的内容盒压成 0，填充条高度就没了 */
+  background: var(--line);
 }
 
 .buffered {
   position: absolute;
-  inset: 0 auto 0 0;
+  top: 0;
+  bottom: auto;
+  left: 0;
+  height: 2px;
   background: var(--t2);
   opacity: 0.28;
   border-radius: var(--r-pill);
@@ -111,7 +113,10 @@ function onChange(ev: Event) {
 
 .fill {
   position: absolute;
-  inset: 0 auto 0 0;
+  top: 0;
+  bottom: auto;
+  left: 0;
+  height: 2px;
   background: var(--accent);
   border-radius: var(--r-pill);
   /* 拖动时不要过渡 —— 加了会感觉"跟不上手指" */
@@ -124,9 +129,9 @@ function onChange(ev: Event) {
 .thumb {
   position: absolute;
   top: 50%;
-  width: 12px;
-  height: 12px;
-  margin-left: -6px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
   border-radius: 50%;
   background: var(--accent);
   border: 1px solid color-mix(in srgb, var(--accent) 70%, #000);

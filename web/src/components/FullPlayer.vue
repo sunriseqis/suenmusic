@@ -15,7 +15,6 @@ import { useRoute } from 'vue-router';
 import { addDislike } from '@/api/recommend.ts';
 import { registerBackHandler } from '@/native/back.ts';
 import ArtistLinks from '@/components/ArtistLinks.vue';
-import LyricsPanel from '@/components/LyricsPanel.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSlider from '@/components/neu/NeuSlider.vue';
@@ -23,6 +22,7 @@ import QueuePanel from '@/components/QueuePanel.vue';
 import { usePlayerStore, PLAYBACK_MODE_LABEL, PLAYBACK_MODE_ICON } from '@/stores/player.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { useUiStore } from '@/stores/ui.ts';
+import { useLyricsStore } from '@/stores/lyrics.ts';
 import { cleanAiText, coverUrl, formatDuration } from '@/utils/format.ts';
 
 const emit = defineEmits<{ (e: 'close'): void }>();
@@ -38,13 +38,12 @@ watch(
 const player = usePlayerStore();
 const favorites = useFavoritesStore();
 const ui = useUiStore();
+const lyrics = useLyricsStore();
 const scrubMs = ref<number | null>(null);
 
 /** 队列弹层开关 */
 const queueOpen = ref(false);
 
-/** 歌词大视区开关：点击封面全幅展开，点击歌词切回封面 */
-const lyricsOpen = ref(false);
 
 /** 不喜欢两级菜单交互状态 */
 const dislikeMenuOpen = ref(false);
@@ -65,14 +64,29 @@ const offBack = registerBackHandler(() => {
     queueOpen.value = false;
     return true;
   }
-  if (lyricsOpen.value) {
-    lyricsOpen.value = false;
-    return true;
-  }
   emit('close');
   return true;
 });
 onBeforeUnmount(offBack);
+
+/**
+ * 播放页底部的三行歌词。
+ *
+ * 设计稿里歌词**始终在播放控件下方**，不再靠"点封面翻转"——
+ * 翻转把两件本该同时存在的东西做成了互斥，用户想边看封面边看词就做不到。
+ */
+const peekLines = computed(() => {
+  const ls = lyrics.lines;
+  const i = lyrics.activeIdx;
+  if (!ls.length || i < 0) return [];
+  return ls.slice(Math.max(0, i - 1), i + 2);
+});
+const activeLine = computed(() => lyrics.lines[lyrics.activeIdx] ?? null);
+/** 过渡用的键：当前行一变就换 key，触发交叉淡入 */
+const lyricKey = computed(() => {
+  const l = activeLine.value;
+  return l ? `${l.time}:${l.text}` : 'none';
+});
 
 /** 收藏当前曲目 */
 const currentFav = computed(() => {
@@ -199,24 +213,12 @@ function onScrubCommit(percent: number) {
         </span>
         <span class="h2 neu-ellipsis">{{ albumName || '未知专辑' }}</span>
       </div>
-      <NeuIconButton
-        icon="list"
-        :label="queueOpen ? '收起队列' : '播放队列'"
-        size="md"
-        @click="queueOpen = !queueOpen"
-      />
+      <span class="head-spacer" aria-hidden="true"></span>
     </header>
 
     <!-- 中间主体：视图 A 封面展示面 vs 视图 B 沉浸全屏歌词面 -->
     <div class="body">
-      <transition name="view-fade" mode="out-in">
-        <!-- 视图 A：封面面（默认）- 点击直接切歌词，普通歌曲自然垂直居中排布 -->
-        <div
-          v-if="!lyricsOpen"
-          key="cover-view"
-          class="stage-cover"
-          @click="lyricsOpen = true"
-        >
+      <div class="stage-cover">
           <!-- 封面唱片 -->
           <div class="cover-wrap neu-raised-lg">
             <img v-if="cover" :src="cover" :alt="track?.name || ''" class="cover-img" />
@@ -226,11 +228,23 @@ function onScrubCommit(percent: number) {
 
           <!-- 曲目信息 -->
           <div class="info">
-            <h2 class="t-name neu-clamp-2">{{ track?.name || '未在播放' }}</h2>
-            <p class="t-artist neu-ellipsis">
-              <ArtistLinks v-if="track" :artists="track.ar" />
-              <template v-else>从搜索或首页选一首开始</template>
-            </p>
+            <div class="info-main">
+              <div class="info-text">
+                <h2 class="t-name neu-clamp-2">{{ track?.name || '未在播放' }}</h2>
+                <p class="t-artist neu-ellipsis">
+                  <ArtistLinks v-if="track" :artists="track.ar" />
+                  <template v-else>从搜索或首页选一首开始</template>
+                </p>
+              </div>
+              <NeuIconButton
+                :icon="currentFav ? 'heart-filled' : 'heart'"
+                :label="currentFav ? '取消收藏' : '收藏'"
+                size="md"
+                :class="{ 'fav-on': currentFav }"
+                :disabled="!track"
+                @click="toggleCurrentFav"
+              />
+            </div>
 
             <!-- 推荐理由卡片：仅在专属推荐曲目展示，内置两级不喜欢；普通曲目纯净居中，无多余按键 -->
             <div
@@ -286,18 +300,6 @@ function onScrubCommit(percent: number) {
           </div>
         </div>
 
-        <!-- 视图 B：沉浸全屏歌词面 - 开阔大视区、上下渐隐、点击任意处返回封面 -->
-        <div
-          v-else
-          key="lyrics-view"
-          class="stage-lyrics"
-          @click="lyricsOpen = false"
-        >
-          <div class="lyrics-wrap">
-            <LyricsPanel dense :seekable="false" />
-          </div>
-        </div>
-      </transition>
     </div>
 
     <!-- 移动端底栏：标准 5 键式布局，收藏功能唯一的视觉锚点 -->
@@ -352,14 +354,27 @@ function onScrubCommit(percent: number) {
         </div>
         <div class="wing wing-r">
           <NeuIconButton
-            :icon="currentFav ? 'heart-filled' : 'heart'"
-            :label="currentFav ? '取消收藏' : '收藏'"
+            icon="list"
+            :label="queueOpen ? '收起队列' : '播放队列'"
             size="md"
-            :class="{ 'fav-on': currentFav }"
-            :disabled="!track"
-            @click="toggleCurrentFav"
+            @click="queueOpen = !queueOpen"
           />
         </div>
+      </div>
+
+      <div class="lyric-wrap">
+        <Transition name="lyric-fade">
+          <div v-if="peekLines.length" :key="lyricKey" class="lyric-peek">
+            <p
+              v-for="(l, i) in peekLines"
+              :key="i"
+              class="peek-line"
+              :class="{ on: l === activeLine }"
+            >
+              {{ l.text }}
+            </p>
+          </div>
+        </Transition>
       </div>
     </footer>
 
@@ -457,12 +472,10 @@ function onScrubCommit(percent: number) {
   transform: scale(1.25);
 }
 .src-dot.src-netease {
-  background: #e60026;
-  box-shadow: 0 0 6px rgba(230, 0, 38, 0.7);
+  background: var(--src-netease);
 }
 .src-dot.src-bilibili {
-  background: #fb7299;
-  box-shadow: 0 0 6px rgba(251, 114, 153, 0.7);
+  background: var(--src-bili);
 }
 
 /* ---- 中间主体 ---- */
@@ -528,14 +541,44 @@ function onScrubCommit(percent: number) {
 
 .info {
   width: 100%;
-  text-align: center;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.info-main {
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-3);
+  width: 100%;
+}
+.info-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.head-spacer {
+  width: 44px;
+  flex: none;
+}
+
+/* 次级控件一律无面板 —— 设计稿里只有播放键有厚度。
+   全给面板会让 5 个键变成一排按钮，厚度也不稀缺了。 */
+.head :deep(.neu-icon-btn),
+.info-main :deep(.neu-icon-btn),
+.controls :deep(.neu-icon-btn:not(.primary)) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.head :deep(.neu-icon-btn:active),
+.info-main :deep(.neu-icon-btn:active),
+.controls :deep(.neu-icon-btn:not(.primary):active) {
+  background: var(--panel-2);
+  box-shadow: none;
 }
 .t-name {
   margin: 0;
+  text-align: left;
   font-size: 24px;
   font-weight: var(--fw-bold);
   letter-spacing: -0.01em;
@@ -545,6 +588,7 @@ function onScrubCommit(percent: number) {
 }
 .t-artist {
   margin: 2px 0 0;
+  text-align: left;
   font-size: var(--fs-sm);
   color: var(--t2);
 }
@@ -760,6 +804,62 @@ function onScrubCommit(percent: number) {
 
 :deep(.fav-on) {
   color: var(--accent-text);
+}
+
+/* 底部三行歌词：不滚动、不遮挡，只做"此刻唱到哪"的提示 */
+.lyric-wrap {
+  position: relative;
+  min-height: 58px;
+}
+/* 换行时整块向上淡出、新块从下方浮上来 —— 像一块滑动显示板，
+   而不是"啪"地换字 */
+.lyric-fade-enter-active {
+  transition:
+    opacity 240ms var(--ease),
+    transform 240ms var(--ease);
+}
+.lyric-fade-leave-active {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  transition:
+    opacity 160ms var(--ease),
+    transform 160ms var(--ease);
+}
+.lyric-fade-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.lyric-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+.lyric-peek {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding-top: 6px;
+  min-height: 58px;
+}
+.peek-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--t2);
+  opacity: 0.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 92%;
+}
+.peek-line.on {
+  color: var(--accent);
+  opacity: 1;
+  font-size: 13px;
+  font-weight: var(--fw-medium);
 }
 
 /* 播放键是整页唯一有厚度的控件：面板色键面 + 琥珀图标，按下位移 1px。
