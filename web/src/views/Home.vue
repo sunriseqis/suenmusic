@@ -507,7 +507,7 @@ onBeforeUnmount(() => {
         <div class="block-head">
           <h2 class="block-title">新歌首发</h2>
         </div>
-        <div class="list neu-raised-md">
+        <div class="list">
           <TrackRow
             v-for="(t, i) in data.newSongs.slice(0, 8)"
             :key="t.id"
@@ -596,9 +596,10 @@ onBeforeUnmount(() => {
 }
 .hi {
   margin: 0;
-  font-size: var(--fs-2xl);
+  font-size: 26px;
   font-weight: var(--fw-bold);
-  line-height: var(--lh-tight);
+  letter-spacing: -0.02em;
+  line-height: 1.2;
   color: var(--t1);
   white-space: nowrap;
   overflow: hidden;
@@ -690,7 +691,6 @@ onBeforeUnmount(() => {
  */
 .rail-nav {
   flex: none;
-  filter: drop-shadow(0 3px 8px rgba(26, 36, 54, 0.3));
 }
 :root[data-theme='dark'] .rail-nav {
   filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.62));
@@ -735,23 +735,17 @@ onBeforeUnmount(() => {
   display: block;
   width: 100%;
   scroll-snap-align: start;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   overflow: hidden;
   aspect-ratio: 1;
-  background: var(--track);
-  transition:
-    transform var(--dur-mid) var(--ease),
-    box-shadow var(--dur-mid) var(--ease);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
+  transition: border-color var(--dur-mid) var(--ease);
 }
 /* 悬停微抬：幅度与 CoverCard 一致，软拟物的动效应当是"呼吸"而非"弹跳" */
 .poster:hover {
-  transform: translateY(-2px);
-  box-shadow:
-    calc(8px * var(--neu-depth)) calc(8px * var(--neu-depth)) calc(18px * var(--neu-depth)) var(--sd),
-    calc(-8px * var(--neu-depth)) calc(-8px * var(--neu-depth)) calc(18px * var(--neu-depth)) var(--sl);
-}
-.poster:active {
-  transform: translateY(0);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 .poster:focus-visible {
   outline: 2px solid var(--accent-text);
@@ -848,9 +842,10 @@ onBeforeUnmount(() => {
   gap: var(--sp-3);
 }
 .block-title {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-bold);
-  color: var(--t1);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: var(--fw-medium);
+  color: var(--t2);
 }
 
 .list-play-all {

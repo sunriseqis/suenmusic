@@ -91,10 +91,13 @@ export const useUiStore = defineStore('ui', () => {
    * （inline style 会盖过 tokens.css 里的主题定义，这正是我们要的）。
    */
   function applyAccent(): void {
-    const v = resolvedTheme.value === 'dark' ? accent.value.dark : accent.value.light;
-    const root = document.documentElement;
-    root.style.setProperty('--accent', v.fill);
-    root.style.setProperty('--accent-text', v.text);
+    /**
+     * 哑光硬件只允许**一个**强调色，颜色由 tokens.css 定义。
+     * 这里保留函数是为了兼容调用点，但**不再写 inline 变量** ——
+     * 以前那套会在启动时把 --accent 覆盖成用户上次选的色，
+     * 导致设计稿的琥珀永远不生效（真机实测：--accent 仍是 #e0783c）。
+     */
+    void resolvedTheme.value;
   }
 
   function setAccent(key: string): void {

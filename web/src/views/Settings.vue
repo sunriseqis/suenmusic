@@ -57,7 +57,7 @@ import { usePlayerStore } from '@/stores/player.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useDislikesStore } from '@/stores/dislikes.ts';
-import { ACCENT_PRESETS, useUiStore } from '@/stores/ui.ts';
+import { useUiStore } from '@/stores/ui.ts';
 import { formatDateTime, formatRelative } from '@/utils/format.ts';
 import type { SessionInfo } from '@/api/types.ts';
 
@@ -1138,26 +1138,7 @@ function deviceLabel(ua: string): string {
             <span class="appearance-lbl neu-t2">主题模式</span>
             <NeuTabs v-model="themeValue" :items="THEME_TABS" />
           </div>
-          <div class="appearance-row accent-picker-row">
-            <span class="appearance-lbl neu-t2">强调色彩</span>
-            <div class="accents" role="radiogroup" aria-label="强调色" data-role="accent-picker">
-              <button
-                v-for="p in ACCENT_PRESETS"
-                :key="p.key"
-                type="button"
-                role="radio"
-                class="swatch"
-                :class="{ active: ui.accentKey === p.key }"
-                :style="{
-                  '--sw': ui.resolvedTheme === 'dark' ? p.dark.fill : p.light.fill,
-                }"
-                :aria-label="p.label"
-                :aria-checked="ui.accentKey === p.key"
-                :title="p.label"
-                @click="ui.setAccent(p.key)"
-              />
-            </div>
-          </div>
+
         </div>
 
         <!-- 设备与更新：两个紧凑入口。原先各占一张整卡片，只放一个控件，很突兀。

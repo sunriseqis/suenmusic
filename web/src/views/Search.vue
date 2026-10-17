@@ -297,7 +297,7 @@ function openPlaylist(tid: string | number | undefined) {
             播放全部
           </button>
         </div>
-        <div class="list neu-raised-md">
+        <div class="list">
           <TrackRow
             v-for="(t, i) in result.songs"
             :key="t.id"
@@ -459,9 +459,10 @@ function openPlaylist(tid: string | number | undefined) {
   gap: var(--sp-3);
 }
 .block-title {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-bold);
-  color: var(--t1);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: var(--fw-medium);
+  color: var(--t2);
 }
 .count {
   color: var(--t2);

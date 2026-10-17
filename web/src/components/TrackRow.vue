@@ -361,7 +361,7 @@ onMounted(() => {
   /* 必须有底色：否则滑动时下层动作区会从整行透出来 */
   position: relative;
   z-index: 1;
-  background: var(--panel);
+  background: transparent;
   display: grid;
   grid-template-columns: 32px 40px minmax(0, 1.6fr) minmax(0, 1fr) 52px 56px;
   align-items: center;

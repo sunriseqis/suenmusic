@@ -496,16 +496,14 @@ function onScrubCommit(percent: number) {
 }
 .cover-wrap {
   position: relative;
-  width: min(72vw, 290px);
+  width: min(74vw, 300px);
   aspect-ratio: 1;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   overflow: hidden;
-  margin-bottom: var(--sp-3);
+  margin-bottom: var(--sp-4);
   flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-.cover-wrap:active {
-  transform: scale(0.98);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .cover-img {
   width: 100%;
@@ -517,10 +515,8 @@ function onScrubCommit(percent: number) {
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--track);
-  box-shadow:
-    inset 4px 4px 10px var(--sd),
-    inset -4px -4px 10px var(--sl);
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .art-sheen {
   position: absolute;
@@ -540,15 +536,16 @@ function onScrubCommit(percent: number) {
 }
 .t-name {
   margin: 0;
-  font-size: var(--fs-lg);
+  font-size: 24px;
   font-weight: var(--fw-bold);
+  letter-spacing: -0.01em;
   color: var(--t1);
-  max-width: 90%;
-  line-height: var(--lh-tight);
+  max-width: 92%;
+  line-height: 1.2;
 }
 .t-artist {
-  margin: 0;
-  font-size: var(--fs-xs);
+  margin: 2px 0 0;
+  font-size: var(--fs-sm);
   color: var(--t2);
 }
 .t-artist :deep(a) {
@@ -737,7 +734,9 @@ function onScrubCommit(percent: number) {
 .times {
   display: flex;
   justify-content: space-between;
-  font-size: var(--fs-xs);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
   color: var(--t2);
   padding: 0 2px;
 }
@@ -761,5 +760,18 @@ function onScrubCommit(percent: number) {
 
 :deep(.fav-on) {
   color: var(--accent-text);
+}
+
+/* 播放键是整页唯一有厚度的控件：面板色键面 + 琥珀图标，按下位移 1px。
+   NeuIconButton 的 primary 写在子组件里，用 :deep + !important 压过去。 */
+.controls :deep(.primary) {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel)) !important;
+  color: var(--accent) !important;
+  border: 1px solid var(--line) !important;
+  box-shadow: inset 0 1px 0 var(--hi) !important;
+}
+.controls :deep(.primary:active) {
+  transform: translateY(1px) !important;
+  box-shadow: inset 0 2px 8px var(--lo) !important;
 }
 </style>
