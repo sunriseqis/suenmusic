@@ -15,6 +15,7 @@ import { useRoute } from 'vue-router';
 import { addDislike } from '@/api/recommend.ts';
 import { registerBackHandler } from '@/native/back.ts';
 import ArtistLinks from '@/components/ArtistLinks.vue';
+import LyricsPanel from '@/components/LyricsPanel.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSlider from '@/components/neu/NeuSlider.vue';
@@ -44,6 +45,9 @@ const scrubMs = ref<number | null>(null);
 /** 队列弹层开关 */
 const queueOpen = ref(false);
 
+/** 歌词页（从底部弹出的整页歌词） */
+const lyricsOpen = ref(false);
+
 
 /** 不喜欢两级菜单交互状态 */
 const dislikeMenuOpen = ref(false);
@@ -62,6 +66,10 @@ const offBack = registerBackHandler(() => {
   }
   if (queueOpen.value) {
     queueOpen.value = false;
+    return true;
+  }
+  if (lyricsOpen.value) {
+    lyricsOpen.value = false;
     return true;
   }
   emit('close');
@@ -360,7 +368,14 @@ function onScrubCommit(percent: number) {
         </div>
       </div>
 
-      <div class="lyric-wrap">
+      <div
+        class="lyric-wrap"
+        role="button"
+        tabindex="0"
+        aria-label="展开歌词"
+        @click="lyricsOpen = true"
+        @keydown.enter.prevent="lyricsOpen = true"
+      >
         <Transition name="lyric-fade">
           <div v-if="peekLines.length" :key="lyricKey" class="lyric-peek">
             <p
@@ -375,6 +390,21 @@ function onScrubCommit(percent: number) {
         </Transition>
       </div>
     </footer>
+
+    <!-- 歌词页：点击底部歌词后从下往上推出来 -->
+    <Transition name="lyric-sheet">
+      <section v-if="lyricsOpen" class="lyric-sheet" aria-label="歌词">
+        <header class="lyric-sheet-head">
+          <span class="lyric-sheet-eyebrow">歌词 · {{ track?.name || '' }}</span>
+          <button type="button" class="sheet-close" aria-label="收起歌词" @click="lyricsOpen = false">
+            <NeuIcon name="chevron-down" :size="20" />
+          </button>
+        </header>
+        <div class="lyric-sheet-body">
+          <LyricsPanel dense />
+        </div>
+      </section>
+    </Transition>
 
     <QueuePanel :open="queueOpen" @close="queueOpen = false" />
   </div>
@@ -814,10 +844,68 @@ function onScrubCommit(percent: number) {
   color: var(--accent-text);
 }
 
+/* ---------------- 歌词页（底部弹出） ---------------- */
+
+.lyric-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  padding: calc(var(--sp-3) + var(--safe-top)) var(--sp-5)
+    calc(var(--sp-4) + var(--safe-bottom));
+  background: var(--bg);
+  /* 顶沿一条发丝线：这块是从机身里抽出来的，不是浮在空中的弹窗 */
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+
+.lyric-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding-bottom: var(--sp-2);
+}
+.lyric-sheet-eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--t2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sheet-close {
+  background: transparent;
+  border: 0;
+  padding: 6px;
+  color: var(--t2);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.lyric-sheet-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 从下往上推出：只用 transform，不做淡入 —— 位移本身已经是"抽出来" */
+.lyric-sheet-enter-active,
+.lyric-sheet-leave-active {
+  transition: transform 340ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.lyric-sheet-enter-from,
+.lyric-sheet-leave-to {
+  transform: translateY(100%);
+}
+
 /* 底部三行歌词：不滚动、不遮挡，只做"此刻唱到哪"的提示 */
 .lyric-wrap {
   position: relative;
   min-height: 58px;
+  cursor: pointer;
+  /* 留出一点上边距，让它像一块可推起的面板而不是贴着控件 */
+  padding-top: 2px;
 }
 /* 换行时整块向上淡出、新块从下方浮上来 —— 像一块滑动显示板，
    而不是"啪"地换字 */
