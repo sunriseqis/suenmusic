@@ -196,6 +196,7 @@ onMounted(() => {
           :index="i + 1"
           :list="filtered"
           swipe-remove-on-unfavorite
+          :mark-fav="false"
         />
       </div>
     </template>

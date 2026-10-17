@@ -37,8 +37,19 @@ const props = withDefaults(
      * 普通页（主页/搜索/合集/每日推荐）保持 false：行留在原地，弹回即可。
      */
     swipeRemoveOnUnfavorite?: boolean;
+    /**
+     * 已收藏时把**序号**染成琥珀（默认开）。
+     * 收藏页自己传 false —— 那一页每一行都是收藏，全染成琥珀就没有信息量了。
+     */
+    markFav?: boolean;
   }>(),
-  { showAlbum: true, showCover: true, dislikeable: false, swipeRemoveOnUnfavorite: false }
+  {
+    showAlbum: true,
+    showCover: true,
+    dislikeable: false,
+    swipeRemoveOnUnfavorite: false,
+    markFav: true,
+  }
 );
 
 const emit = defineEmits<{
@@ -244,19 +255,12 @@ onMounted(() => {
         <span v-if="isCurrent" class="bars" aria-hidden="true">
           <i /><i /><i />
         </span>
-        <span v-else class="neu-num num">{{ index }}</span>
+        <span v-else class="neu-num num" :class="{ 'num-fav': isFav && props.markFav }">{{ index }}</span>
       </div>
 
       <div v-if="showCover" class="cov">
         <img v-if="cover" :src="cover" :alt="''" loading="lazy" />
         <span v-else class="cov-ph" aria-hidden="true" />
-        <!--
-          已收藏：封面左上角一盏很小的强调色指示灯。
-          手机上心形列整列被隐藏，没有它滑动就是盲操作（不知道这一下
-          是"收藏"还是"取消收藏"）—— 但也不能抢戏，所以只做一个小光点，
-          不用图标。仅窄屏显示：PC 有 hover 红心，不需要常显。
-        -->
-        <span v-if="isFav" class="fav-dot" aria-hidden="true" />
       </div>
 
       <div class="main">
@@ -409,6 +413,11 @@ onMounted(() => {
   outline-offset: -2px;
 }
 
+.num.num-fav {
+  color: var(--accent);
+  font-weight: var(--fw-medium);
+}
+
 .idx {
   display: flex;
   align-items: center;
@@ -476,26 +485,6 @@ onMounted(() => {
   background: var(--track);
 }
 
-/*
- * 已收藏的指示灯：封面左上角**外面**一个 6px 的强调色光点 + 一圈柔光。
- *
- * 位置刻意压在封面框线上（只压住 1px，其余 5px 落在封面外的底色上）：
- * 放在封面内侧会被封面图吃掉对比度，看不清。
- * 整体做得极小 —— 它的职责只是"让你滑动前知道当前状态"，
- * 不是号召点击（心形列在手机上本来就是隐藏的）。
- */
-.fav-dot {
-  display: none;
-  position: absolute;
-  top: 3px;
-  left: -5px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 5px 1px var(--accent);
-  pointer-events: none;
-}
 
 .main {
   display: flex;
@@ -613,8 +602,5 @@ onMounted(() => {
   }
   /* 手机上心形列整列被隐藏，改由封面左上角那盏小灯表达"已收藏"，
      滑动才知道这一下是收藏还是取消收藏（PC 有 hover 红心，不需要） */
-  .fav-dot {
-    display: block;
   }
-}
 </style>
