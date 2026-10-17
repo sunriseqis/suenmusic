@@ -44,9 +44,90 @@ const theme = ref<'dark' | 'paper'>('dark');
     <main class="stack">
       <!-- ================= 01 Logo ================= -->
       <section class="spec">
-        <p class="label">01 — MARK / 凹槽波形</p>
+        <p class="label">01 — MARK / 三版 S 变体</p>
 
         <div class="logo-stage">
+          <!-- V1 方波：直角 + 平口，像电路走线 / 铣出来的槽 -->
+          <div class="logo-cell">
+            <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
+              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
+              <path
+                d="M46 17 H26 V32 H46 V47 H20"
+                class="groove-deep"
+                style="stroke-width: 9"
+                stroke-linejoin="miter"
+                stroke-linecap="square"
+                fill="none"
+                transform="translate(0 1.2)"
+              />
+              <path
+                d="M46 17 H26 V32 H46 V47 H20"
+                class="groove-edge"
+                style="stroke-width: 2"
+                stroke-linejoin="miter"
+                stroke-linecap="square"
+                fill="none"
+              />
+              <circle cx="20" cy="47" r="2.6" class="dot" />
+            </svg>
+            <div class="mini-row">
+              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
+                <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
+                <path
+                  d="M46 17 H26 V32 H46 V47 H20"
+                  class="groove-edge"
+                  style="stroke-width: 6"
+                  stroke-linejoin="miter"
+                  stroke-linecap="square"
+                  fill="none"
+                />
+                <circle cx="20" cy="47" r="4" class="dot" />
+              </svg>
+            </div>
+            <span class="cap">V1 方波 · 64 / 24</span>
+          </div>
+
+          <!-- V2 折角：45° 斜接，像折出来的金属件 -->
+          <div class="logo-cell">
+            <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
+              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
+              <path
+                d="M46 17 H24 L40 30 H20 L36 44 H18"
+                class="groove-deep"
+                style="stroke-width: 8"
+                stroke-linejoin="miter"
+                stroke-linecap="square"
+                fill="none"
+                transform="translate(0 1.2)"
+              />
+              <path
+                d="M46 17 H24 L40 30 H20 L36 44 H18"
+                class="groove-edge"
+                style="stroke-width: 2"
+                stroke-linejoin="miter"
+                stroke-linecap="square"
+                fill="none"
+              />
+              <circle cx="18" cy="44" r="2.6" class="dot" />
+            </svg>
+            <div class="mini-row">
+              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
+                <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
+                <path
+                  d="M46 17 H24 L40 30 H20 L36 44 H18"
+                  class="groove-edge"
+                  style="stroke-width: 5.5"
+                  stroke-linejoin="miter"
+                  stroke-linecap="square"
+                  fill="none"
+                />
+                <circle cx="18" cy="44" r="4" class="dot" />
+              </svg>
+            </div>
+            <span class="cap">V2 折角 · 64 / 24</span>
+          </div>
+
+          <!-- V3 原版：正弦槽，作对照 -->
           <div class="logo-cell">
             <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
               <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
@@ -58,57 +139,42 @@ const theme = ref<'dark' | 'paper'>('dark');
               <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge" />
               <circle cx="13" cy="33" r="2.6" class="dot" />
             </svg>
-            <span class="cap">64</span>
-          </div>
-
-          <div class="logo-cell">
-            <svg class="mark-md" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path
-                d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0"
-                class="groove-deep"
-                transform="translate(0 1.2)"
-              />
-              <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge" />
-              <circle cx="13" cy="33" r="2.6" class="dot" />
-            </svg>
-            <span class="cap">32</span>
-          </div>
-
-          <div class="logo-cell">
-            <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge thin" />
-              <circle cx="13" cy="33" r="3" class="dot" />
-            </svg>
-            <span class="cap">24</span>
-          </div>
-
-          <div class="logo-cell wide">
-            <div class="lockup">
-              <svg class="mark-md" viewBox="0 0 64 64" aria-hidden="true">
+            <div class="mini-row">
+              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
                 <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-                <path
-                  d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0"
-                  class="groove-deep"
-                  transform="translate(0 1.2)"
-                />
-                <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge" />
-                <circle cx="13" cy="33" r="2.6" class="dot" />
+                <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge thin" />
+                <circle cx="13" cy="33" r="3" class="dot" />
               </svg>
-              <div class="lockup-text">
-                <span class="wordmark lg">SUENMUSIC</span>
-                <span class="tagline">LOCAL FIRST · PLAYER</span>
-              </div>
             </div>
-            <span class="cap">LOCKUP</span>
+            <span class="cap">V3 原版 · 64 / 24</span>
           </div>
         </div>
 
-        <p class="note">
-          波形是一道刻槽：深色描边下沉 1.2px，亮色描边压在上沿 —— 不画纹理，
-          靠光影方向表达"凹进去"。琥珀只出现在槽的起点，是整枚标记唯一的颜色。
-        </p>
+        <div class="lockup-row">
+          <div class="lockup">
+            <svg class="mark-md" viewBox="0 0 64 64" aria-hidden="true">
+              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
+              <path
+                d="M46 17 H26 V32 H46 V47 H20"
+                class="groove-edge"
+                style="stroke-width: 3.2"
+                stroke-linejoin="miter"
+                stroke-linecap="square"
+                fill="none"
+              />
+              <circle cx="20" cy="47" r="2.6" class="dot" />
+            </svg>
+            <div class="lockup-text">
+              <span class="wordmark lg">SUENMUSIC</span>
+              <span class="tagline">LOCAL FIRST · PLAYER</span>
+            </div>
+          </div>
+          <p class="note tight">
+            V1 的直角和平口是"铣"出来的：没有一处圆角，转折用 90°，末端切平。
+            V2 把转折换成 45° 斜接，像一个折弯的金属件。
+            两者都比正弦槽硬，区别是 V1 更像电路、V2 更像钣金。
+          </p>
+        </div>
       </section>
 
       <!-- ================= 02 播放页 ================= -->
@@ -292,6 +358,51 @@ const theme = ref<'dark' | 'paper'>('dark');
           分隔靠 1px 发丝线与 16px 行距，不用阴影分层。
         </p>
       </section>
+      <!-- ================= 05 导航 ================= -->
+      <section class="spec">
+        <p class="label">05 — NAV / 三套导航</p>
+
+        <div class="nav-demos">
+          <div class="nav-demo">
+            <span class="cap">N1 导轨选择器 · 活动项是滑到位的滑块</span>
+            <div class="nav-rail">
+              <button class="rail-item on">首页</button>
+              <button class="rail-item">搜索</button>
+              <button class="rail-item">收藏</button>
+              <button class="rail-item">设置</button>
+            </div>
+          </div>
+
+          <div class="nav-demo">
+            <span class="cap">N2 物理键排 · 活动项按下去</span>
+            <div class="nav-keys">
+              <button class="key-item on">首页</button>
+              <button class="key-item">搜索</button>
+              <button class="key-item">收藏</button>
+              <button class="key-item">设置</button>
+            </div>
+          </div>
+
+          <div class="nav-demo">
+            <span class="cap">N3 指示灯 · 面板上的铭牌 + LED</span>
+            <div class="nav-led">
+              <button class="led-item on">首页</button>
+              <button class="led-item">搜索</button>
+              <button class="led-item">收藏</button>
+              <button class="led-item">设置</button>
+            </div>
+          </div>
+        </div>
+
+        <p class="note">
+          N1 把导航做成一条凹槽导轨，活动项是一个凸起的滑块（带底部琥珀指示条）——
+          这是硬件感最强的一套，也最占高度；
+          N2 每个都是一枚独立按键，活动项直接"按下去"（位移 1px + 内阴影），
+          代价是四枚按键在窄屏上会显得碎；
+          N3 最克制：整条只有铭牌和 LED，活动项亮一颗琥珀点，靠字重和亮度区分。
+        </p>
+      </section>
+
     </main>
   </div>
 </template>
@@ -952,5 +1063,146 @@ svg.fill.amber {
   height: 3px;
   border-radius: 50%;
   background: var(--amber);
+}
+
+/* ==========================================================================
+   Logo 变体补充
+   ========================================================================== */
+.mini-row {
+  display: flex;
+  justify-content: center;
+}
+.lockup-row {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  flex-wrap: wrap;
+  padding: 0 18px;
+}
+.note.tight {
+  flex: 1;
+  min-width: 240px;
+}
+
+/* ==========================================================================
+   导航三套
+   ========================================================================== */
+.nav-demos {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 390px;
+  margin: 0 auto;
+  width: 100%;
+}
+.nav-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+/* N1 导轨 */
+.nav-rail {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: var(--bg);
+  box-shadow: inset 0 2px 7px var(--lo);
+}
+.rail-item {
+  flex: 1;
+  padding: 12px 0 14px;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  position: relative;
+  cursor: pointer;
+}
+.rail-item.on {
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: inset 0 1px 0 var(--hi);
+  color: var(--text);
+}
+.rail-item.on::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  width: 14px;
+  height: 2px;
+  background: var(--amber);
+  transform: translateX(-50%);
+}
+
+/* N2 物理键 */
+.nav-keys {
+  display: flex;
+  gap: 8px;
+}
+.key-item {
+  flex: 1;
+  padding: 13px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--panel-2), var(--panel));
+  box-shadow: inset 0 1px 0 var(--hi);
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  cursor: pointer;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
+}
+.key-item.on {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 8px var(--lo);
+  color: var(--amber);
+  /* 不要琥珀描边：那会变成"聚焦框"，不是"按下去"。厚度差异由内阴影表达 */
+  border-color: var(--line);
+}
+
+/* N3 指示灯 */
+.nav-led {
+  display: flex;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+.led-item {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--dim);
+  font-family: inherit;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  position: relative;
+  padding-top: 12px;
+  cursor: pointer;
+}
+.led-item::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--line);
+  transform: translateX(-50%);
+}
+.led-item.on {
+  color: var(--text);
+}
+.led-item.on::before {
+  background: var(--amber);
+  box-shadow: 0 0 7px color-mix(in srgb, var(--amber) 70%, transparent);
 }
 </style>
