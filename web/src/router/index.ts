@@ -59,6 +59,17 @@ const routes: RouteRecordRaw[] = [
     meta: { public: true },
   },
   {
+    /**
+     * 哑光硬件设计稿（静态）。
+     *
+     * 它不依赖现有样式与服务端，只用来"看气质" —— 确认设计语言之后再迁到真页面。
+     */
+    path: '/design',
+    name: 'design',
+    component: () => import('@/views/DesignPreview.vue'),
+    meta: { public: true },
+  },
+  {
     // 兜底：不认识的地址回首页，而不是白屏
     path: '/:pathMatch(.*)*',
     redirect: '/',
