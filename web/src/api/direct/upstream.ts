@@ -60,7 +60,7 @@ export interface HttpResult {
   viaNative: boolean;
 }
 
-async function httpJson(
+export async function httpJson(
   url: string,
   opts: { method?: string; headers?: Record<string, string>; params?: Record<string, string>; data?: unknown } = {}
 ): Promise<HttpResult> {

@@ -188,7 +188,7 @@ onMounted(() => {
     </div>
 
     <template v-else>
-      <div class="list neu-raised-md">
+      <div class="list">
         <TrackRow
           v-for="(t, i) in filtered"
           :key="t.id"
@@ -275,8 +275,8 @@ onMounted(() => {
   padding: var(--sp-3);
 }
 .list {
-  padding: var(--sp-2);
-  border-radius: var(--r-xl);
+  /* 列表直接落在页面底上：不要内边距与圆角，靠行的发丝线分格 */
+  padding: 0;
 }
 .empty {
   padding: var(--sp-6) var(--sp-4);

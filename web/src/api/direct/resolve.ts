@@ -11,6 +11,7 @@ import { artistNames } from '@/utils/format.ts';
 import { biliResolveAudio, biliSearch } from './upstream.ts';
 import { scoreCandidate, type MatchTrack } from './matcher.ts';
 import { getLocalAnchor } from './anchor.ts';
+import { neteaseAvailable, neteaseSearch, neteaseSongUrl } from './netease.ts';
 
 /** 直链缓存时长。B 站签名通常 2 小时有效，但队列里反复重解析没必要，10 分钟够用 */
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -146,6 +147,111 @@ export async function resolveDirect(track: Track): Promise<{
       };
     } catch {
       /* 锚点失效：继续走自动匹配 */
+    }
+  }
+
+  /**
+   * 网易云优先。
+   *
+   * 与旧版策略一致：**拿到试听就当失败**（30 秒的"能播"比"播不了"更糟），
+   * 逐级降码率都不行才回退 B 站。所以这里失败是常态，静默继续即可。
+   */
+  if (neteaseAvailable()) {
+    try {
+      const artist = artistNames(track.ar);
+      const kw = artist && artist !== '未知歌手' ? `${name} ${artist}` : name;
+      const songs = await neteaseSearch(kw, 10);
+      const mt: MatchTrack = {
+        name,
+        artists: (track.ar ?? []).map(a => a.name).filter(Boolean),
+        durationMs: track.dt || 0,
+      };
+      const scored = songs
+        .map(s => {
+          const cand = {
+            bvid: String(s.id),
+            title: s.name,
+            author: s.artists.join('/'),
+            durationSec: Math.round(s.durationMs / 1000),
+            pic: s.picUrl,
+          };
+          const sc = scoreCandidate(mt, cand);
+          return { s, cand, ...sc };
+        })
+        .sort((a, b) => b.finalScore - a.finalScore);
+
+      /**
+       * 网易云的搜索结果里**翻唱极多**（"晴天(深情版)"这种），
+       * 光靠时长+标题能打到 80 分。必须要求歌手命中，否则宁可回退 B 站 ——
+       * 放错版本比播不了更糟，用户第一耳就能听出来。
+       */
+      const wanted = (track.ar ?? []).map(a => a.name.toLowerCase().trim()).filter(Boolean);
+      const artistHit = (item: (typeof scored)[number]): boolean => {
+        const hay = `${item.s.artists.join('/')} ${item.s.name}`.toLowerCase();
+        if (wanted.length > 0) return wanted.some(a => hay.includes(a));
+        /**
+         * 曲目没有歌手信息时，退化为**标题必须完全相等** ——
+         * 网易云里 "晴天(深情版)" 这类翻唱会附加后缀，只要歌名里有"晴天"
+         * 就能骗过包含判断。宁可回退 B 站。
+         */
+        return item.s.name.trim() === name.trim();
+      };
+
+      console.log(
+        `[direct] 网易云候选 ${songs.length} 条，最高分 ${scored[0]?.finalScore ?? 0}（${scored[0]?.s.name ?? '-'}）wanted=[${wanted.join('/')}]` +
+          (scored[0] ? ` cand=[${scored[0].s.artists.join('/')}]` : '')
+      );
+      for (const item of scored.slice(0, 3)) {
+        if (item.finalScore < 50) break;
+        if (!artistHit(item)) {
+          console.log(`[direct] 网易云跳过（歌手不符）《${item.s.name}》- ${item.s.artists.join('/')}`);
+          continue;
+        }
+        const stream = await neteaseSongUrl(item.s.id);
+        console.log(
+          `[direct] 网易云取流 ${item.s.id}《${item.s.name}》score=${item.finalScore} → ${stream ? 'ok br=' + stream.br : '无整首'}`
+        );
+        if (!stream) continue;
+        console.log(
+          `[direct] 网易云命中 ${track.id} ← ${item.s.id} br=${stream.br} score=${item.finalScore}`
+        );
+        cache.set(track.id, {
+          url: stream.url,
+          bvid: String(item.s.id),
+          title: item.s.name,
+          bandwidth: stream.br,
+          at: Date.now(),
+        });
+        return {
+          result: {
+            trackId: track.id,
+            ok: true,
+            reason: 'ok',
+            message: null,
+            score: item.finalScore,
+            bvid: String(item.s.id),
+            matchedTitle: item.s.name,
+            matchedAuthor: item.s.artists.join('/'),
+            durationDiff: item.durationDiff,
+            fallbackStream: false,
+            bandwidth: stream.br,
+            streamUrl: stream.url,
+            streamTokenExpiresInSec: Math.round(CACHE_TTL_MS / 1000),
+            expiresInSec: Math.round(CACHE_TTL_MS / 1000),
+            hitLevel: 'direct',
+            source: 'netease' as const,
+            costMs: Date.now() - started,
+            topCandidates: [],
+            coverUrl: item.s.picUrl || null,
+            track: null,
+          },
+          url: stream.url,
+        };
+      }
+    } catch (e) {
+      console.warn(
+        `[direct] 网易云不可用，回退 B 站：${e instanceof Error ? e.message : String(e)}`
+      );
     }
   }
 

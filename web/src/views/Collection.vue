@@ -646,7 +646,7 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
     </section>
 
     <!-- 状态区 -->
-    <div v-if="loading" class="list neu-raised-md">
+    <div v-if="loading" class="list">
       <NeuSkeleton :lines="8" height="22px" class="sk" />
     </div>
 
@@ -675,7 +675,7 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
     </div>
 
     <template v-else>
-      <div class="list neu-raised-md">
+      <div class="list">
         <TrackRow
           v-for="(t, i) in shownTracks"
           :key="t.id"
@@ -928,8 +928,8 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
 }
 
 .list {
-  padding: var(--sp-2);
-  border-radius: var(--r-xl);
+  /* 列表直接落在页面底上：不要内边距与圆角，靠行的发丝线分格 */
+  padding: 0;
 }
 .sk {
   padding: var(--sp-3);

@@ -217,7 +217,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 推荐曲目列表（纯粹沉浸，无任何标签干扰） -->
-    <div v-else class="list neu-raised-md">
+    <div v-else class="list">
       <TrackRow
         v-for="(t, i) in list"
         :key="t.id"
@@ -308,8 +308,8 @@ onBeforeUnmount(() => {
 }
 
 .list {
-  padding: var(--sp-2);
-  border-radius: var(--r-xl);
+  /* 列表直接落在页面底上：不要内边距与圆角，靠行的发丝线分格 */
+  padding: 0;
 }
 .empty {
   padding: var(--sp-6) var(--sp-4);
