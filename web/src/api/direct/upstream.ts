@@ -16,8 +16,17 @@
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
+/**
+ * ⚠️ 必须是**桌面浏览器 UA**，不能用移动端 UA。
+ *
+ * 实测（同一节点 upos-sz-mirrorhw、同一链接）：
+ *   移动 UA → 403 ；桌面 UA → 206
+ * 用移动 UA 会让一部分 CDN 节点整首歌都拉不到，且现象很像"节点故障"
+ * 或"直链失效"，极难定位 —— 我在这上面栽过一次。
+ * 服务端 `utils/constants.ts` 的 BROWSER_UA 也是桌面 UA，保持一致。
+ */
 const UA =
-  'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36';
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
 const BILI_ORIGIN = 'https://www.bilibili.com';
 
