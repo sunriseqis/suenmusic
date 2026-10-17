@@ -15,6 +15,7 @@
  * 模拟"装了 app 但没登录"这一档 —— 也就是要验证的那一档。
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { parseDuration } from './matcher.ts';
 
 /**
  * ⚠️ 必须是**桌面浏览器 UA**，不能用移动端 UA。
@@ -271,6 +272,11 @@ export async function biliSearchProbe(keyword: string): Promise<HttpProbe[]> {
 export interface BiliCandidate {
   bvid: string;
   title: string;
+  author: string;
+  /** 时长（秒）。B 站返回的是 `mm:ss` 字符串，已转成秒 */
+  durationSec: number;
+  /** 封面（https 绝对地址）。锚定弹窗与"曲目没有专辑封面时"的兜底 */
+  pic: string;
 }
 
 export async function biliSearch(keyword: string): Promise<BiliCandidate[]> {
@@ -288,10 +294,16 @@ export async function biliSearch(keyword: string): Promise<BiliCandidate[]> {
   if (code !== 0) throw new Error(`B站搜索 code=${code}`);
   return extractVideos(r.json)
     .slice(0, 10)
-    .map((v) => ({
-      bvid: String(v.bvid ?? ''),
-      title: String(v.title ?? '').replace(/<[^>]+>/g, ''),
-    }))
+    .map((v) => {
+      const pic = String(v.pic ?? '');
+      return {
+        bvid: String(v.bvid ?? ''),
+        title: String(v.title ?? '').replace(/<[^>]+>/g, ''),
+        author: String(v.author ?? ''),
+        durationSec: parseDuration(String(v.duration ?? '')),
+        pic: pic.startsWith('//') ? `https:${pic}` : pic,
+      };
+    })
     .filter((c) => c.bvid.length > 0);
 }
 

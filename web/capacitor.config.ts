@@ -14,6 +14,24 @@ import type { CapacitorConfig } from '@capacitor/cli';
  *
  * 好处：`npx cap sync` 不再依赖「两个仓必须检出在同一级目录」这个前提。
  */
+/**
+ * 开发期 live reload：设了 `SUEN_LIVE_URL` 就把 WebView 指到 Vite dev server。
+ *
+ * 为什么需要：直连逻辑只能跑在原生环境（CapacitorHttp 绕 CORS），
+ * 但每改一行就 `build → cap sync → gradle → install` 要一分多钟。
+ * 指到 dev server 后：改代码 → HMR 自动刷新 → 仍然是原生环境（插件都在）。
+ *
+ * 用法：
+ *   SUEN_LIVE_URL=http://192.168.89.10:5273 npx cap sync android
+ *   ./gradlew assembleDebug && adb install -r ...
+ * 之后只要 `SUENMUSIC_WEB_HOST=0.0.0.0 npm run dev` 起服务即可。
+ *
+ * ⚠️ 这会把页面源从 `http://localhost` 变成 dev server 的地址，
+ * **WebView 的 localStorage / IndexedDB 是另一套**（按 origin 隔离）。
+ * 所以它只用于调 UI 与交互，验证本地数据持久化仍要用不带这个变量的正式包。
+ */
+const liveUrl = process.env.SUEN_LIVE_URL;
+
 const config: CapacitorConfig = {
   android: {
     allowMixedContent: true,
@@ -33,6 +51,8 @@ const config: CapacitorConfig = {
     // 同协议后此问题消失。
     // ⚠️ 改 scheme 会清空 WebView 的 localStorage（origin 变了）。
     androidScheme: 'http',
+    // live reload 时页面来自明文 http 的局域网地址，必须显式放行
+    ...(liveUrl ? { url: liveUrl, cleartext: true } : {}),
   },
   plugins: {
     /**

@@ -1,18 +1,15 @@
 /**
  * 无服务端时的音源解析：QQ 元数据 → B 站搜索 → playurl → 直链。
  *
- * 这是诊断页验证过的那条链路的产品化版本。与服务端 `sources/bilibili/matcher.ts`
- * 的差别：那里有完整的打分（时长差、UP 主、播放量等），这里只做**够用的**筛选 ——
- * 歌名覆盖率 + 歌手命中 + 明显错版本降权。
- *
- * ⚠️ 为什么先用简单打分而不是把 matcher 搬过来：
- * 先把"能播"跑通，把评分做复杂是第二步。评分错了的表现是"放的是翻唱"，
- * 而解析不出来的表现是"播不了" —— 后者严重得多。
+ * 打分用**逐字搬过来**的服务端 matcher（时长差 40 分 + 负面词熔断 +
+ * 歌名/歌手 40 分 + 官方加权 20 分）。不用自己那套"歌名覆盖率"的简化版：
+ * 简化版对"翻唱 / 伴奏 / 鬼畜"几乎没有分辨力，用户第一耳就能听出来放错了。
  */
 
 import type { ResolveResult, Track } from '@/api/types.ts';
 import { artistNames } from '@/utils/format.ts';
-import { biliResolveAudio, biliSearch, type BiliCandidate } from './upstream.ts';
+import { biliResolveAudio, biliSearch } from './upstream.ts';
+import { scoreCandidate, type MatchTrack } from './matcher.ts';
 
 /** 直链缓存时长。B 站签名通常 2 小时有效，但队列里反复重解析没必要，10 分钟够用 */
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -26,42 +23,6 @@ interface CacheEntry {
 }
 
 const cache = new Map<string, CacheEntry>();
-
-/** 明显的非原版标签 —— 命中就大幅降权（放错版本比放不出来更让人恼火） */
-const BAD_VERSION = /(翻唱|cover|伴奏|remix|dj|鬼畜|纯音乐|钢琴|吉他|教学|教程|reaction|直播|切片)/i;
-
-function normalize(s: string): string {
-  return s
-    .toLowerCase()
-    .replace(/[\s\-_·,，.。!！?？'"“”()（）[\]【】]/g, '');
-}
-
-/** 给一个候选打 0~100 分。只要"歌名对得上、歌手能命中"就够排序用 */
-function scoreCandidate(c: BiliCandidate, name: string, artist: string): number {
-  const title = normalize(c.title);
-  const n = normalize(name);
-  if (!n) return 0;
-
-  let score = 0;
-  if (title.includes(n)) {
-    score += 60;
-  } else {
-    // 没整体命中时按字符覆盖率给分（标题常带前后缀）
-    let hit = 0;
-    for (const ch of n) if (title.includes(ch)) hit += 1;
-    score += Math.round((hit / n.length) * 40);
-  }
-
-  for (const a of artist.split('/').map(x => normalize(x.trim())).filter(Boolean)) {
-    if (title.includes(a)) {
-      score += 30;
-      break;
-    }
-  }
-
-  if (BAD_VERSION.test(c.title)) score -= 25;
-  return score;
-}
 
 function fail(trackId: string, reason: 'no_match' | 'error', message: string): {
   result: ResolveResult;
@@ -143,7 +104,7 @@ export async function resolveDirect(track: Track): Promise<{
   const artist = artistNames(track.ar);
   const keyword = artist && artist !== '未知歌手' ? `${name} ${artist}` : name;
 
-  let candidates: BiliCandidate[] = [];
+  let candidates: Awaited<ReturnType<typeof biliSearch>> = [];
   try {
     candidates = await biliSearch(keyword);
   } catch (e) {
@@ -157,13 +118,28 @@ export async function resolveDirect(track: Track): Promise<{
     return fail(track.id, 'no_match', '没有搜到可用的音源');
   }
 
+  const matchTrack: MatchTrack = {
+    name,
+    artists: (track.ar ?? []).map(a => a.name).filter(Boolean),
+    durationMs: track.dt || 0,
+  };
+
   const ranked = candidates
-    .map(c => ({ c, score: scoreCandidate(c, name, artist) }))
-    .sort((a, b) => b.score - a.score);
+    .map(c => ({ c, ...scoreCandidate(matchTrack, c) }))
+    .sort((a, b) => b.finalScore - a.finalScore);
 
   const best = ranked[0];
-  if (!best || best.score < 20) {
-    return fail(track.id, 'no_match', '搜到的结果与原曲差异太大');
+  /**
+   * 阈值 60 与服务端 `SUENMUSIC_MATCH_THRESHOLD` 的默认值一致。
+   * 低于它就拒绝播放 —— 放一首翻唱/伴奏比"暂时播不了"更让人恼火，
+   * 而且用户没法从界面上判断"这是原曲还是翻唱"。
+   */
+  if (!best || best.finalScore < 60) {
+    return fail(
+      track.id,
+      'no_match',
+      `最佳候选置信度 ${best ? best.finalScore : 0} 低于 60（${best ? best.c.title : '无候选'}）`
+    );
   }
 
   try {
@@ -183,7 +159,7 @@ export async function resolveDirect(track: Track): Promise<{
         ok: true,
         reason: 'ok',
         message: null,
-        score: best.score,
+        score: best.finalScore,
         bvid: best.c.bvid,
         matchedTitle: best.c.title,
         matchedAuthor: null,
@@ -199,10 +175,12 @@ export async function resolveDirect(track: Track): Promise<{
         topCandidates: ranked.slice(0, 5).map(x => ({
           bvid: x.c.bvid,
           title: x.c.title,
-          author: '',
-          score: x.score,
+          author: x.c.author,
+          score: x.finalScore,
+          durationMs: x.durationSec * 1000,
         })),
-        coverUrl: null,
+        // 曲目没有专辑封面时用它兜底（播放页/播放条立刻有图）
+        coverUrl: best.c.pic || null,
         track: null,
       },
       url: audio.url,

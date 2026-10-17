@@ -16,6 +16,7 @@ import {
   clearSession,
   getCachedUser,
   restoreCachedUser,
+  getBaseUrl,
   getRefreshToken,
   hasUsableRefreshToken,
   onBaseUrlChanged,
@@ -117,6 +118,16 @@ export const useSessionStore = defineStore('session', () => {
   }
 
   async function loadAuthConfig(): Promise<AuthConfig | null> {
+    /**
+     * 没配服务器时**不要发这个请求**。
+     * 基地址为空时 `/api/auth/config` 会变成相对路径，打到静态服务器或
+     * 开发代理上 —— 前者返回 index.html 让 JSON.parse 抛错，后者产生一条
+     * 无意义的 ECONNREFUSED 日志。两种情况都只会让人以为"服务端出问题了"。
+     */
+    if (!getBaseUrl()) {
+      authConfigFailed.value = false;
+      return null;
+    }
     try {
       authConfig.value = await authApi.fetchAuthConfig();
       authConfigFailed.value = false;
