@@ -92,6 +92,50 @@ const theme = ref<'dark' | 'paper'>('dark');
             </div>
           </div>
 
+          <p class="row-label">分段配色 · 单色 / 各段一段琥珀</p>
+          <div class="logo-row">
+            <div class="logo-cell">
+              <MarkBold :size="60" />
+              <span class="cap">单色</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="60" :accent-index="0" />
+              <span class="cap">段 0</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="60" :accent-index="1" />
+              <span class="cap">段 1</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="60" :accent-index="2" />
+              <span class="cap">段 2</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="60" :accent-index="3" />
+              <span class="cap">段 3</span>
+            </div>
+          </div>
+
+          <p class="row-label">小尺寸对照（26 / 20）</p>
+          <div class="logo-row">
+            <div class="logo-cell">
+              <MarkBold :size="26" :bare="true" />
+              <span class="cap">26 单色</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="26" :bare="true" :accent-index="0" />
+              <span class="cap">26 段0</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="20" :bare="true" />
+              <span class="cap">20 单色</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="20" :bare="true" :accent-index="0" />
+              <span class="cap">20 段0</span>
+            </div>
+          </div>
+
           <p class="row-label">横版组合</p>
           <div class="logo-row">
             <div class="lockup">
@@ -340,8 +384,10 @@ const theme = ref<'dark' | 'paper'>('dark');
   --hi: rgba(255, 255, 255, 0.06);
   --lo: rgba(0, 0, 0, 0.55);
   --shadow-text: 0 1px 0 rgba(0, 0, 0, 0.45);
+  --mark-plate: #17181b;
   --mark-frame: #3a3d42;
   --mark-glyph: #e9e7e2;
+  --mark-accent: #e8a33d;
 
   min-height: 100vh;
   background: var(--bg);
@@ -365,8 +411,10 @@ const theme = ref<'dark' | 'paper'>('dark');
   --hi: rgba(255, 255, 255, 0.95);
   --lo: rgba(0, 0, 0, 0.14);
   --shadow-text: none;
-  --mark-frame: #c9c3b7;
+  --mark-plate: #fffdf8;
+  --mark-frame: #d8d2c6;
   --mark-glyph: #141414;
+  --mark-accent: #a85b0a;
 }
 
 /* ==========================================================================

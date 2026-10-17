@@ -12,8 +12,13 @@ const props = withDefaults(
     size?: number;
     /** true = 不画底板，只要字形 */
     bare?: boolean;
+    /**
+     * 把第 N 段（0-3）染成强调色；-1 = 单色。
+     * 用来验证"一段琥珀"能否在小尺寸/浅色底上提升可读性。
+     */
+    accentIndex?: number;
   }>(),
-  { size: 64, bare: false }
+  { size: 64, bare: false, accentIndex: -1 }
 );
 
 const P1 =
@@ -38,7 +43,13 @@ const paths = [P1, P2, P3, P4];
   >
     <rect v-if="!props.bare" class="plate" x="4" y="4" width="792" height="792" rx="188" />
     <g transform="translate(0,800) scale(0.1,-0.1)">
-      <path v-for="(d, i) in paths" :key="i" class="glyph" :d="d" />
+      <path
+        v-for="(d, i) in paths"
+        :key="i"
+        class="glyph"
+        :class="{ accent: i === props.accentIndex }"
+        :d="d"
+      />
     </g>
   </svg>
 </template>
@@ -51,5 +62,8 @@ const paths = [P1, P2, P3, P4];
 }
 .glyph {
   fill: var(--mark-glyph, #e9e7e2);
+}
+.glyph.accent {
+  fill: var(--mark-accent, #e8a33d);
 }
 </style>
