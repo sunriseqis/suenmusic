@@ -10,6 +10,7 @@
  * 右上角可切换 DARK（哑光黑）与 PAPER（纸白），两套用同一组语义变量。
  */
 import { ref } from 'vue';
+import MarkS from '@/components/brand/MarkS.vue';
 
 const theme = ref<'dark' | 'paper'>('dark');
 </script>
@@ -18,16 +19,7 @@ const theme = ref<'dark' | 'paper'>('dark');
   <div class="mh" :class="theme">
     <header class="toolbar">
       <div class="brand">
-        <svg class="mark-sm" viewBox="0 0 64 64" aria-hidden="true">
-          <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-          <path
-            d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0"
-            class="groove-deep"
-            transform="translate(0 1.2)"
-          />
-          <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge" />
-          <circle cx="13" cy="33" r="2.6" class="dot" />
-        </svg>
+        <MarkS :size="26" :weight="40" :bare="true" />
         <span class="wordmark">SUENMUSIC</span>
       </div>
 
@@ -44,137 +36,58 @@ const theme = ref<'dark' | 'paper'>('dark');
     <main class="stack">
       <!-- ================= 01 Logo ================= -->
       <section class="spec">
-        <p class="label">01 — MARK / 三版 S 变体</p>
+        <p class="label">01 — MARK</p>
 
         <div class="logo-stage">
-          <!-- V1 方波：直角 + 平口，像电路走线 / 铣出来的槽 -->
-          <div class="logo-cell">
-            <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path
-                d="M46 17 H26 V32 H46 V47 H20"
-                class="groove-deep"
-                style="stroke-width: 9"
-                stroke-linejoin="miter"
-                stroke-linecap="square"
-                fill="none"
-                transform="translate(0 1.2)"
-              />
-              <path
-                d="M46 17 H26 V32 H46 V47 H20"
-                class="groove-edge"
-                style="stroke-width: 2"
-                stroke-linejoin="miter"
-                stroke-linecap="square"
-                fill="none"
-              />
-              <circle cx="20" cy="47" r="2.6" class="dot" />
-            </svg>
-            <div class="mini-row">
-              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
-                <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-                <path
-                  d="M46 17 H26 V32 H46 V47 H20"
-                  class="groove-edge"
-                  style="stroke-width: 6"
-                  stroke-linejoin="miter"
-                  stroke-linecap="square"
-                  fill="none"
-                />
-                <circle cx="20" cy="47" r="4" class="dot" />
-              </svg>
+          <p class="row-label">原始 · 细线</p>
+          <div class="logo-row">
+            <div class="logo-cell">
+              <MarkS :size="76" />
+              <span class="cap">76</span>
             </div>
-            <span class="cap">V1 方波 · 64 / 24</span>
+            <div class="logo-cell">
+              <MarkS :size="46" />
+              <span class="cap">46</span>
+            </div>
+            <div class="logo-cell">
+              <MarkS :size="26" :bare="true" />
+              <span class="cap">26 · 去框</span>
+            </div>
           </div>
 
-          <!-- V2 折角：45° 斜接，像折出来的金属件 -->
-          <div class="logo-cell">
-            <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path
-                d="M46 17 H24 L40 30 H20 L36 44 H18"
-                class="groove-deep"
-                style="stroke-width: 8"
-                stroke-linejoin="miter"
-                stroke-linecap="square"
-                fill="none"
-                transform="translate(0 1.2)"
-              />
-              <path
-                d="M46 17 H24 L40 30 H20 L36 44 H18"
-                class="groove-edge"
-                style="stroke-width: 2"
-                stroke-linejoin="miter"
-                stroke-linecap="square"
-                fill="none"
-              />
-              <circle cx="18" cy="44" r="2.6" class="dot" />
-            </svg>
-            <div class="mini-row">
-              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
-                <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-                <path
-                  d="M46 17 H24 L40 30 H20 L36 44 H18"
-                  class="groove-edge"
-                  style="stroke-width: 5.5"
-                  stroke-linejoin="miter"
-                  stroke-linecap="square"
-                  fill="none"
-                />
-                <circle cx="18" cy="44" r="4" class="dot" />
-              </svg>
+          <p class="row-label">加粗 · 与界面线宽一致</p>
+          <div class="logo-row">
+            <div class="logo-cell">
+              <MarkS :size="76" :weight="24" />
+              <span class="cap">76 / w24</span>
             </div>
-            <span class="cap">V2 折角 · 64 / 24</span>
+            <div class="logo-cell">
+              <MarkS :size="46" :weight="30" />
+              <span class="cap">46 / w30</span>
+            </div>
+            <div class="logo-cell">
+              <MarkS :size="26" :weight="40" :bare="true" />
+              <span class="cap">26 / w40</span>
+            </div>
           </div>
 
-          <!-- V3 原版：正弦槽，作对照 -->
-          <div class="logo-cell">
-            <svg class="mark-lg" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path
-                d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0"
-                class="groove-deep"
-                transform="translate(0 1.2)"
-              />
-              <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge" />
-              <circle cx="13" cy="33" r="2.6" class="dot" />
-            </svg>
-            <div class="mini-row">
-              <svg class="mark-xs" viewBox="0 0 64 64" aria-hidden="true">
-                <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-                <path d="M13 33c6.5 8.5 12.5 8.5 19 0s12.5-8.5 19 0" class="groove-edge thin" />
-                <circle cx="13" cy="33" r="3" class="dot" />
-              </svg>
+          <p class="row-label">横版组合</p>
+          <div class="logo-row">
+            <div class="lockup">
+              <MarkS :size="44" :weight="30" />
+              <div class="lockup-text">
+                <span class="wordmark lg">SUENMUSIC</span>
+                <span class="tagline">LOCAL FIRST · PLAYER</span>
+              </div>
             </div>
-            <span class="cap">V3 原版 · 64 / 24</span>
           </div>
         </div>
 
-        <div class="lockup-row">
-          <div class="lockup">
-            <svg class="mark-md" viewBox="0 0 64 64" aria-hidden="true">
-              <rect x="1" y="1" width="62" height="62" rx="15" class="plate" />
-              <path
-                d="M46 17 H26 V32 H46 V47 H20"
-                class="groove-edge"
-                style="stroke-width: 3.2"
-                stroke-linejoin="miter"
-                stroke-linecap="square"
-                fill="none"
-              />
-              <circle cx="20" cy="47" r="2.6" class="dot" />
-            </svg>
-            <div class="lockup-text">
-              <span class="wordmark lg">SUENMUSIC</span>
-              <span class="tagline">LOCAL FIRST · PLAYER</span>
-            </div>
-          </div>
-          <p class="note tight">
-            V1 的直角和平口是"铣"出来的：没有一处圆角，转折用 90°，末端切平。
-            V2 把转折换成 45° 斜接，像一个折弯的金属件。
-            两者都比正弦槽硬，区别是 V1 更像电路、V2 更像钣金。
-          </p>
-        </div>
+        <p class="note">
+          字形不动，只做两件事：外框用比正文暗一档的灰（像蚀刻的边），
+          以及**按尺寸加粗** —— 原始线宽只有视口的 1.5%，26px 时不到 1px，屏幕上等于没有。
+          加粗是同色描边，不改变任何锚点或曲率。
+        </p>
       </section>
 
       <!-- ================= 02 播放页 ================= -->
@@ -344,12 +257,12 @@ const theme = ref<'dark' | 'paper'>('dark');
               </ul>
             </section>
 
-            <nav class="nav">
-              <button class="nav-item on"><span class="nav-dot"></span>首页</button>
-              <button class="nav-item">搜索</button>
-              <button class="nav-item">收藏</button>
-              <button class="nav-item">设置</button>
-            </nav>
+            <div class="nav-rail home-rail">
+              <button class="rail-item on">首页</button>
+              <button class="rail-item">搜索</button>
+              <button class="rail-item">收藏</button>
+              <button class="rail-item">设置</button>
+            </div>
           </div>
         </div>
 
@@ -360,11 +273,11 @@ const theme = ref<'dark' | 'paper'>('dark');
       </section>
       <!-- ================= 05 导航 ================= -->
       <section class="spec">
-        <p class="label">05 — NAV / 三套导航</p>
+        <p class="label">05 — NAV / N1 导轨选择器</p>
 
         <div class="nav-demos">
           <div class="nav-demo">
-            <span class="cap">N1 导轨选择器 · 活动项是滑到位的滑块</span>
+            <span class="cap">活动项是滑到位的滑块，底部一条琥珀指示条</span>
             <div class="nav-rail">
               <button class="rail-item on">首页</button>
               <button class="rail-item">搜索</button>
@@ -372,34 +285,11 @@ const theme = ref<'dark' | 'paper'>('dark');
               <button class="rail-item">设置</button>
             </div>
           </div>
-
-          <div class="nav-demo">
-            <span class="cap">N2 物理键排 · 活动项按下去</span>
-            <div class="nav-keys">
-              <button class="key-item on">首页</button>
-              <button class="key-item">搜索</button>
-              <button class="key-item">收藏</button>
-              <button class="key-item">设置</button>
-            </div>
-          </div>
-
-          <div class="nav-demo">
-            <span class="cap">N3 指示灯 · 面板上的铭牌 + LED</span>
-            <div class="nav-led">
-              <button class="led-item on">首页</button>
-              <button class="led-item">搜索</button>
-              <button class="led-item">收藏</button>
-              <button class="led-item">设置</button>
-            </div>
-          </div>
         </div>
 
         <p class="note">
-          N1 把导航做成一条凹槽导轨，活动项是一个凸起的滑块（带底部琥珀指示条）——
-          这是硬件感最强的一套，也最占高度；
-          N2 每个都是一枚独立按键，活动项直接"按下去"（位移 1px + 内阴影），
-          代价是四枚按键在窄屏上会显得碎；
-          N3 最克制：整条只有铭牌和 LED，活动项亮一颗琥珀点，靠字重和亮度区分。
+          整条导航是一条凹下去的导轨，只有活动项凸起 —— 这样"当前在哪"靠**厚度**表达，
+          而不是靠颜色。琥珀只做指示条，不承担状态色。
         </p>
       </section>
 
@@ -422,6 +312,8 @@ const theme = ref<'dark' | 'paper'>('dark');
   --hi: rgba(255, 255, 255, 0.06);
   --lo: rgba(0, 0, 0, 0.55);
   --shadow-text: 0 1px 0 rgba(0, 0, 0, 0.45);
+  --mark-frame: #3a3d42;
+  --mark-glyph: #e9e7e2;
 
   min-height: 100vh;
   background: var(--bg);
@@ -445,6 +337,8 @@ const theme = ref<'dark' | 'paper'>('dark');
   --hi: rgba(255, 255, 255, 0.95);
   --lo: rgba(0, 0, 0, 0.14);
   --shadow-text: none;
+  --mark-frame: #c9c3b7;
+  --mark-glyph: #141414;
 }
 
 /* ==========================================================================
@@ -556,14 +450,25 @@ const theme = ref<'dark' | 'paper'>('dark');
    ========================================================================== */
 .logo-stage {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 28px;
+  flex-direction: column;
+  gap: 16px;
   padding: 26px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel);
   box-shadow: inset 0 1px 0 var(--hi);
+}
+.row-label {
+  margin: 6px 0 0;
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--dim);
+}
+.logo-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 28px;
 }
 .logo-cell {
   display: flex;
@@ -1032,6 +937,10 @@ svg.fill.amber {
 }
 .row.active .row-title {
   color: var(--amber);
+}
+
+.home-rail {
+  margin: 6px 0 16px;
 }
 
 .nav {
