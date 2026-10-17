@@ -810,25 +810,6 @@ export const usePlayerStore = defineStore('player', () => {
        */
       if (isNativeAudio) {
         await SuenAudio.setDirectUrl({ id: track.id, url: direct ? url : '' }).catch(() => {});
-
-        /**
-         * 原生队列的 URI 是在 `setQueue` 那一刻组装的（`onAddMediaItems`），
-         * 而直连地址要等解析完才有 —— 所以入队时那一条的 URI 是空串，
-         * ExoPlayer 一 prepare 就报 "Source error"。
-         *
-         * 必须让原生**重建这一条**（`reloadCurrent` 会重新 `streamUrlFor(id)`）。
-         * 用 autoplay:false：出声仍交给下面统一的 `el.play()`，避免两处抢着播。
-         */
-        if (direct) {
-          const qIndex = queue.value.findIndex(t => t.id === track.id);
-          if (qIndex >= 0) {
-            await SuenAudio.reloadCurrent({
-              index: qIndex,
-              positionMs: pendingSeekMs ?? positionMs.value,
-              autoplay: false,
-            }).catch(() => {});
-          }
-        }
       }
 
       const probe = await probeStream(url, direct);
@@ -865,6 +846,29 @@ export const usePlayerStore = defineStore('player', () => {
 
       el.src = url;
       el.load();
+
+      /**
+       * 直连模式下，原生队列条目的 URI 是在 `setQueue` 那一刻组装的
+       * （`onAddMediaItems` 里调 `streamUrlFor`），而直连地址要等解析完才有 ——
+       * 入队时那一条是空串，ExoPlayer 一 prepare 就报 "Source error"。
+       * 所以必须让原生**重建这一条**。
+       *
+       * ⚠️ 顺序很关键：必须放在 `el.load()` **之后**。
+       * `el.load()` 会触发桥的 `seekToIndex({force:true})` → `seekTo(index, 0)`；
+       * 先 reload 再 load 的话，刚恢复的位置会被这一下 seek 归零
+       * （真机表现：续播位置又变成 0）。
+       */
+      if (isNativeAudio && direct) {
+        const qIndex = queue.value.findIndex(t => t.id === track.id);
+        if (qIndex >= 0) {
+          await SuenAudio.reloadCurrent({
+            index: qIndex,
+            positionMs: opts.keepPositionMs ?? positionMs.value,
+            autoplay: false,
+          }).catch(() => {});
+        }
+      }
+
       lastFailedTrackId = null;
       return true;
     } catch (e) {
@@ -1308,6 +1312,17 @@ export const usePlayerStore = defineStore('player', () => {
       el.removeAttribute('src');
       el.load();
       return false;
+    }
+
+    /**
+     * 带起播位置的装载（恢复会话）要把位置**在 saveSession 之前**写回状态。
+     *
+     * 否则顺序是：`positionMs=0` → `saveSession()` 落盘 0 →（稍后）UI 才被更新。
+     * 只要用户在这个窗口里杀掉 App，续播位置就真被 0 覆盖了 ——
+     * 表现和"续播没做"一模一样。
+     */
+    if (opts.startPositionMs !== undefined && opts.startPositionMs > 1000) {
+      positionMs.value = opts.startPositionMs;
     }
 
     saveSession();

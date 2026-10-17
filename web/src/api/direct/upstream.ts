@@ -196,12 +196,18 @@ async function qqSearchOnce(keyword: string, limit = 5, page = 1): Promise<QqSon
   const list = json?.req?.data?.body?.song?.list ?? [];
   return list.map((s) => {
     const singers = (s.singer as Array<{ name?: string }> | undefined) ?? [];
+    /**
+     * ⚠️ 专辑信息在 **`album` 对象里**（`album.mid` / `album.name`），
+     * 不是顶层的 `albummid` / `albumname`。读错字段的后果很隐蔽：
+     * 歌名歌手都对，只有封面全是空 —— 因为 picUrl 是拼出来的。
+     */
+    const album = s.album as { mid?: string; name?: string } | undefined;
     return {
       mid: String(s.mid ?? ''),
       name: String(s.name ?? s.title ?? '未知曲目'),
       artist: singers.map((x) => x.name ?? '').filter(Boolean).join('/') || '未知歌手',
-      album: String((s.albumname as string) ?? ''),
-      albumMid: String((s.albummid as string) ?? ''),
+      album: String(album?.name ?? ''),
+      albumMid: String(album?.mid ?? ''),
       durationSec: Number(s.interval ?? 0) || 0,
     };
   });
