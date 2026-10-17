@@ -69,34 +69,27 @@ function onKeydown(ev: KeyboardEvent) {
 .tabs {
   display: inline-flex;
   align-items: center;
-  gap: var(--sp-1);
-  padding: var(--sp-1);
-  border-radius: var(--r-pill);
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--r-md);
   background: var(--bg);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
-  /* 分片多的时候允许横向滚动而不是换行挤成两行 */
+  border: 1px solid var(--line);
+  box-shadow: inset 0 2px 6px var(--lo);
   overflow-x: auto;
   scrollbar-width: none;
   max-width: 100%;
 }
-.tabs::-webkit-scrollbar {
-  display: none;
-}
+.tabs::-webkit-scrollbar { display: none; }
 
-.block {
-  display: flex;
-  width: 100%;
-}
+.block { display: flex; width: 100%; }
 
 .tab {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
   padding: 0 var(--sp-4);
-  min-height: 34px;
-  border-radius: var(--r-pill);
+  min-height: 32px;
+  border-radius: calc(var(--r-md) - 3px);
   color: var(--t2);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
@@ -104,30 +97,20 @@ function onKeydown(ev: KeyboardEvent) {
   flex: none;
   transition:
     color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
+    background-color var(--dur-fast) var(--ease);
 }
-.block .tab {
-  flex: 1 1 auto;
-  justify-content: center;
-}
+.block .tab { flex: 1 1 auto; justify-content: center; }
 
-.tab:hover:not(:disabled) {
-  color: var(--t1);
-}
+.tab:hover:not(:disabled) { color: var(--t1); }
 
-/* 选中：凹陷 + 主文字色。凹陷由 .neu-selected 提供 */
+/* 选中项是导轨里滑到位的滑块：凸起，不是凹陷 */
 .tab[aria-selected='true'] {
   color: var(--t1);
   font-weight: var(--fw-bold);
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 
-.count {
-  color: var(--t2);
-  font-size: 11px;
-  opacity: 0.85;
-}
-
-.is-disabled {
-  opacity: 0.55;
-}
+.count { color: var(--t2); font-size: 11px; opacity: 0.85; }
+.is-disabled { opacity: 0.55; }
 </style>

@@ -65,51 +65,35 @@ const blocked = computed(() => props.disabled || props.loading);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--r-pill);
-  /* 圆形软拟物按钮不能有内边距，否则点区域与视觉中心错位 */
+  border-radius: 50%;
   padding: 0;
-  background: var(--bg);
+  background: var(--panel);
+  border: 1px solid var(--line);
   color: var(--t1);
+  box-shadow: inset 0 1px 0 var(--hi);
   flex: none;
 }
 
-/* 方形档：大圆角矩形（--r-md，与文字按钮同规格）。页面级操作按钮
-   （播放全部/换一批/导入等）用，与圆形的播放控制按钮在形态上区分开 */
-.neu-icon-btn.square {
-  border-radius: var(--r-md);
-}
+.neu-icon-btn.square { border-radius: var(--r-md); }
 
-/* 默认形态是三态里最轻的一档 */
-.neu-icon-btn:not(.primary) {
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+.neu-icon-btn:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 .primary {
-  color: #fff;
+  color: #1a1206;
   background: var(--accent);
-  box-shadow:
-    2px 2px 5px var(--sd),
-    -2px -2px 5px var(--sl);
+  border-color: color-mix(in srgb, var(--accent) 70%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
-:root[data-theme='dark'] .primary {
-  color: #2b1a0e;
-}
-.primary.s-xl {
-  /* 主播放键做大一点，但不要大到破坏"元素同源"的感觉 */
-  box-shadow:
-    3px 3px 8px var(--sd),
-    -3px -3px 8px var(--sl);
-}
+:root[data-theme='light'] .primary { color: #fff; }
 
-/* 选中态（已收藏等）：凹陷 + 强调色文字，不用填充 ——
-   填充会让"开启/关闭"的差别看起来像"两个不同的按钮" */
+/* 选中（已收藏等）：不换色，只把键按下去 */
 .neu-icon-btn.neu-selected {
   color: var(--accent-text);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: var(--panel-2);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 .spinner {
@@ -120,9 +104,5 @@ const blocked = computed(() => props.disabled || props.loading);
   border-top-color: transparent;
   animation: spin 0.7s linear infinite;
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

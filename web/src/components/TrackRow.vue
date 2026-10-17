@@ -324,7 +324,7 @@ onMounted(() => {
 .row-wrap {
   position: relative;
   overflow: hidden;
-  border-radius: var(--r-md);
+  border-radius: 0;
 }
 /* 已触发动作、行正在滑出（收藏页：随后被父级剪掉）—— 期间不再接手势 */
 .row-wrap.is-vanishing {
@@ -361,13 +361,13 @@ onMounted(() => {
   /* 必须有底色：否则滑动时下层动作区会从整行透出来 */
   position: relative;
   z-index: 1;
-  background: var(--bg);
+  background: var(--panel);
   display: grid;
   grid-template-columns: 32px 40px minmax(0, 1.6fr) minmax(0, 1fr) 52px 56px;
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
+  border-radius: 0;
   min-height: 52px;
   cursor: pointer;
   color: var(--t1);
@@ -389,18 +389,19 @@ onMounted(() => {
   grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) 52px 56px;
 }
 
-.row:hover {
-  /* 极轻的凹陷 —— 密集列表里任何"浮起"都会互相干扰 */
-  box-shadow:
-    inset 1px 1px 2px var(--sd),
-    inset -1px -1px 2px var(--sl);
+/* 列表靠发丝线分界，行本身不做"卡片" */
+.row-wrap:not(:last-child) .row {
+  border-bottom: 1px solid var(--line);
 }
 
-/* 当前播放项：完整凹陷 + 主文字色加粗 */
+.row:hover {
+  background: var(--panel-2);
+}
+
+/* 当前播放项：左侧一条 2px 琥珀，比整行变色克制 */
 .row.current {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .row:focus-visible {
   outline: 2px solid var(--accent-text);
@@ -465,10 +466,9 @@ onMounted(() => {
 }
 .cov-ph {
   display: block;
-  background: var(--track);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .cov img {
   object-fit: cover;

@@ -119,15 +119,18 @@ function onInput(ev: Event) {
   padding: 0 var(--sp-4);
   min-height: 44px; /* 移动端触摸目标下限 */
   border-radius: var(--r-md);
-  transition: box-shadow var(--dur-fast) var(--ease);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 2px 6px var(--lo);
+  transition:
+    border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease);
 }
 .wrap:focus-within {
-  /* 聚焦时用强调色描一圈阴影，而不是加 border ——
-     加 border 会改变盒模型尺寸并让整个框抖一下 */
+  border-color: var(--accent-text);
   box-shadow:
-    inset 2px 2px 5px var(--sd),
-    inset -2px -2px 5px var(--sl),
-    0 0 0 2px var(--accent-text);
+    inset 0 2px 6px var(--lo),
+    0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 .is-disabled {
   opacity: 0.55;

@@ -91,11 +91,13 @@ function onChange(ev: Event) {
 .track {
   position: relative;
   width: 100%;
-  height: 8px;
-  border-radius: var(--r-pill);
+  height: 4px;
+  border-radius: 2px;
   overflow: hidden;
-  /* 轨道本身是凹陷的，里面的填充也要跟着缩进去一点才自然 */
   padding: 0;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 3px var(--lo);
 }
 
 .buffered {
@@ -122,14 +124,13 @@ function onChange(ev: Event) {
 .thumb {
   position: absolute;
   top: 50%;
-  width: 14px;
-  height: 14px;
-  margin-left: -7px;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
   border-radius: 50%;
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
   transform: translateY(-50%);
   pointer-events: none;
   transition:

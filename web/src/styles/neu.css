@@ -1,133 +1,101 @@
 /* ==========================================================================
-   软拟物（neumorphism）基础工具类
+   哑光硬件 · 基础工具类
    --------------------------------------------------------------------------
-   核心约定：**容器与页面同底色**，分层只靠双向阴影 —— 不用边框、不用背景色差。
-   全局只有三种状态：凸起 / 凹陷 / 按下（按下 = 凹陷 + 轻微缩放）。
+   与旧版（neumorphism）的差别只有一句：**不再用外阴影表达体积**。
 
-   为什么不用边框：一旦加了 1px 边框，视觉重心立刻从"阴影体积"变成"描边线条"，
-   整个软拟物的柔和感就没了。状态区分必须靠明暗关系，不靠描边。
+   旧的立体感来自"右下暗、左上亮"的双向外阴影 —— 那是软塑料。
+   新的立体感来自三样东西：
+     1. 面板色与页面色的**一层色差**（--panel vs --bg）
+     2. 一条 1px 的**发丝线**（--line）划出边界
+     3. 顶沿一条 1px **内高光**（--hi），表示"这块是装上去的"
+
+   只有真正"按得下去"的东西才给凹陷（inset）—— 厚度是稀缺资源。
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
    基础表面
    -------------------------------------------------------------------------- */
 
-/* 页面底色。所有壳层容器都用它，保证与凸起元素同色 */
 .neu-bg {
   background: var(--bg);
 }
 
 /**
- * 凸起：元素浮出页面。
- * 阴影是"外扩"的：右下暗、左上亮，模拟光从左上来。
+ * 凸起：面板。
+ * 不再是"浮出页面"，而是"嵌进机身的一块板"。
  */
-.neu-raised {
-  background: var(--bg);
-  box-shadow:
-    calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
-    calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
-}
-
-/* 中等凸起：卡片、面板一级。深度加大，仍保持同底色 */
-.neu-raised-md {
-  background: var(--bg);
-  box-shadow:
-    calc(3px * var(--neu-depth)) calc(3px * var(--neu-depth)) calc(7px * var(--neu-depth)) var(--sd),
-    calc(-3px * var(--neu-depth)) calc(-3px * var(--neu-depth)) calc(7px * var(--neu-depth)) var(--sl);
-}
-
-/* 大凸起：全屏播放页封面、模态框 */
+.neu-raised,
+.neu-raised-md,
 .neu-raised-lg {
-  background: var(--bg);
-  box-shadow:
-    calc(6px * var(--neu-depth)) calc(6px * var(--neu-depth)) calc(14px * var(--neu-depth)) var(--sd),
-    calc(-6px * var(--neu-depth)) calc(-6px * var(--neu-depth)) calc(14px * var(--neu-depth)) var(--sl);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 
 /**
- * 凹陷：元素被压进页面。
- * 阴影改为 `inset`，方向反转 —— 暗侧跑到左上，亮侧跑到右下。
+ * 凹陷：被压进去的区域（输入框、滑轨、导轨）。
  */
 .neu-inset {
   background: var(--bg);
-  box-shadow:
-    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
-    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 2px 6px var(--lo);
 }
 
-/* 深凹陷：输入框、滑块轨道、进度槽 */
 .neu-inset-deep {
   background: var(--bg);
-  box-shadow:
-    inset calc(2px * var(--neu-depth)) calc(2px * var(--neu-depth)) calc(5px * var(--neu-depth)) var(--sd),
-    inset calc(-2px * var(--neu-depth)) calc(-2px * var(--neu-depth)) calc(5px * var(--neu-depth)) var(--sl);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 3px 9px var(--lo);
 }
 
-/**
- * 分界线。软拟物里没有边框，但偶尔需要一条极淡的分隔
- * （例如侧边栏与主区之间）。用阴影而不是 border，避免撑开盒模型。
- */
+/** 分界线：一条发丝线，不用阴影 */
 .neu-divide-b {
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
-}
-:root[data-theme='dark'] .neu-divide-b {
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 1px 0 var(--line);
 }
 
 /* --------------------------------------------------------------------------
    交互态
    -------------------------------------------------------------------------- */
 
-/**
- * 可点击的凸起元素。
- *
- * 用 `:active` 而不是 JS 类：触摸与鼠标都被覆盖，也不会因为
- * 拖动时丢失 mouseup 而卡在按下态。
- */
 .neu-clickable {
   cursor: pointer;
   transition:
-    box-shadow var(--dur-fast) var(--ease),
     transform var(--dur-fast) var(--ease),
+    box-shadow var(--dur-fast) var(--ease),
     color var(--dur-fast) var(--ease),
     opacity var(--dur-fast) var(--ease);
-  /* 移动端不要 300ms 点击延迟与高亮块 */
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
   user-select: none;
 }
 
 .neu-clickable:hover:not(:disabled):not(.neu-disabled) {
-  /* 悬停只提亮文字，不改阴影 —— 改阴影会让整页都在动，很吵 */
   color: var(--t1);
 }
 
+/**
+ * 按下：位移 1px + 内阴影。
+ *
+ * 不用 scale —— 缩放是"软件在模仿物理"，位移才是物理。
+ * 真实按键不会变小，只会陷下去。
+ */
 .neu-clickable:active:not(:disabled):not(.neu-disabled) {
-  box-shadow:
-    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
-    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
-  transform: scale(0.98);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
-/* 选中/激活态：凹陷。用于列表当前项、开关、标签页 ——
-   **不给每行加凸起**，密集列表里那样会糊成一片（PLAN.md 3.4） */
+/* 选中：换成次级面板色 + 保留顶沿高光，不做凹陷 */
 .neu-selected {
-  background: var(--bg);
-  box-shadow:
-    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
-    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 
-/* 禁用：只降透明度 + 换光标。不要改阴影，否则看起来像"另一种尺寸的按钮" */
 .neu-disabled,
 .neu-clickable:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-  /* 禁用的按钮不该在按下时缩 */
   transform: none !important;
 }
 
-/* 键盘可达性：软拟物没有边框，focus 环必须显式给 */
 .neu-focusable:focus-visible {
   outline: 2px solid var(--accent-text);
   outline-offset: 2px;
@@ -137,7 +105,6 @@
    文字
    -------------------------------------------------------------------------- */
 
-/* 只有两级灰 —— 铁律 1 */
 .neu-t1 {
   color: var(--t1);
 }
@@ -148,7 +115,6 @@
   color: var(--accent-text);
 }
 
-/* 单行省略 */
 .neu-ellipsis {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -156,7 +122,6 @@
   min-width: 0;
 }
 
-/* 两行省略 */
 .neu-clamp-2 {
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -187,7 +152,6 @@
   min-width: 0;
 }
 
-/* 视觉隐藏但屏幕阅读器可读 */
 .neu-sr {
   position: absolute;
   width: 1px;
@@ -200,13 +164,11 @@
   border: 0;
 }
 
-/* 骨架屏：凸起 + 呼吸动画 */
+/* 骨架屏：一块没有内容的板，只呼吸不发光 */
 .neu-skeleton {
-  background: var(--bg);
+  background: var(--panel-2);
   border-radius: var(--r-md);
-  box-shadow:
-    inset calc(1px * var(--neu-depth)) calc(1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sd),
-    inset calc(-1px * var(--neu-depth)) calc(-1px * var(--neu-depth)) calc(3px * var(--neu-depth)) var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
   animation: neu-breathe 1.6s var(--ease) infinite;
 }
 
@@ -216,11 +178,10 @@
     opacity: 1;
   }
   50% {
-    opacity: 0.55;
+    opacity: 0.5;
   }
 }
 
-/* 尊重系统的"减少动态效果" */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

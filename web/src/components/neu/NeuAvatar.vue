@@ -44,10 +44,9 @@ const resolved = computed(() => (props.src ? coverUrl(props.src, 150) : ''));
   overflow: hidden;
   color: var(--t2);
   font-weight: var(--fw-medium);
-  /* 图片也是一种"面"，给它一点凸起 */
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  /* 图片是一块贴上去的板：一条发丝线 + 顶沿高光 */
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .circle {
   border-radius: 50%;
@@ -56,10 +55,9 @@ const resolved = computed(() => (props.src ? coverUrl(props.src, 150) : ''));
   border-radius: var(--r-md);
 }
 .placeholder {
-  /* 无图时是凹陷的，暗示"这里本该有内容" */
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  /* 无图时是凹的，暗示"这里本该有内容" */
+  border: 1px solid var(--line);
+  box-shadow: inset 0 2px 6px var(--lo);
 }
 .avatar img {
   width: 100%;

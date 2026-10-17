@@ -360,14 +360,16 @@ function onNowClick(e: MouseEvent) {
 }
 
 .mini-progress {
+  /* 进度属于"这一屏"，贴在容器下沿，不浮在中间 */
   position: absolute;
-  top: 0;
   left: 0;
   right: 0;
-  height: 3px;
+  bottom: 0;
+  height: 2px;
   border-radius: 0;
+  border: 0;
   box-shadow: none;
-  background: var(--track);
+  background: var(--line);
 }
 .mini-fill {
   height: 100%;
@@ -385,10 +387,9 @@ function onNowClick(e: MouseEvent) {
 }
 .mini-cover-ph {
   display: block;
-  background: var(--track);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .mini-cover img {
   object-fit: cover;

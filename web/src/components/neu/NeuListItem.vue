@@ -71,20 +71,17 @@ const bindings = computed(() => {
   text-decoration: none;
   /* 移动端触摸目标下限 */
   min-height: 44px;
-  background: var(--bg);
-  transition:
-    box-shadow var(--dur-fast) var(--ease),
-    background-color var(--dur-fast) var(--ease);
+  background: transparent;
+  border-radius: var(--r-sm);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 .item:hover {
   text-decoration: none;
 }
 
-/* 悬停只给最轻的凹陷 —— 密集列表里任何"浮起"都会互相干扰 */
+/* 悬停只换一层底色 —— 列表里任何"浮起"都会互相干扰 */
 .item:hover:not(.neu-disabled):not(.neu-selected) {
-  box-shadow:
-    inset 1px 1px 2px var(--sd),
-    inset -1px -1px 2px var(--sl);
+  background: var(--panel-2);
 }
 
 .r-sm {

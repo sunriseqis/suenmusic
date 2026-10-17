@@ -68,89 +68,67 @@ function onClick(ev: MouseEvent) {
   gap: var(--sp-2);
   font-weight: var(--fw-medium);
   white-space: nowrap;
-  /* 触摸目标最小 36px；移动端另有 44px 的硬要求，由 s-lg 承担 */
   min-height: 36px;
-}
-
-.block {
-  width: 100%;
-}
-
-.s-sm {
-  min-height: 30px;
-  padding: 0 var(--sp-3);
-  font-size: var(--fs-sm);
+  border: 1px solid transparent;
   border-radius: var(--r-md);
 }
-.s-md {
-  min-height: 40px;
-  padding: 0 var(--sp-4);
-  font-size: var(--fs-md);
-  border-radius: var(--r-md);
-}
-.s-lg {
-  min-height: 48px;
-  padding: 0 var(--sp-5);
-  font-size: var(--fs-lg);
-  border-radius: var(--r-lg);
-}
+
+.block { width: 100%; }
+
+.s-sm { min-height: 30px; padding: 0 var(--sp-3); font-size: var(--fs-sm); }
+.s-md { min-height: 40px; padding: 0 var(--sp-4); font-size: var(--fs-md); }
+.s-lg { min-height: 48px; padding: 0 var(--sp-5); font-size: var(--fs-lg); }
 
 /* ---- 变体 ---- */
 
-/* 默认：与页面同底色，只靠阴影浮起 */
+/* 默认：一块装在面板上的键 */
 .v-default {
   color: var(--t1);
+  background: var(--panel);
+  border-color: var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+.v-default:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
-/* 主按钮：强调色填充。文字用白色 —— 铁律 2 说 --accent 当文字只有 3.74:1，
-   但当背景时白字对比度是够的 */
+/* 主按钮：琥珀填充，深色字（深色主题）/ 白字（纸白主题） */
 .v-primary {
-  color: #fff;
+  color: #1a1206;
   background: var(--accent);
-  box-shadow:
-    2px 2px 5px var(--sd),
-    -2px -2px 5px var(--sl);
+  border-color: color-mix(in srgb, var(--accent) 70%, #000);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
-:root[data-theme='dark'] .v-primary {
-  /* 深色下 --accent 更亮，白字对比度下降，改用深色文字 */
-  color: #2b1a0e;
+:root[data-theme='light'] .v-primary {
+  color: #fff;
 }
 .v-primary:active:not(:disabled) {
-  /* 填充类按钮的按下态不能用 inset 阴影（会被背景色盖住看不出），
-     改为压缩外阴影 + 缩放 */
-  box-shadow: 1px 1px 2px var(--sd);
-  transform: scale(0.98);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px rgba(0, 0, 0, 0.35);
 }
 
-/* 幽灵按钮：无凸起，仅强调色文字。用于"次要但重要"的动作 */
+/* 幽灵：没有厚度，只有文字 */
 .v-ghost {
   color: var(--accent-text);
   background: transparent;
+  border-color: transparent;
   box-shadow: none;
 }
-.v-ghost:hover:not(:disabled) {
-  color: var(--accent-text);
-  text-decoration: underline;
-}
+.v-ghost:hover:not(:disabled) { text-decoration: underline; }
 .v-ghost:active:not(:disabled) {
+  transform: translateY(1px);
   box-shadow: none;
 }
 
-/* 危险动作：删除。软拟物里没有红色令牌，这里直接用语义红，
-   但只用于文字与按下态的轻阴影，不引入第五种颜色面 */
+/* 危险：只用文字色，不做红色填充 */
 .v-danger {
-  color: #b3261e;
+  color: #d4564a;
+  background: transparent;
+  border-color: transparent;
 }
-:root[data-theme='dark'] .v-danger {
-  color: #ff9a92;
-}
-.v-danger:active:not(:disabled) {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
-}
+:root[data-theme='light'] .v-danger { color: #a8322a; }
 
-/* 加载指示：一个旋转的缺口圆环，不用 emoji */
 .spinner {
   width: 14px;
   height: 14px;
@@ -160,9 +138,5 @@ function onClick(ev: MouseEvent) {
   animation: spin 0.7s linear infinite;
   flex: none;
 }
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

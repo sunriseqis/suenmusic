@@ -47,40 +47,36 @@ function toggle() {
   border-radius: var(--r-pill);
   padding: 0;
   flex: none;
-  transition:
-    box-shadow var(--dur-mid) var(--ease),
-    background-color var(--dur-mid) var(--ease);
-}
-
-.off {
+  border: 1px solid var(--line);
   background: var(--bg);
-  box-shadow:
-    inset 2px 2px 5px var(--sd),
-    inset -2px -2px 5px var(--sl);
+  box-shadow: inset 0 2px 6px var(--lo);
+  transition:
+    background-color var(--dur-mid) var(--ease),
+    border-color var(--dur-mid) var(--ease);
 }
 
 .on {
-  /* 开态：填充强调色。白/深色文字不涉及，滑块是独立的圆形 */
-  background: var(--accent);
-  box-shadow:
-    inset 1px 1px 3px rgba(0, 0, 0, 0.25),
-    inset -1px -1px 3px rgba(255, 255, 255, 0.18);
+  background: color-mix(in srgb, var(--accent) 20%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
 }
 
 .knob {
   position: absolute;
-  top: 4px;
-  left: 4px;
+  top: 3px;
+  left: 3px;
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
-  transition: transform var(--dur-mid) var(--ease);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
+  transition:
+    transform var(--dur-mid) var(--ease),
+    background-color var(--dur-mid) var(--ease);
 }
 .on .knob {
   transform: translateX(20px);
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 70%, #000);
 }
 </style>

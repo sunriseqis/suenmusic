@@ -61,7 +61,11 @@ const greeting = computed(() => {
 const aiWelcome = computed(() => (data.value?.welcomePhrase || '').trim());
 
 /** 首页大标题：有 AI 欢迎语就用它，否则「时段问候，用户名」 */
-const headText = computed(() => aiWelcome.value || `${greeting.value}，${session.displayName}`);
+const headText = computed(() => {
+  if (aiWelcome.value) return aiWelcome.value;
+  // 没登录时 displayName 是空串 —— 直接拼会得到"夜深了，"，那个逗号很扎眼
+  return session.displayName ? `${greeting.value}，${session.displayName}` : greeting.value;
+});
 
 /** 当前是不是"没配服务端"的直连模式 —— 首页空状态的文案要区分开 */
 const localMode = computed(() => !serverReady());

@@ -7,7 +7,6 @@
  */
 import { onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import NeuIcon from '@/components/neu/NeuIcon.vue';
 import PlayerBar from '@/components/PlayerBar.vue';
 import FullPlayer from '@/components/FullPlayer.vue';
 import { registerBackHandler } from '@/native/back.ts';
@@ -65,7 +64,6 @@ onBeforeUnmount(offBack);
         :class="{ active: isActive(item.name) }"
         :aria-current="isActive(item.name) ? 'page' : undefined"
       >
-        <NeuIcon :name="item.icon" :size="21" />
         <span class="tab-label">{{ item.label }}</span>
       </router-link>
     </nav>
@@ -119,40 +117,63 @@ onBeforeUnmount(offBack);
   padding: 0 var(--sp-3);
 }
 
+/* N1 导轨选择器：整条导航是凹槽，活动项是滑到位的滑块 */
 .tabbar {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: 1fr;
-  height: calc(var(--mobile-nav-h) + var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
+  gap: 3px;
+  margin: 6px 10px calc(6px + var(--safe-bottom));
+  padding: 3px;
   background: var(--bg);
-  box-shadow: inset 0 1px 0 var(--sl);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 2px 7px var(--lo);
   z-index: var(--z-nav);
 }
 
 .tab {
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   color: var(--t2);
   text-decoration: none;
+  border-radius: calc(var(--r-md) - 3px);
   /* 触摸目标：整个 tab 都是，远超 44px */
   min-height: 44px;
-  transition: color var(--dur-fast) var(--ease);
+  /* 底部留出指示条的位置，否则琥珀条会压在文字上 */
+  padding: 0 0 8px;
+  transition:
+    color var(--dur-fast) var(--ease),
+    background-color var(--dur-fast) var(--ease);
 }
 .tab:hover {
   text-decoration: none;
 }
 
 .tab.active {
-  color: var(--accent-text);
+  color: var(--t1);
   font-weight: var(--fw-medium);
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+
+/* 琥珀只做指示条，不承担状态色 */
+.tab.active::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 12px;
+  height: 2px;
+  background: var(--accent);
+  transform: translateX(-50%);
 }
 
 .tab-label {
-  font-size: 11px;
+  font-size: 12px;
+  letter-spacing: 0.08em;
   line-height: 1;
 }
 
