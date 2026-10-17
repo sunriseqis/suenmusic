@@ -21,13 +21,25 @@ import {
   type TrackAnchorInfo,
 } from '@/api/playback.ts';
 import type { AnchorTrackMeta, BiliCandidate } from '@/api/playback.ts';
-import { resolveUrl } from '@/api/client.ts';
+import { getBaseUrl, resolveUrl } from '@/api/client.ts';
+import { biliResolveAudio } from '@/api/direct/upstream.ts';
+import {
+  getLocalAnchor,
+  removeLocalAnchor,
+  searchLocalCandidates,
+  setLocalAnchor,
+} from '@/api/direct/anchor.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useUiStore } from '@/stores/ui.ts';
 import { blurActiveInput, registerBackHandler } from '@/native/back.ts';
 import { formatDuration } from '@/utils/format.ts';
 
 const player = usePlayerStore();
+
+/** 没配服务端 = 直连模式：候选搜索、锚点存取全部走本机 */
+function isLocal(): boolean {
+  return !getBaseUrl().trim();
+}
 const ui = useUiStore();
 
 const track = computed(() => player.anchorCandidate);
@@ -76,20 +88,27 @@ function stopPreview(): void {
   previewingBvid.value = null;
 }
 
-function togglePreview(c: BiliCandidate): void {
+async function togglePreview(c: BiliCandidate): Promise<void> {
   if (previewingBvid.value === c.bvid) {
     stopPreview();
     return;
   }
   stopPreview();
-  previewAudio = previewAudio ?? new Audio();
-  previewAudio.src = resolveUrl(c.previewUrl);
-  previewAudio.volume = 0.9;
-  previewingBvid.value = c.bvid;
-  previewAudio.play().catch(() => {
+  try {
+    /**
+     * 服务端模式下 previewUrl 是带令牌的代理流；
+     * 直连模式没有代理，按需现场解析这一条的真实地址。
+     */
+    const url = c.previewUrl ? resolveUrl(c.previewUrl) : (await biliResolveAudio(c.bvid)).url;
+    previewAudio = previewAudio ?? new Audio();
+    previewAudio.src = url;
+    previewAudio.volume = 0.9;
+    previewingBvid.value = c.bvid;
+    await previewAudio.play();
+  } catch {
     ui.err('试听加载失败，请稍后重试');
     previewingBvid.value = null;
-  });
+  }
 }
 
 async function search(): Promise<void> {
@@ -99,7 +118,9 @@ async function search(): Promise<void> {
   searchNote.value = '';
   stopPreview();
   try {
-    const res = await fetchBiliCandidates(t.id, keyword.value.trim());
+    const res = isLocal()
+      ? await searchLocalCandidates(t, keyword.value.trim())
+      : await fetchBiliCandidates(t.id, keyword.value.trim());
     candidates.value = res.candidates;
     // Q 音侧的原版参照：封面 / 专辑 / 时长，对着它挑 B 站视频
     trackMeta.value = res.track ?? null;
@@ -120,12 +141,21 @@ async function doAnchor(c: BiliCandidate): Promise<void> {
   if (!t || anchoringBvid.value) return;
   anchoringBvid.value = c.bvid;
   try {
-    await anchorTrack(t.id, {
-      bvid: c.bvid,
-      title: c.title,
-      author: c.author,
-      durationSec: c.durationSec,
-    });
+    if (isLocal()) {
+      setLocalAnchor(t.id, {
+        bvid: c.bvid,
+        title: c.title,
+        author: c.author,
+        durationSec: c.durationSec,
+      });
+    } else {
+      await anchorTrack(t.id, {
+        bvid: c.bvid,
+        title: c.title,
+        author: c.author,
+        durationSec: c.durationSec,
+      });
+    }
     stopPreview();
     ui.ok('已锚定，开始播放');
     // 服务端锚定时已清解析缓存，这里直接重装当前曲目
@@ -183,6 +213,19 @@ watch(track, t => {
 async function loadCurrentAnchor(): Promise<void> {
   const t = track.value;
   if (!t) return;
+  if (isLocal()) {
+    const a = getLocalAnchor(t.id);
+    currentAnchor.value = a
+      ? {
+          bvid: a.bvid,
+          title: a.title,
+          author: a.author,
+          durationSec: a.durationSec,
+          pinned: a.pinned,
+        }
+      : null;
+    return;
+  }
   try {
     const res = await fetchTrackAnchor(t.id);
     currentAnchor.value = res.anchor;
@@ -196,7 +239,11 @@ async function removeCurrentAnchor(): Promise<void> {
   if (!t || removingAnchor.value) return;
   removingAnchor.value = true;
   try {
-    await unanchorTrack(t.id);
+    if (isLocal()) {
+      removeLocalAnchor(t.id);
+    } else {
+      await unanchorTrack(t.id);
+    }
     currentAnchor.value = null;
     ui.ok('已解除锚定，该曲目回到自动匹配');
   } catch (e) {

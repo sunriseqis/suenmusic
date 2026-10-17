@@ -83,11 +83,6 @@ const peekLines = computed(() => {
 });
 const activeLine = computed(() => lyrics.lines[lyrics.activeIdx] ?? null);
 
-/** 音频源的中文名（顶栏用） */
-const sourceLabel = computed(() => {
-  const s = player.currentSource;
-  return s === 'netease' ? '网易云' : s === 'bilibili' ? 'B站' : '';
-});
 /** 过渡用的键：当前行一变就换 key，触发交叉淡入 */
 const lyricKey = computed(() => {
   const l = activeLine.value;
@@ -204,9 +199,7 @@ function onScrubCommit(percent: number) {
         <!-- 播放来源 · 音频源：用户要知道这首是从哪来的，而不是一句"正在播放" -->
         <span class="eyebrow" :class="{ 'head-err': !!player.errorMessage }">
           <template v-if="player.errorMessage">{{ player.errorMessage }}</template>
-          <template v-else>
-            {{ player.origin }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
-          </template>
+          <template v-else>{{ player.headStatus }} · {{ player.origin }}</template>
         </span>
       </div>
       <NeuIconButton

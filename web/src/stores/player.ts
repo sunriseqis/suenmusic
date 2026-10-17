@@ -32,7 +32,7 @@ import { getBaseUrl } from '@/api/client.ts';
 import { useUiStore } from '@/stores/ui.ts';
 import { getProgress, recordPlay, saveProgress } from '@/offline/localdb.ts';
 import { serverReady } from '@/offline/syncMode.ts';
-import { resolveDirect } from '@/api/direct/resolve.ts';
+import { resolveDirect, clearDirectCache } from '@/api/direct/resolve.ts';
 import { probeAudio } from '@/api/direct/upstream.ts';
 import type { Track } from '@/api/types.ts';
 import { coverUrl, artistNames } from '@/utils/format.ts';
@@ -1846,6 +1846,8 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     retriedForCurrent = false;
+    // 直连模式的解析缓存也要清：否则锚定完拿到的还是旧音源的地址
+    clearDirectCache(track.id);
     // 强制回源解析，且禁止跳下一首（noSkip: true）以确保用户能感知当前曲目的真实结果
     const ok = await load(track, { force: true, noSkip: true });
     if (!ok) return;

@@ -10,6 +10,7 @@ import type { ResolveResult, Track } from '@/api/types.ts';
 import { artistNames } from '@/utils/format.ts';
 import { biliResolveAudio, biliSearch } from './upstream.ts';
 import { scoreCandidate, type MatchTrack } from './matcher.ts';
+import { getLocalAnchor } from './anchor.ts';
 
 /** 直链缓存时长。B 站签名通常 2 小时有效，但队列里反复重解析没必要，10 分钟够用 */
 const CACHE_TTL_MS = 10 * 60 * 1000;
@@ -99,6 +100,53 @@ export async function resolveDirect(track: Track): Promise<{
       },
       url: cached.url,
     };
+  }
+
+  /**
+   * 先看本机锚点：锚定是**最高权威**，命中就直接取流，
+   * 不再搜索、不再打分（否则用户手工指定的版本会被算法覆盖）。
+   * 锚点失效（视频下架/取流失败）时静默回退到自动匹配。
+   */
+  const anchored = getLocalAnchor(track.id);
+  if (anchored) {
+    try {
+      const audio = await biliResolveAudio(anchored.bvid);
+      console.log(`[direct] 锚点命中 ${track.id} ← ${anchored.bvid}`);
+      cache.set(track.id, {
+        url: audio.url,
+        bvid: anchored.bvid,
+        title: anchored.title,
+        bandwidth: audio.bandwidth,
+        at: Date.now(),
+      });
+      return {
+        result: {
+          trackId: track.id,
+          ok: true,
+          reason: 'ok',
+          message: null,
+          score: 100,
+          bvid: anchored.bvid,
+          matchedTitle: anchored.title,
+          matchedAuthor: anchored.author,
+          durationDiff: null,
+          fallbackStream: false,
+          bandwidth: audio.bandwidth,
+          streamUrl: audio.url,
+          streamTokenExpiresInSec: Math.round(CACHE_TTL_MS / 1000),
+          expiresInSec: Math.round(CACHE_TTL_MS / 1000),
+          hitLevel: 'direct',
+          source: 'bilibili',
+          costMs: Date.now() - started,
+          topCandidates: [],
+          coverUrl: null,
+          track: null,
+        },
+        url: audio.url,
+      };
+    } catch {
+      /* 锚点失效：继续走自动匹配 */
+    }
   }
 
   const artist = artistNames(track.ar);
