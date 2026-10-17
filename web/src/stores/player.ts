@@ -1138,7 +1138,26 @@ export const usePlayerStore = defineStore('player', () => {
   // -------------------------------------------------------------------------
 
   /** 播放单曲。`list` 传入时会把它设为播放队列 */
+  /**
+   * 播放来源（收藏 / 搜索 / 每日推荐 / 歌单 / 首页）。
+   *
+   * 设计稿的顶栏写的是「PLAYING FROM · 收藏」—— 用户要知道**这首是从哪来的**，
+   * 而不是一句对所有情况都成立的"正在播放"。
+   * 按当前路由推断而不是让每个调用点传参：来源就是"用户在哪一屏点的播放"，
+   * 路由本身就带着这个信息，多传一个参数只会多一处可能忘掉的地方。
+   */
+  const origin = ref('首页');
+  function detectOrigin(): string {
+    const p = typeof window !== 'undefined' ? window.location.pathname : '/';
+    if (p.startsWith('/search')) return '搜索';
+    if (p.startsWith('/favorites')) return '收藏';
+    if (p.startsWith('/daily')) return '每日推荐';
+    if (p.startsWith('/collection')) return '歌单';
+    return '首页';
+  }
+
   async function playTrack(track: Track, list?: Track[]): Promise<void> {
+    origin.value = detectOrigin();
     if (list && list.length > 0) {
       queue.value = list;
       sourceOrderIds = list.map(t => t.id);
@@ -1248,6 +1267,7 @@ export const usePlayerStore = defineStore('player', () => {
   /** 用整个列表替换队列并从 `startIndex` 开始播 */
   async function playQueue(list: Track[], startIndex = 0): Promise<void> {
     if (list.length === 0) return;
+    origin.value = detectOrigin();
     queue.value = list;
     sourceOrderIds = list.map(t => t.id);
     index.value = Math.min(Math.max(startIndex, 0), list.length - 1);
@@ -2044,6 +2064,7 @@ export const usePlayerStore = defineStore('player', () => {
     playTrack,
     playQueue,
     startCurrent,
+    origin,
     restoreSession,
     toggle,
     next,

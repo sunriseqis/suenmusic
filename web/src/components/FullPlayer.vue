@@ -82,6 +82,12 @@ const peekLines = computed(() => {
   return ls.slice(Math.max(0, i - 1), i + 2);
 });
 const activeLine = computed(() => lyrics.lines[lyrics.activeIdx] ?? null);
+
+/** 音频源的中文名（顶栏用） */
+const sourceLabel = computed(() => {
+  const s = player.currentSource;
+  return s === 'netease' ? '网易云' : s === 'bilibili' ? 'B站' : '';
+});
 /** 过渡用的键：当前行一变就换 key，触发交叉淡入 */
 const lyricKey = computed(() => {
   const l = activeLine.value;
@@ -195,25 +201,23 @@ function onScrubCommit(percent: number) {
     <header class="head">
       <NeuIconButton icon="chevron-down" label="收起播放页" size="md" @click="emit('close')" />
       <div class="head-meta">
-        <span class="h1-row">
-          <span class="h1" :class="{ 'head-err': !!player.errorMessage }">
-            {{ track?.recommendReason ? '专属推荐' : player.headStatus }}
-          </span>
-          <!-- 纯圆点音源指示灯：零文字污染，红=网易云 / 粉=B站，带柔光，点击锚定 -->
-          <button
-            v-if="track"
-            type="button"
-            class="src-dot"
-            :class="`src-${player.currentSource ?? 'bilibili'}`"
-            :title="player.currentSource === 'netease' ? '音源：网易云 · 点击锚定' : '音源：B站 · 点击锚定'"
-            aria-label="锚定音源"
-            data-role="anchor-btn"
-            @click="player.requestAnchor()"
-          />
+        <!-- 播放来源 · 音频源：用户要知道这首是从哪来的，而不是一句"正在播放" -->
+        <span class="eyebrow" :class="{ 'head-err': !!player.errorMessage }">
+          <template v-if="player.errorMessage">{{ player.errorMessage }}</template>
+          <template v-else>
+            {{ player.origin }}<template v-if="sourceLabel"> · {{ sourceLabel }}</template>
+          </template>
         </span>
-        <span class="h2 neu-ellipsis">{{ albumName || '未知专辑' }}</span>
       </div>
-      <span class="head-spacer" aria-hidden="true"></span>
+      <NeuIconButton
+        v-if="track"
+        icon="dots"
+        :stroke="3"
+        label="锚定音源"
+        size="md"
+        data-role="anchor-btn"
+        @click="player.requestAnchor()"
+      />
     </header>
 
     <!-- 中间主体：视图 A 封面展示面 vs 视图 B 沉浸全屏歌词面 -->
@@ -234,6 +238,7 @@ function onScrubCommit(percent: number) {
                 <p class="t-artist neu-ellipsis">
                   <ArtistLinks v-if="track" :artists="track.ar" />
                   <template v-else>从搜索或首页选一首开始</template>
+                  <template v-if="albumName"> · {{ albumName }}</template>
                 </p>
               </div>
               <NeuIconButton
@@ -432,6 +437,16 @@ function onScrubCommit(percent: number) {
   flex-direction: column;
   align-items: center;
   gap: 2px;
+}
+.eyebrow {
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  color: var(--t2);
+  text-transform: uppercase;
+}
+.head-err {
+  font-size: 11px;
+  color: #d4564a;
 }
 .h1-row {
   display: inline-flex;

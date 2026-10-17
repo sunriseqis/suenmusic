@@ -50,7 +50,8 @@ export type IconName =
   | 'playlist-add'
   | 'download'
   | 'upload'
-  | 'info';
+  | 'info'
+  | 'dots';
 
 const props = withDefaults(
   defineProps<{
@@ -67,6 +68,7 @@ const props = withDefaults(
  * 一律使用 24×24 坐标系。
  */
 const PATHS: Record<IconName, string[]> = {
+  dots: ['M5.5 12h.01', 'M12 12h.01', 'M18.5 12h.01'],
   play: ['M8 5.5v13l11-6.5z'],
   pause: ['M9 5v14', 'M15 5v14'],
   next: ['M6 5.5v13l9-6.5z', 'M19 5v14'],
