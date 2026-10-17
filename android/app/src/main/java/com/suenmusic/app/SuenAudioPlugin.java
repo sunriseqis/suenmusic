@@ -312,7 +312,10 @@ public class SuenAudioPlugin extends Plugin {
         } catch (Exception ignored) {}
       }
     }
-    if (items == null || (!anyDirect && (baseUrl == null || token == null))) {
+    // direct=true：整个队列都走客户端自己解析的直连地址，不需要服务端地址与令牌。
+    // 直连地址是播放时逐首登记的（setDirectUrl），所以入队时 items 里可能还没有。
+    final boolean direct = Boolean.TRUE.equals(call.getBoolean("direct", false));
+    if (items == null || (!direct && !anyDirect && (baseUrl == null || token == null))) {
       call.reject("缺少 baseUrl / token / items");
       return;
     }
@@ -399,6 +402,19 @@ public class SuenAudioPlugin extends Plugin {
     if (index < 0 || index >= c.getMediaItemCount()) return false;
     MediaItem current = c.getMediaItemAt(index);
     return current != null && items.get(0).mediaId.equals(current.mediaId);
+  }
+
+  /** 登记单首曲目的直连地址（客户端解析出的上游 URL）。url 为空表示清除。 */
+  @PluginMethod
+  public void setDirectUrl(PluginCall call) {
+    String id = call.getString("id");
+    String url = call.getString("url");
+    if (id == null || id.isEmpty()) {
+      call.reject("缺少 id");
+      return;
+    }
+    SuenAudio.setDirectUrl(id, url == null ? "" : url);
+    call.resolve();
   }
 
   @PluginMethod

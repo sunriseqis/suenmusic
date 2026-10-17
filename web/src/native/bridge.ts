@@ -17,6 +17,7 @@
  * key 会随签名轮换全部失效 —— 所以桥给原生层传的是曲目 id（稳定），
  * 原生层以 id 作为缓存键（见 SuenAudioService 的注释）。
  */
+import { serverReady } from '@/offline/syncMode.ts';
 import { SuenAudio, isNativeAudio, type NativeTrack, type NativeTrackChange } from './audio';
 export { isNativeAudio };
 import { http } from '@/api/client.ts';
@@ -211,13 +212,22 @@ export class NativeAudioBridge extends EventTarget {
      * 组流 URL 要求 baseUrl/token 非空 —— 令牌在断网时根本不会被校验，只需形状
      * 正确。不兜底的话，离线连队列都发不出去（"离线也能听缓存"就瘸了）。
      */
+    /**
+     * 没有服务端时**不需要流会话令牌**：整队走客户端自己解析的直连地址，
+     * 令牌是给 `<baseUrl>/api/stream/<id>` 这条路用的。旧实现在这里直接
+     * `throw`，于是"没配服务器 → 连队列都发不出去 → 点播放没反应"。
+     */
+    const directMode = !serverReady();
+
     let token: string | null = null;
-    try {
-      token =
-        (await http.get<{ token: string; expiresInMs: number }>('/api/stream/session-token'))
-          .token ?? null;
-    } catch {
-      token = null;
+    if (!directMode) {
+      try {
+        token =
+          (await http.get<{ token: string; expiresInMs: number }>('/api/stream/session-token'))
+            .token ?? null;
+      } catch {
+        token = null;
+      }
     }
     if (token !== null) {
       // 存一份供下次离线使用（会话令牌有效期 24h，够撑出门一天）
@@ -236,7 +246,7 @@ export class NativeAudioBridge extends EventTarget {
         token = last.token;
       }
     }
-    if (token === null) {
+    if (!directMode && token === null) {
       // 从没成功拿到过令牌（比如首次使用就离线）：队列发出去也没意义
       throw new Error('离线且没有可用的流会话');
     }
@@ -246,13 +256,14 @@ export class NativeAudioBridge extends EventTarget {
     this.items = tracks.map(t => ({ id: t.id, durationMs: t.dt || 0 }));
 
     await SuenAudio.setQueue({
-      baseUrl: this.baseUrl,
-      token,
+      baseUrl: directMode ? '' : this.baseUrl,
+      token: token ?? '',
       items,
       startIndex,
       startPositionMs,
       autoplay,
       tailOnly,
+      direct: directMode,
     });
   }
 

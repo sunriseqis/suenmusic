@@ -51,21 +51,19 @@ import {
 } from '@/api/library.ts';
 import { downloadBlob } from '@/utils/download.ts';
 import type { PersonaDetail } from '@/api/types.ts';
-import {
-  fetchDislikes,
-  removeDislike,
-  type DislikeItem,
-} from '@/api/recommend.ts';
+import type { DislikeItem } from '@/api/recommend.ts';
 
 import { usePlayerStore } from '@/stores/player.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { useSessionStore } from '@/stores/session.ts';
+import { useDislikesStore } from '@/stores/dislikes.ts';
 import { ACCENT_PRESETS, useUiStore } from '@/stores/ui.ts';
 import { formatDateTime, formatRelative } from '@/utils/format.ts';
 import type { SessionInfo } from '@/api/types.ts';
 
 const router = useRouter();
 const session = useSessionStore();
+const dislikes = useDislikesStore();
 const ui = useUiStore();
 const player = usePlayerStore();
 const favorites = useFavoritesStore();
@@ -665,8 +663,10 @@ const artistDislikes = computed(() => dislikeItems.value.filter(d => d.type === 
 async function loadDislikeList() {
   dislikeLoading.value = true;
   try {
-    const res = await fetchDislikes();
-    dislikeItems.value = res.dislikes;
+    await dislikes.ensureLoaded();
+    // 有服务端时对一次账（并集，不会抹掉本地）
+    void dislikes.syncFromServer();
+    dislikeItems.value = dislikes.items;
   } catch {
     dislikeItems.value = [];
   } finally {
@@ -676,10 +676,8 @@ async function loadDislikeList() {
 
 async function undoDislike(item: DislikeItem) {
   try {
-    await removeDislike(item.type, item.targetId);
-    dislikeItems.value = dislikeItems.value.filter(
-      d => !(d.type === item.type && d.targetId === item.targetId)
-    );
+    await dislikes.remove(item.type, item.targetId);
+    dislikeItems.value = [...dislikes.items];
     ui.ok('已恢复推荐');
   } catch (e) {
     ui.err(session.describeError(e));

@@ -18,17 +18,12 @@ import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
-import { ApiError } from '@/api/client.ts';
 import { fetchFavorites } from '@/api/library.ts';
 import { artistNames, parseAiHeader } from '@/utils/format.ts';
 import { blurActiveInput, registerBackHandler } from '@/native/back.ts';
-import { loadOffline, saveOffline } from '@/offline/snapshot.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
+import { serverReady } from '@/offline/syncMode.ts';
 import type { Track } from '@/api/types.ts';
-
-const PAGE_SIZE = 200;
-/** 分页循环上限。200×50=10000 首，家庭级到不了，纯防御死循环 */
-const MAX_PAGES = 50;
 
 const favorites = useFavoritesStore();
 
@@ -99,50 +94,45 @@ const noMatch = computed(
 );
 
 /**
- * 全量装载收藏（分页循环走完游标为止）。
+ * 装载收藏。
  *
- * 数据全部来自本地 SQLite —— 分页循环只多查几次本地库，
- * 不碰任何上游接口，不存在限流顾虑。播放全部也因此是完整列表。
+ * 直连架构下**只读本地库** —— 收藏是本机的主数据，不再向服务端要列表。
+ * 配了服务器的话在后台对一次账（并集合并，不会抹掉任何一边），完成后再刷列表。
+ * AI 评语只有服务端能生成，没有服务端就空着，不影响列表。
  */
 async function load() {
   loading.value = true;
   errorText.value = '';
   try {
-    const acc: Track[] = [];
-    let cursor: string | null = null;
-    for (let page = 0; page < MAX_PAGES; page++) {
-      const res = await fetchFavorites({ limit: PAGE_SIZE, cursor });
-      if (page === 0) {
-        aiSummary.value = res.summary || '';
-      }
-      acc.push(...res.items.map(i => i.track).filter((t): t is Track => t !== null));
-      if (!res.nextCursor) break;
-      cursor = res.nextCursor;
+    await favorites.ensureLoaded();
+    applyRows();
+
+    if (serverReady()) {
+      void (async () => {
+        await favorites.syncFromServer();
+        applyRows();
+        try {
+          const res = await fetchFavorites({ limit: 1 });
+          aiSummary.value = res.summary || '';
+        } catch {
+          /* 评语是装饰，拿不到不影响收藏 */
+        }
+      })();
     }
-    items.value = acc;
-    // 同步一份到本地：断网时这就是唯一能展示的收藏列表
-    void saveOffline('favorites', acc);
   } catch (e) {
-    // 连不上服务端 → 退回上次的快照，让已缓存的歌够得着
-    if (e instanceof ApiError && e.isNetworkError) {
-      const snap = await loadOffline<Track[]>('favorites');
-      if (snap && snap.length > 0) {
-        items.value = snap;
-        return;
-      }
-      errorText.value = '当前离线，且本地还没有收藏快照（联网听一次就有了）';
-      return;
-    }
-    errorText.value = e instanceof ApiError ? e.message : '收藏加载失败，请稍后重试';
+    errorText.value = e instanceof Error ? e.message : '收藏加载失败';
   } finally {
     loading.value = false;
   }
 }
 
+/** 把 store 的行投影成曲目列表（没有快照的行跳过 —— 只有 id 渲染不出东西） */
+function applyRows(): void {
+  items.value = favorites.rows.map(r => r.track).filter((t): t is Track => !!t);
+}
+
 onMounted(() => {
   void load();
-  // 红心集合没就位时先兜底拉一次（失败静默，不影响列表展示）
-  favorites.ensureLoaded().catch(() => {});
 });
 </script>
 

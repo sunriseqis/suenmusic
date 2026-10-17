@@ -77,11 +77,18 @@ export const router = createRouter({
 });
 
 /**
- * 登录守卫。
+ * 路由守卫。
  *
- * **必须等 `bootstrapped`**：刷新页面时 bootstrapped 还是 false，
- * 而静默续期是异步的。不等的话，用户刚刷新就被踹到登录页，
- * 然后续期成功又得自己走回来 —— 典型的"闪一下登录页" bug。
+ * **直连架构下这里不再拦人。**
+ *
+ * 旧逻辑是"未登录 → 一律踢到 /login"，前提是"服务端是唯一的数据源"。
+ * 现在收藏/历史/不喜欢都在本机，搜索和播放走客户端直连上游，
+ * 登录只是一个**可选增强**（多端同步、AI、高音质凭据）。
+ * 继续拦的话，装完 app 第一眼就是登录页 —— 既违背"开箱即用"，
+ * 也会让应用商店审核看到"必须先有服务器才能用"。
+ *
+ * 仍然保留 `bootstrap()` 的等待：刷新页面时它还是 false，而静默续期是异步的。
+ * 不等的话，已登录用户一刷新会先闪一下"未登录"的界面。
  */
 router.beforeEach(async to => {
   const session = useSessionStore();
@@ -96,15 +103,7 @@ router.beforeEach(async to => {
     return true;
   }
 
-  if (to.meta.public) {
-    return true;
-  }
-
-  if (!session.isLoggedIn) {
-    // 记下原本要去哪，登录后能回去
-    return { name: 'login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } };
-  }
-
+  // 其余页面一律放行 —— 本地模式是正常形态，不是降级形态
   return true;
 });
 

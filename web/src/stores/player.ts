@@ -30,6 +30,10 @@ import {
 import { SuenAudio } from '@/native/audio.ts';
 import { getBaseUrl } from '@/api/client.ts';
 import { useUiStore } from '@/stores/ui.ts';
+import { getProgress, recordPlay, saveProgress } from '@/offline/localdb.ts';
+import { serverReady } from '@/offline/syncMode.ts';
+import { resolveDirect } from '@/api/direct/resolve.ts';
+import { probeAudio } from '@/api/direct/upstream.ts';
 import type { Track } from '@/api/types.ts';
 import { coverUrl, artistNames } from '@/utils/format.ts';
 
@@ -263,6 +267,8 @@ export const usePlayerStore = defineStore('player', () => {
 
   let reportTimer: number | null = null;
   let lastReportedMs = 0;
+  /** 最近一次已写入历史记录的曲目 id。避免每 15 秒重写同一条 */
+  let historyTrackId = '';
 
   /**
    * 把"待恢复的位置"落到 audio 上。
@@ -573,7 +579,17 @@ export const usePlayerStore = defineStore('player', () => {
    * 顺带还起到了**探活**作用：地址若已失效，这里就会拿到 403/404，
    * 于是可以在真正播放之前就重新解析，用户不会听到一段静默。
    */
-  async function probeStream(url: string): Promise<{ ok: boolean; status: number; durationMs: number | null }> {
+  async function probeStream(
+    url: string,
+    direct = false
+  ): Promise<{ ok: boolean; status: number; durationMs: number | null }> {
+    // 直连地址在其它源上，普通 fetch 会被 CORS 拦（判成"链接坏了"）。
+    // 原生环境用 CapacitorHttp 探，能带 Referer。
+    if (direct) {
+      const r = await probeAudio(url);
+      return { ok: r.ok, status: r.status, durationMs: null };
+    }
+
     const controller = new AbortController();
     try {
       const res = await fetch(url, {
@@ -614,6 +630,34 @@ export const usePlayerStore = defineStore('player', () => {
    *   只有恢复上次会话才该为 true，见文件头第 4 条
    */
   let loadSequence = 0;
+
+  /**
+   * 解析播放地址：**服务端优先，直连兜底**。
+   *
+   * 有服务端时它的缓存是全局的（一份解析服务所有设备），命中率高、请求上游少，
+   * 所以正常情况走它。但服务端不可达时不能就此判死 —— 客户端自己也能解析
+   * （真机已验证），这正是"后端不在关键路径上"的落点。
+   *
+   * 唯一的例外是 `rateLimited`：服务端说上游正在限流，此时绕过它自己去打上游
+   * 只会让限流更久，所以直接按失败返回。
+   */
+  async function resolveForPlayback(
+    track: Track,
+    force: boolean,
+    retry: boolean
+  ): Promise<{ result: Awaited<ReturnType<typeof playbackApi.resolveStreamUrl>>['result']; url: string | null; direct: boolean }> {
+    if (serverReady()) {
+      try {
+        const r = await playbackApi.resolveStreamUrl(track.id, force, retry);
+        if (r.url) return { ...r, direct: false };
+        if (r.result.rateLimited) return { ...r, direct: false };
+      } catch {
+        /* 服务端不可达 → 落到直连 */
+      }
+    }
+    const d = await resolveDirect(track);
+    return { ...d, direct: true };
+  }
 
   async function load(
     track: Track,
@@ -662,11 +706,7 @@ export const usePlayerStore = defineStore('player', () => {
     try {
       // 这一首上次装载失败过 → 让服务端无视那条"缓存的失败"，否则重试等于白试
       const isRetry = lastFailedTrackId === track.id;
-      const { result, url } = await playbackApi.resolveStreamUrl(
-        track.id,
-        opts.force === true,
-        isRetry
-      );
+      const { result, url, direct } = await resolveForPlayback(track, opts.force === true, isRetry);
       if (seq !== loadSequence) return false;
 
       // 服务端回源补全的完整元数据：队列里的曲目可能来自字段不全的搜索召回行
@@ -728,7 +768,16 @@ export const usePlayerStore = defineStore('player', () => {
         return advanced;
       }
 
-      const probe = await probeStream(url);
+      /**
+       * 原生播放器的地址是它自己按 trackId 取的（`streamUrlFor`），`el.src` 只是
+       * 用来识别曲目。所以直连解析出来的地址必须**登记到原生侧**，否则原生仍然
+       * 会去拼 `<baseUrl>/api/stream/<id>` —— 没配服务器时就是空地址。
+       */
+      if (isNativeAudio) {
+        await SuenAudio.setDirectUrl({ id: track.id, url: direct ? url : '' }).catch(() => {});
+      }
+
+      const probe = await probeStream(url, direct);
       if (seq !== loadSequence) return false;
       if (!probe.ok) {
         lastFailedTrackId = track.id;
@@ -826,6 +875,7 @@ export const usePlayerStore = defineStore('player', () => {
       positionMs.value = 0;
     }
     lastReportedMs = 0;
+    historyTrackId = '';
   }
 
   /**
@@ -888,17 +938,29 @@ export const usePlayerStore = defineStore('player', () => {
    * 太靠前或太靠后的位置都不续播。
    */
   async function fetchResumePosition(trackId: string, totalMs: number): Promise<number | null> {
-    try {
-      const p = await playbackApi.fetchProgress(trackId);
-      if (!p || !Number.isFinite(p.playedMs)) return null;
-      if (p.playedMs < RESUME_MIN_MS) return null;
-      if (totalMs > 0 && p.playedMs > totalMs - RESUME_TAIL_GUARD_MS) return null;
-      return p.playedMs;
-    } catch (e) {
-      // 404 = 没有记录，不是错误
-      if (e instanceof ApiError && e.status === 404) return null;
-      return null;
+    let playedMs: number | null = null;
+
+    // 本地优先：续播位置是本机数据，断网也必须能接上
+    const local = await getProgress(trackId);
+    if (local && Number.isFinite(local.playedMs)) playedMs = local.playedMs;
+
+    // 本地没有、且确实配了服务端时才问 —— 没配服务器时那个请求只会打到静态服务器上
+    if (playedMs === null && serverReady()) {
+      try {
+        const p = await playbackApi.fetchProgress(trackId);
+        if (p && Number.isFinite(p.playedMs)) playedMs = p.playedMs;
+      } catch (e) {
+        // 404 = 没有记录，不是错误
+        if (!(e instanceof ApiError && e.status === 404)) {
+          /* 其他失败也当没有记录，续播不是关键路径 */
+        }
+      }
     }
+
+    if (playedMs === null) return null;
+    if (playedMs < RESUME_MIN_MS) return null;
+    if (totalMs > 0 && playedMs > totalMs - RESUME_TAIL_GUARD_MS) return null;
+    return playedMs;
   }
 
   // -------------------------------------------------------------------------
@@ -980,6 +1042,24 @@ export const usePlayerStore = defineStore('player', () => {
     if (!force && Math.abs(ms - lastReportedMs) < 3_000) return;
     lastReportedMs = ms;
 
+    // 本地先写：这是主存储。断网、没配服务器都照常记
+    void saveProgress(track.id, ms);
+
+    // 历史的写入频率要低一档：每首歌只在第一次上报 + 播完时落一条，
+    // 否则每 15 秒重写一次整条记录，没有意义还费 IO
+    if (historyTrackId !== track.id || completed) {
+      historyTrackId = track.id;
+      void recordPlay({
+        trackId: track.id,
+        track,
+        playedAt: Date.now(),
+        playedMs: ms,
+        completed,
+      });
+    }
+
+    // 服务端那份是备份（配了服务器且已登录才有）
+    if (!serverReady()) return;
     try {
       await playbackApi.reportPlay({
         trackId: track.id,

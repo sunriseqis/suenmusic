@@ -25,6 +25,7 @@ import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import { fetchHome } from '@/api/catalog.ts';
+import { serverReady } from '@/offline/syncMode.ts';
 import { ApiError } from '@/api/client.ts';
 import { isNativeAudio } from '@/native/audio.ts';
 import { usePlayerStore } from '@/stores/player.ts';
@@ -61,6 +62,9 @@ const aiWelcome = computed(() => (data.value?.welcomePhrase || '').trim());
 
 /** 首页大标题：有 AI 欢迎语就用它，否则「时段问候，用户名」 */
 const headText = computed(() => aiWelcome.value || `${greeting.value}，${session.displayName}`);
+
+/** 当前是不是"没配服务端"的直连模式 —— 首页空状态的文案要区分开 */
+const localMode = computed(() => !serverReady());
 
 const hasAnything = computed(() => {
   const d = data.value;
@@ -402,11 +406,15 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 全部为空（上游整片不可用） -->
+    <!-- 全部为空（上游整片不可用 / 无服务端的直连模式） -->
     <div v-else-if="!hasAnything" class="state neu-raised-md">
-      <p class="state-title">暂时没有内容</p>
+      <p class="state-title">{{ localMode ? '直连模式' : '暂时没有内容' }}</p>
       <p class="state-msg neu-t2">
-        上游可能正在限流，稍等片刻再刷新；也可以直接去搜索。
+        {{
+          localMode
+            ? '没有配置服务端。搜索、播放、收藏都能正常用；首页推荐需要服务端，可到设置里填地址。'
+            : '上游可能正在限流，稍等片刻再刷新；也可以直接去搜索。'
+        }}
       </p>
       <button type="button" class="retry" @click="load">
         <NeuIcon name="refresh" :size="15" />

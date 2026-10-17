@@ -13,14 +13,16 @@ import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import { ApiError } from '@/api/client.ts';
-import { addDislike, fetchDailyRecommend } from '@/api/recommend.ts';
+import { fetchDailyRecommend } from '@/api/recommend.ts';
 import { parseAiHeader } from '@/utils/format.ts';
 import { usePlayerStore } from '@/stores/player.ts';
+import { useDislikesStore } from '@/stores/dislikes.ts';
 import { useUiStore } from '@/stores/ui.ts';
 import type { Track } from '@/api/types.ts';
 
 const player = usePlayerStore();
 const ui = useUiStore();
+const dislikes = useDislikesStore();
 
 const PLEASANT_COPIES = [
   '正在为你挑选今日专属歌单…',
@@ -139,7 +141,7 @@ function removeFromList(track: Track): void {
 
 async function dislikeTrack(track: Track) {
   try {
-    await addDislike('track', track.id, track.name);
+    await dislikes.add('track', track.id, track.name);
     ui.ok(`已不再推荐「${track.name}」`);
   } catch (e) {
     ui.err(e instanceof Error ? e.message : '操作失败，请稍后重试');
@@ -156,7 +158,7 @@ async function dislikeArtist(track: Track) {
     return;
   }
   try {
-    await addDislike('artist', mid, name);
+    await dislikes.add('artist', mid, name);
     ui.ok(`已不再推荐歌手「${name}」的相关歌曲`);
   } catch (e) {
     ui.err(e instanceof Error ? e.message : '操作失败，请稍后重试');

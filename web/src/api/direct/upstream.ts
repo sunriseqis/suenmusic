@@ -127,15 +127,19 @@ export interface QqSong {
   name: string;
   artist: string;
   album: string;
+  /** 专辑 mid —— 用它拼封面地址（`T002R300x300M000<albumMid>.jpg`） */
+  albumMid?: string;
+  /** 时长（秒）。QQ 返回的是 `interval` */
+  durationSec?: number;
 }
 
-export async function qqSearch(keyword: string, limit = 5): Promise<QqSong[]> {
+export async function qqSearch(keyword: string, limit = 5, page = 1): Promise<QqSong[]> {
   const body = {
     comm: { ct: 19, cv: 1859 },
     req: {
       module: 'music.search.SearchCgiService',
       method: 'DoSearchForQQMusicDesktop',
-      param: { query: keyword, num_per_page: limit, page_num: 1, search_type: 0 },
+      param: { query: keyword, num_per_page: limit, page_num: page, search_type: 0 },
     },
   };
   const r = await httpJson('https://u.y.qq.com/cgi-bin/musicu.fcg', {
@@ -167,6 +171,8 @@ export async function qqSearch(keyword: string, limit = 5): Promise<QqSong[]> {
       name: String(s.name ?? s.title ?? '未知曲目'),
       artist: singers.map((x) => x.name ?? '').filter(Boolean).join('/') || '未知歌手',
       album: String((s.albumname as string) ?? ''),
+      albumMid: String((s.albummid as string) ?? ''),
+      durationSec: Number(s.interval ?? 0) || 0,
     };
   });
 }
@@ -321,4 +327,96 @@ export async function audioCdnProbeAll(url: string): Promise<HttpProbe[]> {
     }
   }
   return out;
+}
+/**
+ * 探测一个音频直链是否可播（只发 `Range: bytes=0-0`，不下载内容）。
+ *
+ * 为什么不复用 `probeStream`：那个用普通 `fetch`，在 WebView 里跨域会被 CORS 拦，
+ * 结果是"链接明明是好的，却被判成失败"。原生环境必须走 CapacitorHttp。
+ *
+ * 必须带 Referer —— 实测部分 CDN 节点（`upos-*`、`cn-sccd-ct`）不带就是 403，
+ * 而宽松节点带了也无害。所以一律带。
+ */
+export async function probeAudio(url: string): Promise<{ ok: boolean; status: number }> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const res = await CapacitorHttp.request({
+        url,
+        method: 'GET',
+        headers: {
+          'User-Agent': UA,
+          Referer: `${BILI_ORIGIN}/`,
+          Range: 'bytes=0-0',
+        },
+        responseType: 'text',
+      });
+      return { ok: res.status === 200 || res.status === 206, status: res.status };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
+
+  try {
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-0' },
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+    void res.body?.cancel();
+    return { ok: res.ok || res.status === 206, status: res.status };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+/**
+ * QQ 音乐歌词。
+ *
+ * 响应是 JSONP（`MusicJsonCallback({...})`），要剥壳。歌词里是 HTML 实体
+ * （`&apos;`、`&#10;` 这类），不解码会原样显示成乱码。
+ *
+ * 无凭据可用 —— 和服务端的歌词兜底走的是同一个上游。
+ */
+export async function qqLyric(songmid: string): Promise<{ lyric: string; trans: string }> {
+  const r = await httpJson('https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg', {
+    headers: {
+      'User-Agent': UA,
+      Referer: 'https://y.qq.com/portal/player.html',
+    },
+    params: {
+      songmid,
+      format: 'json',
+      nobase64: '1',
+      g_tk: '5381',
+      loginUin: '0',
+      hostUin: '0',
+      platform: 'yqq',
+      needNewCode: '0',
+    },
+  });
+  if (r.status !== 200) throw new Error(`歌词 HTTP ${r.status}`);
+
+  const raw = r.text.trim();
+  const start = raw.indexOf('(');
+  const end = raw.lastIndexOf(')');
+  const body = start >= 0 && end > start ? raw.slice(start + 1, end) : raw;
+
+  const json = JSON.parse(body) as { lyric?: string; trans?: string; retcode?: number };
+  if (json.retcode !== undefined && json.retcode !== 0) {
+    throw new Error(`歌词 retcode=${json.retcode}`);
+  }
+  return {
+    lyric: decodeEntities(json.lyric ?? ''),
+    trans: decodeEntities(json.trans ?? ''),
+  };
+}
+
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#(\d+);/g, (_, d: string) => String.fromCharCode(Number(d)))
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
 }
