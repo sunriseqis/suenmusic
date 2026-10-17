@@ -11,6 +11,7 @@
  */
 import { ref } from 'vue';
 import MarkS from '@/components/brand/MarkS.vue';
+import MarkBold from '@/components/brand/MarkBold.vue';
 
 const theme = ref<'dark' | 'paper'>('dark');
 </script>
@@ -71,10 +72,37 @@ const theme = ref<'dark' | 'paper'>('dark');
             </div>
           </div>
 
+          <p class="row-label">实心折角版 · 用户提供的第二版</p>
+          <div class="logo-row">
+            <div class="logo-cell">
+              <MarkBold :size="76" />
+              <span class="cap">76</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="46" />
+              <span class="cap">46</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="26" :bare="true" />
+              <span class="cap">26 · 去底板</span>
+            </div>
+            <div class="logo-cell">
+              <MarkBold :size="20" :bare="true" />
+              <span class="cap">20 · 去底板</span>
+            </div>
+          </div>
+
           <p class="row-label">横版组合</p>
           <div class="logo-row">
             <div class="lockup">
               <MarkS :size="44" :weight="30" />
+              <div class="lockup-text">
+                <span class="wordmark lg">SUENMUSIC</span>
+                <span class="tagline">LOCAL FIRST · PLAYER</span>
+              </div>
+            </div>
+            <div class="lockup">
+              <MarkBold :size="44" />
               <div class="lockup-text">
                 <span class="wordmark lg">SUENMUSIC</span>
                 <span class="tagline">LOCAL FIRST · PLAYER</span>
@@ -85,7 +113,7 @@ const theme = ref<'dark' | 'paper'>('dark');
 
         <p class="note">
           字形不动，只做两件事：外框用比正文暗一档的灰（像蚀刻的边），
-          以及**按尺寸加粗** —— 原始线宽只有视口的 1.5%，26px 时不到 1px，屏幕上等于没有。
+          以及按尺寸加粗 —— 原始线宽只有视口的 1.5%，26px 时不到 1px，屏幕上等于没有。
           加粗是同色描边，不改变任何锚点或曲率。
         </p>
       </section>
