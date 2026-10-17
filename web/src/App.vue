@@ -54,11 +54,19 @@ watch(
   { immediate: true }
 );
 
+/**
+ * 恢复上次的播放会话（队列 + 进度）。
+ *
+ * ⚠️ 这里原来等的是 `session.isLoggedIn` —— 因为那时"播放队列属于账号"。
+ * 直连架构下队列是本机的，没登录也该恢复；继续用登录态当开关的直接后果是
+ * **纯本地用户杀掉进程重开后，播放条和续播位置全没了**（真机实测）。
+ * 改成等 `bootstrapped`：只保证不在初始化完成前抢跑。
+ */
 let restoredThisLoad = false;
 watch(
-  () => session.isLoggedIn,
-  loggedIn => {
-    if (!loggedIn || restoredThisLoad) return;
+  () => session.bootstrapped,
+  ready => {
+    if (!ready || restoredThisLoad) return;
     restoredThisLoad = true;
     void player.restoreSession();
   },

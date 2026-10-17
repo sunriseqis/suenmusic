@@ -67,6 +67,9 @@ function fail(trackId: string, reason: 'no_match' | 'error', message: string): {
   result: ResolveResult;
   url: null;
 } {
+  // 直连解析失败必须留痕：它的失败会表现成"播放不了"，而没有日志时
+  // 无法区分"搜不到 / 上游风控 / 取流失败"——只能在真机上靠猜
+  console.error(`[direct] 解析失败 ${trackId} ${reason}: ${message}`);
   return {
     result: {
       trackId,
@@ -144,7 +147,11 @@ export async function resolveDirect(track: Track): Promise<{
   try {
     candidates = await biliSearch(keyword);
   } catch (e) {
-    return fail(track.id, 'error', e instanceof Error ? e.message : '搜索音源失败');
+    return fail(
+      track.id,
+      'error',
+      `B站搜索失败（${keyword}）：${e instanceof Error ? e.message : String(e)}`
+    );
   }
   if (candidates.length === 0) {
     return fail(track.id, 'no_match', '没有搜到可用的音源');
@@ -161,6 +168,7 @@ export async function resolveDirect(track: Track): Promise<{
 
   try {
     const audio = await biliResolveAudio(best.c.bvid);
+    console.log(`[direct] 解析成功 ${track.id} ← ${best.c.bvid} bw=${audio.bandwidth}`);
     cache.set(track.id, {
       url: audio.url,
       bvid: best.c.bvid,

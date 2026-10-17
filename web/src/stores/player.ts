@@ -488,14 +488,49 @@ export const usePlayerStore = defineStore('player', () => {
      * 锁屏时 timeupdate 依然会触发（媒体事件不受 JS 定时器节流影响）。
      */
     let lastPosReport = 0;
+    /** 本地进度落库的节流。3 秒足够"杀进程后还能接上"，而写一条记录很便宜 */
+    let lastLocalPosSave = 0;
     el.addEventListener('timeupdate', () => {
       positionMs.value = Math.round(el.currentTime * 1000);
+
+      /**
+       * **本地进度每 3 秒落一次**，不等 15 秒的服务端上报周期。
+       *
+       * 真机反馈："播了一会儿杀掉重开，续播没了"。原因是进度只随 15 秒的
+       * 上报周期保存，杀掉得太早（或在两次上报之间）就什么都没留下。
+       * 本地写是 IndexedDB 单条 put，代价可以忽略。
+       */
+      const cur = currentTrack.value;
+      if (cur) {
+        const t = Date.now();
+        if (t - lastLocalPosSave >= 3_000) {
+          lastLocalPosSave = t;
+          void saveProgress(cur.id, positionMs.value);
+        }
+      }
+
       if (!playing.value) return;
       const now = Date.now();
       if (now - lastPosReport < 1000) return;
       lastPosReport = now;
       syncMediaSessionPlaybackState('playing', positionMs.value, durationMs.value);
     });
+
+    /**
+     * 切到后台 / 页面被回收前，把会话与进度立刻落一次。
+     *
+     * 安卓从最近任务划掉不保证有回调，但 `visibilitychange` 通常在冻结前会到 ——
+     * 有它比只靠 15 秒定时器强。这里不 await，尽力而为。
+     */
+    const flushLocal = (): void => {
+      if (document.visibilityState !== 'hidden') return;
+      saveSession();
+      const cur = currentTrack.value;
+      if (cur) void saveProgress(cur.id, positionMs.value);
+      void reportProgress(true);
+    };
+    document.addEventListener('visibilitychange', flushLocal);
+    window.addEventListener('pagehide', flushLocal);
 
     el.addEventListener('durationchange', () => {
       // 浏览器自己解析出的时长。仅在"比已知值更可信"时采用 ——
@@ -775,6 +810,25 @@ export const usePlayerStore = defineStore('player', () => {
        */
       if (isNativeAudio) {
         await SuenAudio.setDirectUrl({ id: track.id, url: direct ? url : '' }).catch(() => {});
+
+        /**
+         * 原生队列的 URI 是在 `setQueue` 那一刻组装的（`onAddMediaItems`），
+         * 而直连地址要等解析完才有 —— 所以入队时那一条的 URI 是空串，
+         * ExoPlayer 一 prepare 就报 "Source error"。
+         *
+         * 必须让原生**重建这一条**（`reloadCurrent` 会重新 `streamUrlFor(id)`）。
+         * 用 autoplay:false：出声仍交给下面统一的 `el.play()`，避免两处抢着播。
+         */
+        if (direct) {
+          const qIndex = queue.value.findIndex(t => t.id === track.id);
+          if (qIndex >= 0) {
+            await SuenAudio.reloadCurrent({
+              index: qIndex,
+              positionMs: pendingSeekMs ?? positionMs.value,
+              autoplay: false,
+            }).catch(() => {});
+          }
+        }
       }
 
       const probe = await probeStream(url, direct);
@@ -1405,6 +1459,22 @@ export const usePlayerStore = defineStore('player', () => {
       autoplay: false,
       startPositionMs: snap.positionMs,
     });
+
+    /**
+     * 恢复后**必须把进度写回 UI 状态**。
+     *
+     * 原生路径下 `pendingSeekMs` 只交给了原生队列，`applyPendingSeek` 依赖
+     * `loadedmetadata` 之类的媒体事件才会把 `positionMs` 同步回来 —— 而恢复时
+     * `autoplay:false`，这些事件不一定触发。真机表现：原生已经在 2:14，播放页
+     * 却显示 0:00 和"已停止"，用户会认为"续播又丢了"。
+     */
+    if (ok) {
+      positionMs.value = Math.max(0, snap.positionMs);
+      if (!durationMs.value && currentTrack.value?.dt) {
+        durationMs.value = currentTrack.value.dt;
+      }
+    }
+
     if (!ok) {
       // 恢复失败多半是上游限流。用户并没有主动要求播放任何东西，
       // 不该在刚打开页面时就甩给他一条报错 —— 安静地撤掉播放条即可。

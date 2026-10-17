@@ -129,12 +129,24 @@ async function run() {
     }
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') return;
+    // 带上原始原因：直连模式下搜索走 QQ，报"搜索失败"而不给原因会让
+    // "上游风控 / 网络抖动 / 代码 bug"三种情况无法区分
+    const reason = e instanceof Error ? e.message : String(e);
+    // QQ 风控（2001）是"等一会就好"，不是搜索坏了 —— 文案要区分开，
+    // 否则用户会以为 app 出故障
+    if (reason.includes('2001')) {
+      errorText.value = 'QQ 音乐检索被限流，约几秒到一分钟恢复，请稍后重试';
+      result.value = null;
+      searched.value = true;
+      loading.value = false;
+      return;
+    }
     errorText.value =
       e instanceof ApiError
         ? e.isNetworkError
           ? '连不上服务端，请到设置页检查基地址'
           : e.message
-        : '搜索失败';
+        : `搜索失败：${reason}`;
     result.value = null;
     searched.value = true;
   } finally {

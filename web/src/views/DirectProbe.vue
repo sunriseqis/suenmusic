@@ -11,7 +11,7 @@
  * 每一项独立跑、独立显示结论，失败不会中断后面的项 —— 因为要的正是
  * "哪一步不行"的定位，而不是一个总的成败。
  */
-import { ref, computed } from 'vue';
+import { ref, computed, reactive } from 'vue';
 import {
   qqSearch,
   biliSearch,
@@ -25,6 +25,7 @@ import {
   type BiliCandidate,
 } from '@/api/direct/upstream';
 import { saveOffline, loadOffline } from '@/offline/snapshot';
+import { listHistory, recordPlay } from '@/offline/localdb';
 import { SuenAudio, isNativeAudio } from '@/native/audio';
 
 interface Item {
@@ -40,6 +41,10 @@ const items = ref<Item[]>([
   { name: '③ 解析音频地址', state: 'idle', detail: '' },
   { name: '③ 音频 CDN 是否要 Referer', state: 'idle', detail: '' },
   { name: '③ 原生播放器播放直连地址', state: 'idle', detail: '' },
+  // 这一项专门复现"红心不落库"的那个坑：IndexedDB 的结构化克隆**不能克隆
+  // Vue 的响应式 Proxy**，直接 put 会抛 DataCloneError。旧测试只用了纯对象，
+  // 所以一直是绿的 —— 测试对象必须和真实调用一样是 reactive 的。
+  { name: '② 本地数据层（写入 reactive 对象）', state: 'idle', detail: '' },
 ]);
 
 function set(i: number, state: Item['state'], detail: string): void {
@@ -168,6 +173,43 @@ async function run(): Promise<void> {
     set(6, 'ok', '已交给原生播放器（应听到声音）');
   } catch (e) {
     set(6, 'fail', e instanceof Error ? e.message : String(e));
+  }
+
+
+  // ②-2 本地数据层：用 reactive 对象写入（真实调用就是这个形状）
+  try {
+    set(7, 'run', '');
+    const stamp = Date.now();
+    const proxy = reactive({
+      id: '__probe__',
+      mid: 'probe',
+      name: '本地数据层测试',
+      ar: [{ id: 'a', mid: '', name: '测试歌手', picUrl: '' }],
+      artists: [],
+      al: { id: '', mid: '', name: '测试专辑', picUrl: '' },
+      album: { id: '', name: '测试专辑', picUrl: '' },
+      dt: 1000,
+      duration: 1,
+      playable: true,
+      matched: false,
+      privilege: { playMaxbr: 0, maxbr: 0, freeTrialPrivilege: { resConsumable: false } },
+    });
+    await recordPlay({
+      trackId: '__probe__',
+      track: proxy as never,
+      playedAt: stamp,
+      playedMs: 1234,
+      completed: false,
+    });
+    const rows = await listHistory(50);
+    const hit = rows.find(r => r.trackId === '__probe__');
+    if (hit) {
+      set(7, 'ok', `写入并读回成功（历史共 ${rows.length} 条）`);
+    } else {
+      set(7, 'fail', '写入后读不到 —— 结构化克隆可能被拒（DataCloneError）');
+    }
+  } catch (e) {
+    set(7, 'fail', e instanceof Error ? e.message : String(e));
   }
 
   running.value = false;

@@ -133,7 +133,37 @@ export interface QqSong {
   durationSec?: number;
 }
 
+/**
+ * QQ 搜索（带一次自动重试）。
+ *
+ * 真机反馈：**首次搜索报错，再点一次就正常**。冷启动/切网后第一个出站请求
+ * 失败（DNS/TLS 握手、WebView 刚起来时的网络栈）是移动端的常见现象，
+ * 一次 600ms 后的静默重试能把这类抖动挡在用户之外。
+ *
+ * `code=2001` 也重试 —— **真机实测它往往几秒内就恢复**（第一次 2001、
+ * 紧接着再打就 200 且有结果）。之前不重试是照搬服务端的"冷却"语义，
+ * 但服务端那是为了防止整站共用出口被打，客户端单用户不需要那么保守。
+ * 只重试一次：真限流时多打两次也无济于事，反而拖长恢复。
+ */
 export async function qqSearch(keyword: string, limit = 5, page = 1): Promise<QqSong[]> {
+  // 真机上 2001 的恢复时间实测是**十几秒到一分钟**：700ms 的重试太短，
+  // 会被同一段限流窗口吃掉。1200/2400 两档覆盖得更实，且总等待不超过 4 秒。
+  const delays = [1200, 2400];
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
+    try {
+      return await qqSearchOnce(keyword, limit, page);
+    } catch (e) {
+      lastErr = e;
+      if (attempt < delays.length) {
+        await new Promise(r => setTimeout(r, delays[attempt]));
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
+
+async function qqSearchOnce(keyword: string, limit = 5, page = 1): Promise<QqSong[]> {
   const body = {
     comm: { ct: 19, cv: 1859 },
     req: {
@@ -397,9 +427,19 @@ export async function qqLyric(songmid: string): Promise<{ lyric: string; trans: 
   if (r.status !== 200) throw new Error(`歌词 HTTP ${r.status}`);
 
   const raw = r.text.trim();
-  const start = raw.indexOf('(');
-  const end = raw.lastIndexOf(')');
-  const body = start >= 0 && end > start ? raw.slice(start + 1, end) : raw;
+
+  /**
+   * ⚠️ 这个接口**有时带 JSONP 外壳、有时不带**（同一个端点，真机返回的就是纯 JSON）。
+   * 不能无条件找括号 —— 歌词正文里本来就有括号（`[00:00.00]晴天 - 周杰伦 (Jay Chou)`），
+   * `indexOf('(')` 会命中歌词里的那个，切出一段乱码后 JSON.parse 必然失败。
+   * 判断依据只能是"首个非空字符是不是 `{`"。
+   */
+  let body = raw;
+  if (!raw.startsWith('{') && !raw.startsWith('[')) {
+    const start = raw.indexOf('(');
+    const end = raw.lastIndexOf(')');
+    if (start >= 0 && end > start) body = raw.slice(start + 1, end);
+  }
 
   const json = JSON.parse(body) as { lyric?: string; trans?: string; retcode?: number };
   if (json.retcode !== undefined && json.retcode !== 0) {

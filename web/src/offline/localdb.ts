@@ -122,6 +122,29 @@ function lsWrite<T>(store: StoreName, rows: T[]): void {
   }
 }
 
+/**
+ * 转成"能被结构化克隆"的纯对象。
+ *
+ * ⚠️ **这是必须的，不是保险**：IndexedDB 用结构化克隆算法写值，而 Vue 的响应式
+ * 对象是 **Proxy** —— 直接 `put()` 会抛 `DataCloneError: #<Object> could not be cloned`。
+ * 而调用方传进来的 `props.track` / `player.currentTrack` 全都是 Proxy。
+ *
+ * 症状极具误导性：界面上的红心变了（内存生效），但**一条都没落库**，
+ * 杀进程重开就全没了；而且异常被静默吞掉，控制台也不一定看得到。
+ */
+function toPlain<T>(value: T): T {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return value;
+  }
+}
+
+function logFailure(action: string, store: StoreName, err: unknown): void {
+  // 不打断主流程，但不能完全无声 —— 否则"没存上"会被误判成"存了但读不到"
+  console.error(`[localdb] ${action} ${store} 失败:`, err);
+}
+
 function keyOf(store: StoreName, row: unknown): string {
   switch (store) {
     case 'favorites':
@@ -174,24 +197,25 @@ export async function ldbGet<T>(store: StoreName, key: string): Promise<T | null
 
 /** 按主键写入（存在即覆盖）。主键由 `keyOf` 决定，调用方不用给 */
 export async function ldbPut(store: StoreName, row: unknown): Promise<void> {
+  const plain = toPlain(row);
   const db = await openDb();
   if (!db) {
-    const key = keyOf(store, row);
+    const key = keyOf(store, plain);
     const rows = lsRead<unknown>(store).filter(r => keyOf(store, r) !== key);
-    rows.push(row);
+    rows.push(plain);
     lsWrite(store, rows);
     return;
   }
   try {
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(store, 'readwrite');
-      tx.objectStore(store).put(row);
+      tx.objectStore(store).put(plain);
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
     });
-  } catch {
-    /* 写失败：本地存储不可用时也不抛，调用方按"尽力而为"处理 */
+  } catch (err) {
+    logFailure('put', store, err);
   }
 }
 
@@ -309,18 +333,18 @@ export async function recordPlay(rec: Omit<LocalPlayRecord, 'seq'>): Promise<voi
     const db = await openDb();
     if (!db) {
       const nextSeq = rows.reduce((m, r) => Math.max(m, r.seq ?? 0), 0) + 1;
-      const next = [...rows, { ...rec, seq: nextSeq }];
+      const next = [...rows, toPlain({ ...rec, seq: nextSeq })];
       lsWrite('history', next);
     } else {
       try {
         await new Promise<void>((resolve, reject) => {
           const tx = db.transaction('history', 'readwrite');
-          tx.objectStore('history').add(rec);
+          tx.objectStore('history').add(toPlain(rec));
           tx.oncomplete = () => resolve();
           tx.onerror = () => reject(tx.error);
         });
-      } catch {
-        /* 写失败就算了 */
+      } catch (err) {
+        logFailure('add', 'history', err);
       }
     }
   }
