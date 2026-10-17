@@ -28,10 +28,27 @@ const config: CapacitorConfig = {
   server: {
     // ⚠️ 安卓侧的 scheme 配置键是 server.androidScheme（android.scheme 是 iOS 的）。
     // 页面源用 http：API 服务器是明文 http（局域网/Tailscale），若页面是
-    // https://localhost，所有 fetch 都会被当混合内容硬拦（allowMixedContent
-    // 的兼容模式只放行媒体，拦 fetch——实测踩过）。同协议后此问题消失。
+    // https://localhost，所有 fetch 都会被当混合内容硬拦
+    // （allowMixedContent 的兼容模式只放行媒体，拦 fetch——实测踩过）。
+    // 同协议后此问题消失。
     // ⚠️ 改 scheme 会清空 WebView 的 localStorage（origin 变了）。
     androidScheme: 'http',
+  },
+  plugins: {
+    /**
+     * 让 fetch / XMLHttpRequest 走**原生 HTTP**，而不是 WebView 的网络栈。
+     *
+     * 为什么需要：QQ音乐、B站这些上游**不回 Access-Control-Allow-Origin**，
+     * 浏览器/WebView 里的跨域 fetch 会被 CORS 直接拦掉（实测：QQ 返回 200
+     * 但没有任何 CORS 头；B站对非 bilibili 的 Origin 直接 403）。
+     * 走原生后没有同源概念，且可以自定义 Referer 这类浏览器禁止脚本设置的头。
+     *
+     * 注意：只影响"用 fetch 取数据"。音频字节由原生播放器取（见 SuenAudioCache），
+     * 那条路本来就不经过这里。
+     */
+    CapacitorHttp: {
+      enabled: true,
+    },
   },
   appId: 'com.suenmusic.app',
   appName: 'SuenMusic',

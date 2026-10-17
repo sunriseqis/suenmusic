@@ -104,6 +104,17 @@ public final class SuenAudioCache {
           .setConnectTimeoutMs(8_000)
           .setReadTimeoutMs(15_000);
 
+      // 直连模式下播的是 B 站 CDN，它会校验 Referer —— 不带就是 403，一个字节都拿不到
+      // （实测：带 Referer 206 / 不带 403）。经服务端代理时这一层不参与，所以
+      // 默认带上无害；只有 bilibili/bilivideo 域名才需要，网易云反而要求不带。
+      java.util.Map<String, String> defaultHeaders = new java.util.HashMap<>();
+      defaultHeaders.put("Referer", "https://www.bilibili.com");
+      try {
+        httpFactory.setDefaultRequestProperties(defaultHeaders);
+      } catch (Exception ignored) {
+        /* 老版本 media3 无此方法时退化为不带默认头，不影响服务端代理路径 */
+      }
+
       SimpleCache c = get(ctx);
       if (c == null) {
         factory = httpFactory;

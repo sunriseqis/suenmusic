@@ -66,9 +66,18 @@ export interface NativeTrack {
   album?: string;
   coverUrl?: string;
   durationMs?: number;
+  /**
+   * 直连地址（不配服务端时用）。
+   *
+   * 给了它就绕开 `<baseUrl>/api/stream/<id>`，让原生播放器直接去上游取流。
+   * B站 CDN 校验 Referer，这一层由原生数据源补上（见 SuenAudioCache）。
+   * 原生侧只要**整队**都有 directUrl，就不再要求 baseUrl/token。
+   */
+  directUrl?: string;
 }
 
 export interface NativeQueue {
+  /** 直连模式下可为空串（原生侧会检查：整队都有 directUrl 时不要求它） */
   baseUrl: string;
   token: string;
   items: NativeTrack[];

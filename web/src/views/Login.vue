@@ -226,6 +226,16 @@ async function submit() {
       >
         本服务已关闭注册。需要新账号请联系管理员创建。
       </p>
+
+      <!--
+        诊断入口。
+        为什么放在登录页：路由守卫会把未登录用户一律赶到 /login，
+        而这个诊断页的用途正是"没有服务端、也没登录"时能不能用 ——
+        不给入口就等于打不开，自证不了。
+      -->
+      <p class="probe-entry">
+        <router-link to="/probe">无后端直连诊断 →</router-link>
+      </p>
     </div>
   </div>
 </template>
@@ -322,5 +332,17 @@ async function submit() {
   font-size: var(--fs-xs);
   color: var(--t2);
   text-align: center;
+}
+
+/* 诊断入口：不抢视觉，但摸得到 */
+.probe-entry {
+  margin-top: 10px;
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+.probe-entry a {
+  color: var(--t2);
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 </style>

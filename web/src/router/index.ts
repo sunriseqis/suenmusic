@@ -47,6 +47,18 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Settings.vue'),
   },
   {
+    /**
+     * 无后端直连诊断页。
+     *
+     * 必须 meta.public —— 它的整个用途就是"没有服务端、也没登录"时能不能用。
+     * 走登录守卫的话它永远打不开，等于自证不了。
+     */
+    path: '/probe',
+    name: 'probe',
+    component: () => import('@/views/DirectProbe.vue'),
+    meta: { public: true },
+  },
+  {
     // 兜底：不认识的地址回首页，而不是白屏
     path: '/:pathMatch(.*)*',
     redirect: '/',

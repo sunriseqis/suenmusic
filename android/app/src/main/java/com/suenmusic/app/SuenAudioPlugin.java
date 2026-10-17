@@ -301,11 +301,24 @@ public class SuenAudioPlugin extends Plugin {
     // tailOnly=true：items 只覆盖 [startIndex, 队尾) 这一段（重排未播部分）。
     // 正在播的那首不在替换范围内 → 不重新 prepare → 切模式不再"卡一下"。
     final boolean tailOnly = Boolean.TRUE.equals(call.getBoolean("tailOnly", false));
-    if (baseUrl == null || token == null || items == null) {
+    // 直连模式：条目自带 directUrl 时不需要服务端地址与流会话令牌。
+    // 先扫一遍再决定要不要因为缺 baseUrl/token 而拒绝。
+    boolean anyDirect = false;
+    if (items != null) {
+      for (int i = 0; i < items.length(); i++) {
+        try {
+          String du = items.getJSONObject(i).optString("directUrl", "");
+          if (du != null && !du.isEmpty()) { anyDirect = true; break; }
+        } catch (Exception ignored) {}
+      }
+    }
+    if (items == null || (!anyDirect && (baseUrl == null || token == null))) {
       call.reject("缺少 baseUrl / token / items");
       return;
     }
-    SuenAudio.setStreamSession(baseUrl, token);
+    if (baseUrl != null && token != null) {
+      SuenAudio.setStreamSession(baseUrl, token);
+    }
 
     List<MediaItem> mediaItems = new ArrayList<>();
     try {
@@ -325,6 +338,11 @@ public class SuenAudioPlugin extends Plugin {
           try {
             mb.setArtworkUri(Uri.parse(cover.trim()));
           } catch (Exception ignored) {}
+        }
+        // 直连地址：登记后 streamUrlFor() 会优先用它，不再拼 /api/stream/<id>
+        String directUrl = o.optString("directUrl", "");
+        if (directUrl != null && !directUrl.trim().isEmpty()) {
+          SuenAudio.setDirectUrl(id, directUrl.trim());
         }
         mediaItems.add(new MediaItem.Builder()
             .setMediaId(id)
