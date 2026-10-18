@@ -2,12 +2,15 @@
 /**
  * 设置。
  *
- * 无服务端：单页（无 tab）—— 蓝牙歌词 / 缓存 / 黑名单 / 歌单导入 / 去重 /
- *           数据备份 / 应用更新 / 主题 / 登入
+ * 无服务端：单页（无 tab）
+ *   播放   蓝牙歌词 / 缓存
+ *   资料库 黑名单 / 歌单导入 / 去重 / 数据备份
+ *   设备   应用更新 / 主题
+ *   账号   登入
  * 有服务端：本机 / 智能 / 高级
  *
- * 原则：服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
- * 界面不写说明文案；每项只有名称与必要状态。
+ * 一次性任务（登入、黑名单、导入、去重、备份、缓存、主题）走底部弹层。
+ * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
 import { computed, onMounted, ref } from 'vue';
 import NeuButton from '@/components/neu/NeuButton.vue';
@@ -17,6 +20,7 @@ import NeuSwitch from '@/components/neu/NeuSwitch.vue';
 import NeuTabs from '@/components/neu/NeuTabs.vue';
 import OfflineCachePanel from '@/components/OfflineCachePanel.vue';
 import ServerListEditor from '@/components/ServerListEditor.vue';
+import Sheet from '@/components/Sheet.vue';
 import { isAndroid } from '@/native/update.ts';
 import {
   isBluetoothLyricsEnabled,
@@ -43,6 +47,9 @@ const favorites = useFavoritesStore();
 const dislikes = useDislikesStore();
 const update = useUpdateStore();
 
+type SheetName = 'login' | 'dislikes' | 'import' | 'dedupe' | 'backup' | 'theme' | 'cache';
+const sheet = ref<SheetName | null>(null);
+
 // ---------------------------------------------------------------- 主题
 const THEME_TABS = [
   { value: 'system', label: '跟随系统' },
@@ -53,6 +60,9 @@ const themeValue = computed({
   get: () => ui.themeMode,
   set: v => ui.setTheme(v as 'system' | 'light' | 'dark'),
 });
+const themeLabel = computed(
+  () => THEME_TABS.find(t => t.value === ui.themeMode)?.label ?? '跟随系统'
+);
 
 // ---------------------------------------------------------------- 蓝牙歌词
 const btLyrics = ref(isBluetoothLyricsEnabled());
@@ -127,36 +137,8 @@ async function runDedup(): Promise<void> {
 // ---------------------------------------------------------------- 备份
 const backupBusy = ref(false);
 const backupMsg = ref('');
-const webdav = ref(loadWebdav());
-async function uploadWebdav(): Promise<void> {
-  if (backupBusy.value) return;
-  backupBusy.value = true;
-  try {
-    saveWebdav(webdav.value);
-    await webdavPut(webdav.value, JSON.stringify(await buildBackup()));
-    backupMsg.value = '已上传';
-  } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '上传失败';
-  } finally {
-    backupBusy.value = false;
-  }
-}
-async function downloadWebdav(): Promise<void> {
-  if (backupBusy.value) return;
-  backupBusy.value = true;
-  try {
-    saveWebdav(webdav.value);
-    const res = await applyBackup(await webdavGet(webdav.value));
-    backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
-    await favorites.ensureLoaded();
-    await dislikes.ensureLoaded();
-  } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '下载失败';
-  } finally {
-    backupBusy.value = false;
-  }
-}
 const fileInput = ref<HTMLInputElement | null>(null);
+const webdav = ref(loadWebdav());
 async function exportBackup(): Promise<void> {
   if (backupBusy.value) return;
   backupBusy.value = true;
@@ -181,10 +163,40 @@ async function onBackupFile(ev: Event): Promise<void> {
   try {
     const res = await applyBackup(await file.text());
     backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
+    webdav.value = loadWebdav();
     await favorites.ensureLoaded();
     await dislikes.ensureLoaded();
   } catch (e) {
     backupMsg.value = e instanceof Error ? e.message : '导入失败';
+  } finally {
+    backupBusy.value = false;
+  }
+}
+async function uploadWebdav(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    saveWebdav(webdav.value);
+    await webdavPut(webdav.value, JSON.stringify(await buildBackup()));
+    backupMsg.value = '已上传';
+  } catch (e) {
+    backupMsg.value = e instanceof Error ? e.message : '上传失败';
+  } finally {
+    backupBusy.value = false;
+  }
+}
+async function downloadWebdav(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    saveWebdav(webdav.value);
+    const res = await applyBackup(await webdavGet(webdav.value));
+    backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
+    webdav.value = loadWebdav();
+    await favorites.ensureLoaded();
+    await dislikes.ensureLoaded();
+  } catch (e) {
+    backupMsg.value = e instanceof Error ? e.message : '下载失败';
   } finally {
     backupBusy.value = false;
   }
@@ -217,6 +229,8 @@ async function doLogin(): Promise<void> {
     if (addr !== ui.baseUrl) ui.setBaseUrl(addr);
     await session.login(loginUser.value, loginPass.value);
     loginPass.value = '';
+    sheet.value = null;
+    ui.ok('已登入');
     await loadServerData();
   } catch (e) {
     loginErr.value = e instanceof Error ? e.message : '登录失败';
@@ -226,6 +240,7 @@ async function doLogin(): Promise<void> {
 }
 async function doLogout(): Promise<void> {
   await session.logout();
+  activeTab.value = 'local';
 }
 
 // ---------------------------------------------------------------- 智能
@@ -339,10 +354,10 @@ onMounted(() => {
 
     <!-- ==================== 本机 ==================== -->
     <template v-if="!serverConfigured || activeTab === 'local'">
-      <section v-if="isAndroid" class="sec">
+      <section class="sec">
         <h2 class="label">播放</h2>
         <div class="panel">
-          <div class="row">
+          <div v-if="isAndroid" class="row">
             <span class="row-name">蓝牙歌词</span>
             <NeuSwitch
               :model-value="btLyrics"
@@ -350,112 +365,47 @@ onMounted(() => {
               @update:model-value="toggleBtLyrics"
             />
           </div>
+          <button v-if="isNativeAudio" type="button" class="row row-btn" @click="sheet = 'cache'">
+            <span class="row-name">缓存</span>
+            <span class="row-val">管理</span>
+          </button>
         </div>
       </section>
 
-      <section v-if="isNativeAudio" class="sec">
-        <h2 class="label">缓存</h2>
-        <OfflineCachePanel />
-      </section>
-
       <section class="sec">
-        <h2 class="label">黑名单</h2>
+        <h2 class="label">资料库</h2>
         <div class="panel">
-          <div class="seg">
-            <button
-              type="button"
-              class="seg-tab"
-              :class="{ on: prefTab === 'track' }"
-              @click="prefTab = 'track'"
-            >
-              歌曲 {{ dislikes.trackItems.length }}
-            </button>
-            <button
-              type="button"
-              class="seg-tab"
-              :class="{ on: prefTab === 'artist' }"
-              @click="prefTab = 'artist'"
-            >
-              歌手 {{ dislikes.artistItems.length }}
-            </button>
-          </div>
-          <div v-for="d in dislikeRows" :key="d.targetId" class="row">
-            <span class="row-name ellipsis">{{ d.name || d.targetId }}</span>
-            <NeuButton size="sm" variant="ghost" @click="undoDislike(prefTab, d.targetId)">
-              恢复
-            </NeuButton>
-          </div>
-          <div v-if="dislikeRows.length === 0" class="row empty">没有记录</div>
-        </div>
-      </section>
-
-      <section class="sec">
-        <h2 class="label">歌单导入</h2>
-        <div class="panel pad">
-          <NeuInput v-model="playlistLink" placeholder="QQ 歌单链接或 id" />
-          <div class="actions">
-            <NeuButton variant="primary" :loading="importing" @click="importPlaylist">导入</NeuButton>
-            <span v-if="importMsg" class="hint">{{ importMsg }}</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="sec">
-        <h2 class="label">去重</h2>
-        <div class="panel pad">
-          <div class="actions">
-            <NeuButton :loading="dupBusy" @click="previewDup">检查重复</NeuButton>
-            <NeuButton
-              v-if="dupGroups.length > 0"
-              variant="primary"
-              :loading="dupBusy"
-              @click="runDedup"
-            >
-              清理 {{ dupGroups.reduce((n, g) => n + g.removeIds.length, 0) }} 首
-            </NeuButton>
-            <span v-if="dupMsg" class="hint">{{ dupMsg }}</span>
-          </div>
-        </div>
-      </section>
-
-      <section class="sec">
-        <h2 class="label">数据备份</h2>
-        <div class="panel pad">
-          <input ref="fileInput" type="file" accept=".sm,.json" hidden @change="onBackupFile" />
-          <div class="actions">
-            <NeuButton :loading="backupBusy" @click="exportBackup">导出</NeuButton>
-            <NeuButton :loading="backupBusy" @click="pickBackup">导入</NeuButton>
-            <span v-if="backupMsg" class="hint">{{ backupMsg }}</span>
-          </div>
-          <div class="divider" />
-          <div class="field">
-            <span class="field-name">WebDAV</span>
-            <NeuInput v-model="webdav.url" placeholder="https://dav.example.com/music" />
-          </div>
-          <div class="field">
-            <span class="field-name">账号</span>
-            <NeuInput v-model="webdav.user" autocomplete="username" />
-          </div>
-          <div class="field">
-            <span class="field-name">口令</span>
-            <NeuInput v-model="webdav.pass" type="password" autocomplete="current-password" />
-          </div>
-          <div class="actions">
-            <NeuButton :loading="backupBusy" @click="uploadWebdav">上传</NeuButton>
-            <NeuButton :loading="backupBusy" @click="downloadWebdav">下载</NeuButton>
-          </div>
-        </div>
-      </section>
-
-      <section v-if="isNativeAudio" class="sec">
-        <h2 class="label">应用更新</h2>
-        <div class="panel">
-          <div class="row">
-            <span class="row-name">
-              {{ update.appVersion ? `v${update.appVersion.versionName}` : '—' }}
-              <template v-if="update.latest">· 最新 v{{ update.latest.versionName }}</template>
+          <button type="button" class="row row-btn" @click="sheet = 'dislikes'">
+            <span class="row-name">黑名单</span>
+            <span class="row-val">
+              歌曲 {{ dislikes.trackItems.length }} · 歌手 {{ dislikes.artistItems.length }}
             </span>
-            <div class="actions">
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'import'">
+            <span class="row-name">歌单导入</span>
+            <span class="row-val">QQ 歌单</span>
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'dedupe'">
+            <span class="row-name">去重</span>
+            <span class="row-val">检查</span>
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'backup'">
+            <span class="row-name">数据备份</span>
+            <span class="row-val">文件 · WebDAV</span>
+          </button>
+        </div>
+      </section>
+
+      <section class="sec">
+        <h2 class="label">设备</h2>
+        <div class="panel">
+          <div v-if="isNativeAudio" class="row">
+            <span class="row-name">应用更新</span>
+            <div class="row-actions">
+              <span class="row-val">
+                {{ update.appVersion ? `v${update.appVersion.versionName}` : '—' }}
+                <template v-if="update.latest">· 最新 v{{ update.latest.versionName }}</template>
+              </span>
               <NeuButton size="sm" :loading="update.checking" @click="update.check(false)">
                 检查
               </NeuButton>
@@ -470,41 +420,26 @@ onMounted(() => {
               </NeuButton>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="sec">
-        <h2 class="label">主题</h2>
-        <div class="panel">
-          <div class="row">
-            <span class="row-name">外观</span>
-            <NeuTabs v-model="themeValue" :items="THEME_TABS" />
-          </div>
+          <button type="button" class="row row-btn" @click="sheet = 'theme'">
+            <span class="row-name">主题</span>
+            <span class="row-val">{{ themeLabel }}</span>
+          </button>
         </div>
       </section>
 
       <section class="sec">
         <h2 class="label">账号</h2>
-        <div v-if="!session.isLoggedIn" class="panel pad">
-          <div class="field">
-            <span class="field-name">服务端</span>
-            <NeuInput v-model="loginAddr" placeholder="http://192.168.1.10:3210" />
-          </div>
-          <div class="field">
-            <span class="field-name">账号</span>
-            <NeuInput v-model="loginUser" autocomplete="username" />
-          </div>
-          <div class="field">
-            <span class="field-name">口令</span>
-            <NeuInput v-model="loginPass" type="password" autocomplete="current-password" />
-          </div>
-          <div class="actions">
-            <NeuButton variant="primary" :loading="loginBusy" @click="doLogin">登入</NeuButton>
-            <span v-if="loginErr" class="hint err">{{ loginErr }}</span>
-          </div>
-        </div>
-        <div v-else class="panel">
-          <div class="row">
+        <div class="panel">
+          <button
+            v-if="!session.isLoggedIn"
+            type="button"
+            class="row row-btn"
+            @click="sheet = 'login'"
+          >
+            <span class="row-name">登入</span>
+            <span class="row-val">未登录</span>
+          </button>
+          <div v-else class="row">
             <span class="row-name">{{ session.displayName }}</span>
             <NeuButton size="sm" variant="danger" @click="doLogout">登出</NeuButton>
           </div>
@@ -518,7 +453,7 @@ onMounted(() => {
         <h2 class="label">画像</h2>
         <div class="panel">
           <button type="button" class="row row-btn" @click="personaOpen = !personaOpen">
-            <span class="row-name">{{ persona?.summary ? '已生成' : '尚未生成' }}</span>
+            <span class="row-name">{{ persona?.summary ? '音乐画像' : '尚未生成' }}</span>
             <NeuIcon :name="personaOpen ? 'chevron-up' : 'chevron-down'" :size="16" />
           </button>
           <div v-if="personaOpen" class="pad">
@@ -595,11 +530,11 @@ onMounted(() => {
         <div class="panel">
           <div class="row">
             <span class="row-name">B 站</span>
-            <span class="hint">{{ biliOn ? biliName || '已授权' : '未授权' }}</span>
+            <span class="row-val">{{ biliOn ? biliName || '已授权' : '未授权' }}</span>
           </div>
           <div class="row">
             <span class="row-name">网易云</span>
-            <span class="hint">{{ neteaseOn ? neteaseName || '已授权' : '未授权' }}</span>
+            <span class="row-val">{{ neteaseOn ? neteaseName || '已授权' : '未授权' }}</span>
           </div>
         </div>
       </section>
@@ -609,19 +544,133 @@ onMounted(() => {
         <div class="panel">
           <div class="row">
             <span class="row-name">注册</span>
-            <span class="hint">{{ session.authConfig?.registrationOpen ? '开放' : '关闭' }}</span>
+            <span class="row-val">{{ session.authConfig?.registrationOpen ? '开放' : '关闭' }}</span>
           </div>
           <div class="row">
             <span class="row-name">已有账号</span>
-            <span class="hint">{{ session.authConfig?.hasUsers ? '是' : '否' }}</span>
+            <span class="row-val">{{ session.authConfig?.hasUsers ? '是' : '否' }}</span>
           </div>
           <div class="row">
             <span class="row-name">口令最短</span>
-            <span class="hint">{{ session.authConfig?.passwordMinLength ?? '—' }}</span>
+            <span class="row-val">{{ session.authConfig?.passwordMinLength ?? '—' }}</span>
           </div>
         </div>
       </section>
     </template>
+
+    <!-- ==================== 弹层 ==================== -->
+    <Sheet :open="sheet === 'cache'" title="缓存" @close="sheet = null">
+      <OfflineCachePanel />
+    </Sheet>
+
+    <Sheet :open="sheet === 'dislikes'" title="黑名单" @close="sheet = null">
+      <div class="seg">
+        <button
+          type="button"
+          class="seg-tab"
+          :class="{ on: prefTab === 'track' }"
+          @click="prefTab = 'track'"
+        >
+          歌曲 {{ dislikes.trackItems.length }}
+        </button>
+        <button
+          type="button"
+          class="seg-tab"
+          :class="{ on: prefTab === 'artist' }"
+          @click="prefTab = 'artist'"
+        >
+          歌手 {{ dislikes.artistItems.length }}
+        </button>
+      </div>
+      <div class="sheet-list">
+        <div v-for="d in dislikeRows" :key="d.targetId" class="row">
+          <span class="row-name ellipsis">{{ d.name || d.targetId }}</span>
+          <NeuButton size="sm" variant="ghost" @click="undoDislike(prefTab, d.targetId)">
+            恢复
+          </NeuButton>
+        </div>
+        <div v-if="dislikeRows.length === 0" class="row empty">没有记录</div>
+      </div>
+    </Sheet>
+
+    <Sheet :open="sheet === 'import'" title="歌单导入" @close="sheet = null">
+      <NeuInput v-model="playlistLink" placeholder="QQ 歌单链接或 id" />
+      <NeuButton variant="primary" block :loading="importing" @click="importPlaylist">
+        导入
+      </NeuButton>
+      <p v-if="importMsg" class="hint">{{ importMsg }}</p>
+    </Sheet>
+
+    <Sheet :open="sheet === 'dedupe'" title="去重" @close="sheet = null">
+      <div class="actions">
+        <NeuButton :loading="dupBusy" @click="previewDup">检查重复</NeuButton>
+        <NeuButton
+          v-if="dupGroups.length > 0"
+          variant="primary"
+          :loading="dupBusy"
+          @click="runDedup"
+        >
+          清理 {{ dupGroups.reduce((n, g) => n + g.removeIds.length, 0) }} 首
+        </NeuButton>
+      </div>
+      <p v-if="dupMsg" class="hint">{{ dupMsg }}</p>
+    </Sheet>
+
+    <Sheet :open="sheet === 'backup'" title="数据备份" @close="sheet = null">
+      <input ref="fileInput" type="file" accept=".sm,.json" hidden @change="onBackupFile" />
+      <div class="actions">
+        <NeuButton :loading="backupBusy" @click="exportBackup">导出文件</NeuButton>
+        <NeuButton variant="ghost" :loading="backupBusy" @click="pickBackup">导入文件</NeuButton>
+      </div>
+      <p v-if="backupMsg" class="hint">{{ backupMsg }}</p>
+      <div class="divider" />
+      <div class="field">
+        <span class="field-name">WebDAV</span>
+        <NeuInput v-model="webdav.url" placeholder="https://dav.example.com/music" />
+      </div>
+      <div class="field">
+        <span class="field-name">账号</span>
+        <NeuInput v-model="webdav.user" autocomplete="username" />
+      </div>
+      <div class="field">
+        <span class="field-name">口令</span>
+        <NeuInput v-model="webdav.pass" type="password" autocomplete="current-password" />
+      </div>
+      <div class="actions">
+        <NeuButton :loading="backupBusy" @click="uploadWebdav">上传</NeuButton>
+        <NeuButton variant="primary" :loading="backupBusy" @click="downloadWebdav">下载</NeuButton>
+      </div>
+    </Sheet>
+
+    <Sheet :open="sheet === 'theme'" title="主题" @close="sheet = null">
+      <button
+        v-for="t in THEME_TABS"
+        :key="t.value"
+        type="button"
+        class="row row-btn"
+        @click="themeValue = t.value as 'system' | 'light' | 'dark'"
+      >
+        <span class="row-name">{{ t.label }}</span>
+        <span v-if="ui.themeMode === t.value" class="dot" />
+      </button>
+    </Sheet>
+
+    <Sheet :open="sheet === 'login'" title="登入" @close="sheet = null">
+      <div class="field">
+        <span class="field-name">服务端</span>
+        <NeuInput v-model="loginAddr" placeholder="http://192.168.1.10:3210" />
+      </div>
+      <div class="field">
+        <span class="field-name">账号</span>
+        <NeuInput v-model="loginUser" autocomplete="username" />
+      </div>
+      <div class="field">
+        <span class="field-name">口令</span>
+        <NeuInput v-model="loginPass" type="password" autocomplete="current-password" />
+      </div>
+      <NeuButton variant="primary" block :loading="loginBusy" @click="doLogin">登入</NeuButton>
+      <p v-if="loginErr" class="hint err">{{ loginErr }}</p>
+    </Sheet>
   </div>
 </template>
 
@@ -701,12 +750,26 @@ onMounted(() => {
   color: var(--t1);
   cursor: pointer;
   font-size: var(--fs-md);
+  text-align: left;
+}
+.row-btn:active {
+  background: var(--panel-2);
 }
 .row-name {
   font-size: var(--fs-md);
   color: var(--t1);
   min-width: 0;
 }
+.row-val {
+  font-size: var(--fs-xs);
+  color: var(--t2);
+}
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
 .empty {
   color: var(--t2);
   font-size: var(--fs-sm);
@@ -715,12 +778,11 @@ onMounted(() => {
 .seg {
   display: flex;
   gap: var(--sp-4);
-  padding: 0 var(--sp-4);
   border-bottom: 1px solid var(--line);
 }
 .seg-tab {
   position: relative;
-  padding: 12px 0 10px;
+  padding: 4px 0 10px;
   border: 0;
   background: transparent;
   color: var(--t2);
@@ -740,6 +802,14 @@ onMounted(() => {
   bottom: -1px;
   height: 2px;
   background: var(--accent);
+}
+
+.sheet-list {
+  display: flex;
+  flex-direction: column;
+}
+.sheet-list .row {
+  padding: 0;
 }
 
 .actions {
@@ -764,6 +834,11 @@ onMounted(() => {
   flex: 1 1 auto;
   min-width: 0;
 }
+/* 输入框内部的 flex 容器也要能收缩，否则带「眼睛」图标时会顶出右边界 */
+.field :deep(.wrap) {
+  min-width: 0;
+  width: 100%;
+}
 
 .select {
   width: 100%;
@@ -780,10 +855,10 @@ onMounted(() => {
 .divider {
   height: 1px;
   background: var(--line);
-  margin: var(--sp-1) 0;
 }
 
 .hint {
+  margin: 0;
   font-size: var(--fs-xs);
   color: var(--t2);
 }
@@ -807,5 +882,11 @@ onMounted(() => {
   font-size: var(--fs-xs);
   color: var(--t2);
   line-height: 1.7;
+}
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 </style>

@@ -16,6 +16,7 @@ import {
   type LocalDislike,
 } from './localdb.ts';
 import { getLocalAnchor, setLocalAnchor } from '@/api/direct/anchor.ts';
+import { loadWebdav, saveWebdav, type WebdavConfig } from './webdav.ts';
 
 const ANCHORS_KEY = 'suenmusic.anchors';
 const THEME_KEY = 'suenmusic.theme';
@@ -31,6 +32,8 @@ export interface SmBackup {
   anchors: Record<string, unknown>;
   /** 设备级偏好（主题等）。换设备时一起带走 */
   settings: { theme?: string };
+  /** WebDAV 凭据：备份文件自包含，换机后直接能继续用同一个盘 */
+  webdav?: WebdavConfig;
 }
 
 export async function buildBackup(): Promise<SmBackup> {
@@ -63,6 +66,7 @@ export async function buildBackup(): Promise<SmBackup> {
     dislikes,
     anchors,
     settings: { theme },
+    webdav: loadWebdav(),
   };
 }
 
@@ -145,6 +149,15 @@ export async function applyBackup(text: string): Promise<ImportResult> {
     } catch {
       /* 写不进去不阻断导入 */
     }
+  }
+
+  // WebDAV 凭据随备份恢复：备份文件自包含，换机后不用重填
+  if (data.webdav?.url) {
+    saveWebdav({
+      url: data.webdav.url,
+      user: data.webdav.user ?? '',
+      pass: data.webdav.pass ?? '',
+    });
   }
 
   return { added, skipped, dislikes, anchors };
