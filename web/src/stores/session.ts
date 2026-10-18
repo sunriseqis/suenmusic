@@ -22,6 +22,7 @@ import {
   onBaseUrlChanged,
   onSessionChanged,
   refreshSession,
+  resetUnreachableNotice,
   setSession,
 } from '@/api/client.ts';
 import * as authApi from '@/api/auth.ts';
@@ -179,6 +180,7 @@ export const useSessionStore = defineStore('session', () => {
    * 只能手动清 localStorage，那体验很糟。服务端那边本来也是幂等的。
    */
   async function logout(): Promise<void> {
+    resetUnreachableNotice();
     const token = getRefreshToken();
     try {
       await authApi.logout(token);

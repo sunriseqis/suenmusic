@@ -543,6 +543,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
       const switched = await failoverHook().catch(() => false);
       if (switched) return request<T>(path, { ...opts, _switched: true });
     }
+    if (err instanceof ApiError && err.isNetworkError) notifyUnreachable();
     throw err;
   }
 
@@ -581,6 +582,7 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
       const switched = await failoverHook().catch(() => false);
       if (switched) return requestBlob(path, { ...opts, _switched: true });
     }
+    if (err instanceof ApiError && err.isNetworkError) notifyUnreachable();
     throw err;
   }
 
@@ -592,6 +594,32 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
   if (!res.ok) throw await parseError(res);
 
   return await res.blob();
+}
+
+/**
+ * 「服务器无法连接」只提示一次（60 秒内不重复）。
+ *
+ * 只在**曾经登录过**的情况下提示：没配服务端或已登出时，
+ * 本地模式本来就该安静工作，不该被一条网络错误打扰。
+ * 通过 window 事件交给 UI 层，client 不依赖任何 store。
+ */
+let lastUnreachableAt = 0;
+function notifyUnreachable(): void {
+  if (!getBaseUrl().trim()) return;
+  if (!refreshToken && !accessToken) return;
+  const now = Date.now();
+  if (now - lastUnreachableAt < 60_000) return;
+  lastUnreachableAt = now;
+  try {
+    window.dispatchEvent(new CustomEvent('suen:server-unreachable'));
+  } catch {
+    /* 非浏览器环境忽略 */
+  }
+}
+
+/** 登出后重置节流：下次再登录时第一条失败仍要提示 */
+export function resetUnreachableNotice(): void {
+  lastUnreachableAt = 0;
 }
 
 /**

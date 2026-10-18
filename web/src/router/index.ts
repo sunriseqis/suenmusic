@@ -114,11 +114,7 @@ router.beforeEach(async to => {
     return { name: 'home' };
   }
 
-  if (to.name === 'login') {
-    // 已登录还去登录页就直接送回首页
-    if (session.isLoggedIn) return { name: 'home' };
-    return true;
-  }
+  // 不再有登录守卫：登录只从设置页的弹层发起，任何页面都可直接访问
 
   // 其余页面一律放行 —— 本地模式是正常形态，不是降级形态
   return true;

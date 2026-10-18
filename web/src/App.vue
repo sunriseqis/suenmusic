@@ -5,7 +5,7 @@
  * 公开页（登录）**不套壳**：软拟物的登录页要占据整屏中央，
  * 套上侧边栏与底部导航会让它看起来像一个"内容页"，很怪。
  */
-import { computed, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AnchorDialog from '@/components/AnchorDialog.vue';
 import UpdateDialog from '@/components/UpdateDialog.vue';
@@ -28,6 +28,20 @@ const lyrics = useLyricsStore();
 lyrics.init();
 
 const isPublic = computed(() => route.meta.public === true);
+
+/**
+ * 服务器连不上时提示一次。
+ *
+ * 只在登录过的情况下会收到（client 里判过 baseUrl 与会话）；
+ * 登出后不再提示 —— 本地模式本就该安静工作。
+ */
+function onServerUnreachable(): void {
+  ui.err('服务器无法连接');
+}
+onMounted(() => window.addEventListener('suen:server-unreachable', onServerUnreachable));
+onBeforeUnmount(() =>
+  window.removeEventListener('suen:server-unreachable', onServerUnreachable)
+);
 
 /**
  * 登录态就绪后，把上次的播放队列摆回播放条（**只就位，不自动出声**）。
