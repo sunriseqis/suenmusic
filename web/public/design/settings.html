@@ -375,6 +375,53 @@
   .stat .v { margin-top: 4px; font-size: 15px; }
 
   /* 页面内的 AI 分配 */
+  /* ---------------- 弹层 ---------------- */
+  .scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .phone { position: relative; }
+  .sheet {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    background: var(--panel);
+    border-top: 1px solid var(--line);
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.45);
+    padding: 10px 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .sheet-grip {
+    width: 36px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--line);
+    align-self: center;
+    margin-bottom: 2px;
+  }
+  .sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .sheet-title {
+    font-size: 14px;
+    font-weight: 600;
+  }
+  .sheet-close {
+    border: 0;
+    background: transparent;
+    color: var(--dim);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .sheet .actions { display: flex; gap: 8px; }
+  .sheet .actions .btn { flex: 1; }
+
   .select {
     height: 36px;
     width: 100%;
@@ -458,20 +505,11 @@
         </section>
 
         <section class="sec">
-          <div class="panel pad">
-            <div class="field">
-              <span class="k">服务端</span>
-              <input class="input" placeholder="http://192.168.1.10:3210" />
+          <div class="panel">
+            <div class="row">
+              <span class="name">登入</span>
+              <span class="val">未登录</span>
             </div>
-            <div class="field">
-              <span class="k">账号</span>
-              <input class="input" placeholder="demo" />
-            </div>
-            <div class="field">
-              <span class="k">口令</span>
-              <input class="input" type="password" placeholder="••••••" />
-            </div>
-            <button class="btn primary wide">登入</button>
           </div>
         </section>
       </div>
@@ -645,6 +683,94 @@
               </div>
             </div>
           </section>
+        </div>
+      </div>
+    </div>
+  </figure>
+
+  <!-- ======================================================= 登入弹层 -->
+  <figure>
+    <figcaption>登入 · 弹层</figcaption>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+      <div class="screen" style="opacity:.35; pointer-events:none">
+        <h1>设置</h1>
+        <section class="sec">
+          <p class="label">播放</p>
+          <div class="panel">
+            <div class="row"><span class="name">蓝牙歌词</span><span class="switch"></span></div>
+            <div class="row"><span class="name">缓存</span><span class="val mono">1.2 GB / 4 GB</span></div>
+          </div>
+        </section>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="sheet-grip"></div>
+        <div class="sheet-head">
+          <span class="sheet-title">登入</span>
+          <button class="sheet-close">关闭</button>
+        </div>
+        <div class="field">
+          <span class="k">服务端</span>
+          <input class="input" placeholder="http://192.168.1.10:3210" />
+        </div>
+        <div class="field">
+          <span class="k">账号</span>
+          <input class="input" placeholder="demo" />
+        </div>
+        <div class="field">
+          <span class="k">口令</span>
+          <input class="input" type="password" placeholder="••••••" />
+        </div>
+        <button class="btn primary wide">登入</button>
+      </div>
+    </div>
+  </figure>
+
+  <!-- ======================================================= 备份弹层 -->
+  <figure>
+    <figcaption>数据备份 · 弹层</figcaption>
+    <div class="phone">
+      <div class="statusbar"><span>9:41</span><span>5G ▮</span></div>
+      <div class="screen" style="opacity:.35; pointer-events:none">
+        <h1>设置</h1>
+        <section class="sec">
+          <p class="label">资料库</p>
+          <div class="panel">
+            <div class="row"><span class="name">黑名单</span><span class="val">歌曲 3 · 歌手 1</span></div>
+            <div class="row"><span class="name">歌单导入</span><span class="val">QQ 歌单</span></div>
+            <div class="row"><span class="name">去重</span><span class="val">发现 5 首</span></div>
+            <div class="row"><span class="name">数据备份</span><span class="val">上次 10-17</span></div>
+          </div>
+        </section>
+      </div>
+      <div class="scrim"></div>
+      <div class="sheet">
+        <div class="sheet-grip"></div>
+        <div class="sheet-head">
+          <span class="sheet-title">数据备份</span>
+          <button class="sheet-close">关闭</button>
+        </div>
+        <div class="actions">
+          <button class="btn">导出文件</button>
+          <button class="btn">导入文件</button>
+        </div>
+        <div style="height:1px;background:var(--line)"></div>
+        <div class="field">
+          <span class="k">WebDAV</span>
+          <input class="input" placeholder="https://dav.example.com/music" />
+        </div>
+        <div class="field">
+          <span class="k">账号</span>
+          <input class="input" placeholder="dav" />
+        </div>
+        <div class="field">
+          <span class="k">口令</span>
+          <input class="input" type="password" placeholder="••••••" />
+        </div>
+        <div class="actions">
+          <button class="btn">上传</button>
+          <button class="btn primary">下载</button>
         </div>
       </div>
     </div>
