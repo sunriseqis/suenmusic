@@ -56,13 +56,14 @@ onMounted(refresh);
 
 <template>
   <div class="cache" data-role="offline-cache">
-    <p class="neu-t2 cache-line">
-      已用 <strong>{{ fmt(usedBytes) }}</strong> / 上限 {{ fmt(maxBytes || 4 * 1024 ** 3) }}
-    </p>
-    <div class="cache-actions">
-      <NeuButton variant="ghost" :loading="loading" @click="refresh">刷新</NeuButton>
-      <NeuButton variant="danger" :disabled="loading || usedBytes <= 0" @click="clear">
-        清空缓存
+    <div class="row">
+      <span class="name">已用</span>
+      <span class="val">{{ fmt(usedBytes) }} / {{ fmt(maxBytes || 4 * 1024 ** 3) }}</span>
+    </div>
+    <div class="row">
+      <NeuButton size="sm" :loading="loading" @click="refresh">刷新</NeuButton>
+      <NeuButton size="sm" variant="danger" :disabled="loading || usedBytes <= 0" @click="clear">
+        清空
       </NeuButton>
     </div>
   </div>
@@ -70,17 +71,30 @@ onMounted(refresh);
 
 <style scoped>
 .cache {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--hi);
+  overflow: hidden;
+}
+.row {
+  min-height: 44px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--sp-3);
+  padding: 0 var(--sp-4);
 }
-.cache-line {
-  margin: 0;
-  font-size: var(--fs-sm);
+.row + .row {
+  border-top: 1px solid var(--line);
 }
-.cache-actions {
-  display: flex;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
+.name {
+  font-size: var(--fs-md);
+  color: var(--t1);
+}
+.val {
+  font-size: var(--fs-xs);
+  color: var(--t2);
+  font-variant-numeric: tabular-nums;
 }
 </style>
