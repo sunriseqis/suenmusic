@@ -33,7 +33,7 @@ function https(url: string): string {
   return url.replace(/^http:/, 'https:');
 }
 
-async function qqPost(payload: Rec): Promise<Rec> {
+export async function qqPost(payload: Rec): Promise<Rec> {
   const r = await httpJson('https://u.y.qq.com/cgi-bin/musicu.fcg', {
     method: 'POST',
     headers: HEADERS,
@@ -43,7 +43,7 @@ async function qqPost(payload: Rec): Promise<Rec> {
   return (r.json as Rec) ?? {};
 }
 
-function trackFromRaw(raw: unknown): Track | null {
+export function trackFromRaw(raw: unknown): Track | null {
   const s = (raw ?? {}) as Rec & {
     songInfo?: Rec;
     singer?: Array<{ name?: string }>;
