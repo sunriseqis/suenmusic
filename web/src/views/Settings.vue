@@ -2651,33 +2651,41 @@ details[open] .chev {
 /* tab：两个音源的切换按钮。小号胶囊，不做大按钮 —— 卡片要轻 */
 .auth-tabs {
   display: flex;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-3);
+  gap: var(--sp-5);
+  margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--line);
 }
 .auth-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 6px 14px;
-  border-radius: var(--r-pill);
+  padding: 0 0 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   font-size: var(--fs-xs);
   font-weight: var(--fw-medium);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   color: var(--t2);
-  background: var(--bg);
-  box-shadow:
-    2px 2px 5px var(--sd),
-    -2px -2px 5px var(--sl);
+  cursor: pointer;
   transition: color 0.15s ease;
 }
 .auth-tab:hover {
   color: var(--t1);
 }
 .auth-tab.active {
-  color: var(--accent-text);
-  box-shadow:
-    inset 2px 2px 5px var(--sd),
-    inset -2px -2px 5px var(--sl);
+  color: var(--t1);
+}
+.auth-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
 }
 /* 已授权小圆点：绿点表示该音源已有凭证 —— 不点开也能一眼看到两边的状态 */
 .auth-dot {

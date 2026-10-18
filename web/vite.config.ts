@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import type { Plugin } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
@@ -39,8 +40,77 @@ const BACKEND = process.env.SUENMUSIC_BACKEND || 'http://127.0.0.1:3210';
  */
 const HOST = process.env.SUENMUSIC_WEB_HOST || process.env.SUENMUSIC_HOST || '127.0.0.1';
 
+/**
+ * 演示用的假 API（仅开发期，SUEN_MOCK=1 时生效）。
+ *
+ * 设备访问不到开发机上的独立端口，所以把假数据挂在 dev server 的 /api 下：
+ * 应用里把服务端地址填成 `http://<开发机 IP>:5273` 即可看到全部设置项。
+ */
+function mockApiPlugin(): Plugin {
+  const now = Date.now();
+  const fixtures: Record<string, unknown> = {
+    '/api/auth/config': {
+      registrationOpen: true,
+      allowRegistration: true,
+      hasUsers: true,
+      passwordMinLength: 6,
+    },
+    '/api/auth/me': {
+      user: { id: 'u_demo', username: 'demo', displayName: '演示账号', role: 'admin' },
+    },
+    '/api/auth/sessions': {
+      sessions: [
+        { id: 's1', createdAt: now - 2 * 864e5, lastUsedAt: now - 36e5, expiresAt: now + 30 * 864e5, userAgent: 'Android 16 · 本机', isCurrent: true },
+        { id: 's2', createdAt: now - 9 * 864e5, lastUsedAt: now - 3 * 864e5, expiresAt: now + 21 * 864e5, userAgent: 'Chrome · Windows', isCurrent: false },
+      ],
+    },
+    '/api/bilibili/account': { loggedIn: true, uname: '哔哩哔哩演示账号', mid: 1234567 },
+    '/api/netease/account': { loggedIn: false },
+    '/api/ai/models': {
+      profiles: [
+        { id: 'm1', name: '主模型', baseUrl: 'http://127.0.0.1:8904/v1', apiKeyMasked: 'sk-****demo', hasApiKey: true, model: 'glm-5.3-flash' },
+        { id: 'm2', name: '复核模型', baseUrl: 'http://127.0.0.1:8904/v1', apiKeyMasked: 'sk-****demo', hasApiKey: true, model: 'glm-5.3' },
+      ],
+      decideProfileId: 'm1',
+      reviewProfileId: 'm2',
+    },
+    '/api/ai/persona': {
+      summary: '偏好人声与华语流行，夜晚更常听抒情人声。',
+      profileLines: ['华语流行 62%', '人声优先', '夜间时段活跃'],
+      ledgerLines: ['收藏 12 首', '不喜欢 2 首'],
+      lastGuidance: '少一点电音',
+      updatedAt: now - 864e5,
+    },
+    '/api/health': { ok: true, version: '1.0.0-demo' },
+  };
+
+  return {
+    name: 'suen-mock-api',
+    configureServer(server) {
+      if (process.env.SUEN_MOCK !== '1') return;
+      server.middlewares.use((req, res, next) => {
+        const url = req.url ?? '';
+        if (!url.startsWith('/api')) return next();
+        const path = url.split('?')[0] ?? url;
+        console.log(`[mock] ${req.method} ${path}`);
+        res.setHeader('Content-Type', 'application/json');
+        if (path === '/api/auth/login' || path === '/api/auth/refresh') {
+          res.end(JSON.stringify({
+            accessToken: 'demo-access',
+            refreshToken: 'demo-refresh',
+            expiresInSec: 3600,
+            user: { id: 'u_demo', username: 'demo', displayName: '演示账号', role: 'admin' },
+          }));
+          return;
+        }
+        res.end(JSON.stringify(fixtures[path] ?? {}));
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), mockApiPlugin()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
