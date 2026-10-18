@@ -85,3 +85,23 @@ export async function directSearch(
     degraded: null,
   };
 }
+
+/**
+ * 无服务端时的"歌手页"：按歌手名搜一批歌，再按歌手名过滤。
+ *
+ * 直连没有歌手详情接口，也没有专辑列表 —— 这里只做**能听的部分**：
+ * 一首歌的 `ar[]` 里有这个名字就算他的作品。过滤后为空就退回整批结果，
+ * 至少不会给一页空白。
+ */
+export async function directArtistSongs(name: string, limit = 50) {
+  const target = name.trim().toLowerCase();
+  const res = await directSearch(name, 1, limit);
+  if (!target) return res.songs;
+  const hit = res.songs.filter(t =>
+    (t.ar ?? []).some(a => {
+      const n = a.name.trim().toLowerCase();
+      return n.includes(target) || target.includes(n);
+    })
+  );
+  return hit.length > 0 ? hit : res.songs;
+}
