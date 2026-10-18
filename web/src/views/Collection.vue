@@ -23,6 +23,7 @@ import TrackRow from '@/components/TrackRow.vue';
 import CoverCard from '@/components/CoverCard.vue';
 import { ApiError, getBaseUrl } from '@/api/client.ts';
 import { directArtistSongs } from '@/api/direct/catalog.ts';
+import { directAlbum, directToplist } from '@/api/direct/home.ts';
 import {
   fetchAlbum,
   fetchArtist,
@@ -389,7 +390,9 @@ async function load() {
   try {
     switch (props.kind) {
       case 'toplist': {
-        const res = await fetchToplist(props.id, { limit: 200 });
+        const res = !getBaseUrl().trim()
+          ? await directToplist(props.id)
+          : await fetchToplist(props.id, { limit: 200 });
         title.value = res.topInfo?.name || '排行榜';
         subtitle.value = res.topInfo?.updateFrequency || '';
         cover.value = res.topInfo?.picUrl || res.topInfo?.coverImgUrl || '';
@@ -406,7 +409,9 @@ async function load() {
         break;
       }
       case 'album': {
-        const res = await fetchAlbum(props.id);
+        const res = !getBaseUrl().trim()
+          ? await directAlbum(props.id)
+          : await fetchAlbum(props.id);
         title.value = res.album.name;
         subtitle.value = [artistNames(res.album.artists), res.album.company]
           .filter(Boolean)

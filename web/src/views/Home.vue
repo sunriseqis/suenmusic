@@ -25,14 +25,15 @@ import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import { fetchHome } from '@/api/catalog.ts';
+import { directHome } from '@/api/direct/home.ts';
 import { serverReady } from '@/offline/syncMode.ts';
 import { ApiError } from '@/api/client.ts';
 import { isNativeAudio } from '@/native/audio.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
-import { artistNames, coverUrl } from '@/utils/format.ts';
-import type { HomeData, Track } from '@/api/types.ts';
+import { artistNames } from '@/utils/format.ts';
+import type { HomeData } from '@/api/types.ts';
 
 const router = useRouter();
 const session = useSessionStore();
@@ -41,23 +42,6 @@ const favorites = useFavoritesStore();
 
 const data = ref<HomeData | null>(null);
 
-/** 直连首页：收藏的最新 10 首 */
-const favTracks = computed(() =>
-  favorites.rows
-    .map(r => r.track)
-    .filter((t): t is Track => !!t)
-    .slice(0, 10)
-);
-const resumeCover = computed(() => coverUrl(player.currentTrack?.al?.picUrl, 150));
-const resumePercent = computed(() => {
-  const d = player.durationMs || player.currentTrack?.dt || 0;
-  return d > 0 ? Math.min(100, Math.round((player.positionMs / d) * 100)) : 0;
-});
-function playRandomFav(): void {
-  const list = favorites.rows.map(r => r.track).filter((t): t is Track => !!t);
-  if (list.length === 0) return;
-  void player.playQueue(list, Math.floor(Math.random() * list.length));
-}
 const loading = ref(true);
 const errorText = ref('');
 /** 根节点：下拉刷新要顺着它往上找滚动容器（外壳里的 .neu-scroll） */
@@ -97,10 +81,18 @@ const hasAnything = computed(() => {
 });
 
 async function load() {
-  // 直连模式没有首页推荐接口：不要发这个请求，否则会落到"没能加载首页"
+  // 直连模式：走 QQ 的同一组 module（新碟 / 新歌 / 榜单），不发 /api/home
   if (localMode.value) {
-    loading.value = false;
-    void favorites.ensureLoaded();
+    loading.value = true;
+    try {
+      data.value = await directHome();
+      void setupPosters();
+    } catch (e) {
+      errorText.value = e instanceof Error ? e.message : '获取首页失败';
+    } finally {
+      loading.value = false;
+      void favorites.ensureLoaded();
+    }
     return;
   }
   loading.value = true;
@@ -436,67 +428,6 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 直连模式的首页：没有推荐数据源，用「继续听 + 收藏」拼一个可用的屏 -->
-    <template v-else-if="localMode">
-      <section v-if="player.currentTrack" class="block">
-        <div class="block-head">
-          <h2 class="block-title">继续听</h2>
-        </div>
-        <button type="button" class="resume neu-raised-md" @click="player.toggle()">
-          <img v-if="resumeCover" class="resume-art" :src="resumeCover" alt="" />
-          <span v-else class="resume-art ph" aria-hidden="true" />
-          <span class="resume-text">
-            <span class="resume-title neu-ellipsis">{{ player.currentTrack.name }}</span>
-            <span class="resume-sub neu-ellipsis">{{ artistNames(player.currentTrack.ar) }}</span>
-            <span class="resume-bar"><i :style="{ width: `${resumePercent}%` }" /></span>
-          </span>
-          <NeuIcon :name="player.playing ? 'pause' : 'play'" :size="20" />
-        </button>
-      </section>
-
-      <section v-if="favTracks.length > 0" class="block">
-        <div class="block-head">
-          <h2 class="block-title">我的收藏</h2>
-        </div>
-        <div class="list">
-          <TrackRow
-            v-for="(t, i) in favTracks"
-            :key="t.id"
-            :track="t"
-            :index="i + 1"
-            :list="favTracks"
-          />
-        </div>
-      </section>
-
-      <section v-else class="block">
-        <div class="state neu-raised-md">
-          <p class="state-title">还没有收藏</p>
-          <p class="state-msg neu-t2">搜一首喜欢的歌，点心形收藏，它会出现在这里。</p>
-          <button type="button" class="retry" @click="router.push('/search')">
-            <NeuIcon name="search" :size="15" />
-            去搜索
-          </button>
-        </div>
-      </section>
-
-      <section class="block">
-        <div class="block-head">
-          <h2 class="block-title">开始听</h2>
-        </div>
-        <div class="local-actions">
-          <button type="button" class="retry" @click="router.push('/search')">
-            <NeuIcon name="search" :size="15" />
-            搜索歌曲
-          </button>
-          <button v-if="favTracks.length > 0" type="button" class="retry" @click="playRandomFav">
-            <NeuIcon name="mode-shuffle" :size="15" />
-            随机播放收藏
-          </button>
-        </div>
-      </section>
-    </template>
-
     <!-- 全部为空（上游整片不可用） -->
     <div v-else-if="!hasAnything" class="state neu-raised-md">
       <p class="state-title">暂时没有内容</p>
@@ -775,8 +706,23 @@ onBeforeUnmount(() => {
 .rail-nav {
   flex: none;
 }
-:root[data-theme='dark'] .rail-nav {
-  filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.62));
+/**
+ * 左右翻页键只对**鼠标**有意义：触摸屏上直接横滑海报即可。
+ * 在触摸设备上隐藏后，整行高度省下来，页码（1 / 6）与指示点仍然保留。
+ */
+@media (pointer: coarse) {
+  .rail-nav {
+    display: none;
+  }
+}
+
+/* 翻页是辅助动作：不要面板，只留箭头。
+   class 落在 NeuIconButton 的根元素上，所以是同一元素而非后代 —— 用 :global 覆盖 */
+:global(.rail-nav.neu-icon-btn) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--t2);
 }
 
 /* ---- 指示点：一页一点。故意不用进度条，那和滚动条太像 ---- */
@@ -788,18 +734,15 @@ onBeforeUnmount(() => {
   margin-top: calc(var(--sp-4) * -0.5);
 }
 .rail-dot {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   padding: 0;
-  border-radius: var(--r-pill);
-  background: var(--track);
-  transition:
-    width var(--dur-mid) var(--ease),
-    background var(--dur-mid) var(--ease);
+  border-radius: 1px;
+  background: var(--line);
+  transition: background var(--dur-mid) var(--ease);
 }
-/* 当前页拉长成小胶囊：比"换个颜色"更容易在余光里分辨 */
+/* 当前页只换色，不拉长 —— 胶囊是旧版语言 */
 .rail-dot.is-on {
-  width: 20px;
   background: var(--accent);
 }
 .rail-dot:focus-visible {
@@ -1090,7 +1033,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-7) var(--sp-5);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   text-align: center;
 }
 .state-title {
@@ -1109,25 +1052,21 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
   margin-top: var(--sp-2);
   padding: var(--sp-2) var(--sp-5);
-  border-radius: var(--r-pill);
-  color: var(--accent-text);
+  border-radius: var(--r-md);
+  color: var(--t1);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
+  cursor: pointer;
 }
 .retry:active {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 @media (max-width: 767px) {
-  .hi {
-    font-size: var(--fs-xl);
-  }
   .home {
     gap: var(--sp-4);
   }
