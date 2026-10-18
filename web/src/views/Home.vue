@@ -30,14 +30,34 @@ import { ApiError } from '@/api/client.ts';
 import { isNativeAudio } from '@/native/audio.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
-import { artistNames } from '@/utils/format.ts';
-import type { HomeData } from '@/api/types.ts';
+import { useFavoritesStore } from '@/stores/favorites.ts';
+import { artistNames, coverUrl } from '@/utils/format.ts';
+import type { HomeData, Track } from '@/api/types.ts';
 
 const router = useRouter();
 const session = useSessionStore();
 const player = usePlayerStore();
+const favorites = useFavoritesStore();
 
 const data = ref<HomeData | null>(null);
+
+/** 直连首页：收藏的最新 10 首 */
+const favTracks = computed(() =>
+  favorites.rows
+    .map(r => r.track)
+    .filter((t): t is Track => !!t)
+    .slice(0, 10)
+);
+const resumeCover = computed(() => coverUrl(player.currentTrack?.al?.picUrl, 150));
+const resumePercent = computed(() => {
+  const d = player.durationMs || player.currentTrack?.dt || 0;
+  return d > 0 ? Math.min(100, Math.round((player.positionMs / d) * 100)) : 0;
+});
+function playRandomFav(): void {
+  const list = favorites.rows.map(r => r.track).filter((t): t is Track => !!t);
+  if (list.length === 0) return;
+  void player.playQueue(list, Math.floor(Math.random() * list.length));
+}
 const loading = ref(true);
 const errorText = ref('');
 /** 根节点：下拉刷新要顺着它往上找滚动容器（外壳里的 .neu-scroll） */
@@ -77,6 +97,12 @@ const hasAnything = computed(() => {
 });
 
 async function load() {
+  // 直连模式没有首页推荐接口：不要发这个请求，否则会落到"没能加载首页"
+  if (localMode.value) {
+    loading.value = false;
+    void favorites.ensureLoaded();
+    return;
+  }
   loading.value = true;
   errorText.value = '';
   try {
@@ -410,15 +436,72 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 全部为空（上游整片不可用 / 无服务端的直连模式） -->
+    <!-- 直连模式的首页：没有推荐数据源，用「继续听 + 收藏」拼一个可用的屏 -->
+    <template v-else-if="localMode">
+      <section v-if="player.currentTrack" class="block">
+        <div class="block-head">
+          <h2 class="block-title">继续听</h2>
+        </div>
+        <button type="button" class="resume neu-raised-md" @click="player.toggle()">
+          <img v-if="resumeCover" class="resume-art" :src="resumeCover" alt="" />
+          <span v-else class="resume-art ph" aria-hidden="true" />
+          <span class="resume-text">
+            <span class="resume-title neu-ellipsis">{{ player.currentTrack.name }}</span>
+            <span class="resume-sub neu-ellipsis">{{ artistNames(player.currentTrack.ar) }}</span>
+            <span class="resume-bar"><i :style="{ width: `${resumePercent}%` }" /></span>
+          </span>
+          <NeuIcon :name="player.playing ? 'pause' : 'play'" :size="20" />
+        </button>
+      </section>
+
+      <section v-if="favTracks.length > 0" class="block">
+        <div class="block-head">
+          <h2 class="block-title">我的收藏</h2>
+        </div>
+        <div class="list">
+          <TrackRow
+            v-for="(t, i) in favTracks"
+            :key="t.id"
+            :track="t"
+            :index="i + 1"
+            :list="favTracks"
+          />
+        </div>
+      </section>
+
+      <section v-else class="block">
+        <div class="state neu-raised-md">
+          <p class="state-title">还没有收藏</p>
+          <p class="state-msg neu-t2">搜一首喜欢的歌，点心形收藏，它会出现在这里。</p>
+          <button type="button" class="retry" @click="router.push('/search')">
+            <NeuIcon name="search" :size="15" />
+            去搜索
+          </button>
+        </div>
+      </section>
+
+      <section class="block">
+        <div class="block-head">
+          <h2 class="block-title">开始听</h2>
+        </div>
+        <div class="local-actions">
+          <button type="button" class="retry" @click="router.push('/search')">
+            <NeuIcon name="search" :size="15" />
+            搜索歌曲
+          </button>
+          <button v-if="favTracks.length > 0" type="button" class="retry" @click="playRandomFav">
+            <NeuIcon name="mode-shuffle" :size="15" />
+            随机播放收藏
+          </button>
+        </div>
+      </section>
+    </template>
+
+    <!-- 全部为空（上游整片不可用） -->
     <div v-else-if="!hasAnything" class="state neu-raised-md">
-      <p class="state-title">{{ localMode ? '直连模式' : '暂时没有内容' }}</p>
+      <p class="state-title">暂时没有内容</p>
       <p class="state-msg neu-t2">
-        {{
-          localMode
-            ? '没有配置服务端。搜索、播放、收藏都能正常用；首页推荐需要服务端，可到设置里填地址。'
-            : '上游可能正在限流，稍等片刻再刷新；也可以直接去搜索。'
-        }}
+        上游可能正在限流，稍等片刻再刷新；也可以直接去搜索。
       </p>
       <button type="button" class="retry" @click="load">
         <NeuIcon name="refresh" :size="15" />
@@ -833,6 +916,62 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.resume {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--t1);
+  text-align: left;
+  cursor: pointer;
+}
+.resume-art {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  flex: none;
+  border: 1px solid var(--line);
+}
+.resume-art.ph {
+  display: block;
+  background: var(--panel-2);
+}
+.resume-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.resume-title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+}
+.resume-sub {
+  font-size: var(--fs-xs);
+  color: var(--t2);
+}
+.resume-bar {
+  display: block;
+  height: 2px;
+  margin-top: 3px;
+  background: var(--line);
+}
+.resume-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.local-actions {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
 }
 
 .block-head {
