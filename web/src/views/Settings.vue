@@ -1116,10 +1116,10 @@ function deviceLabel(ua: string): string {
 
 <template>
   <div class="settings neu-container">
-    <h1 class="h1">设置</h1>
+    <h1 class="h1-settings">设置</h1>
 
     <!-- 顶层主分类切换：个人设置 vs 系统运维 -->
-    <div class="main-tabs-wrap">
+    <div v-if="MAIN_TABS.length > 1" class="main-tabs-wrap">
       <NeuTabs v-model="activeMainTab" :items="MAIN_TABS" />
     </div>
 
@@ -1133,7 +1133,7 @@ function deviceLabel(ua: string): string {
 
 
         <!-- 外观微调组件（降级收拢） -->
-        <div class="appearance-widget neu-inset">
+        <div class="appearance-widget neu-raised-md">
           <div class="appearance-row">
             <span class="appearance-lbl neu-t2">主题模式</span>
             <NeuTabs v-model="themeValue" :items="THEME_TABS" />
@@ -1144,7 +1144,7 @@ function deviceLabel(ua: string): string {
         <!-- 设备与更新：两个紧凑入口。原先各占一张整卡片，只放一个控件，很突兀。
              容器整体也要跟着隐藏：它带 neu-inset（凹陷底），两行都被 v-if 藏掉后
              会在 PC 端剩一个空凹槽。 -->
-        <div v-if="isNativeUpdate || isHarmony" class="quick-toggles neu-inset">
+        <div v-if="isNativeUpdate || isHarmony" class="quick-toggles neu-raised-md">
           <!-- 车机蓝牙歌词只对安卓开放：iOS 的 Now Playing 不支持实时改字段
                （AVRCP 转发机制不同），插件侧 setLyricTimeline/setLyricLine 是空操作，
                摆出开关只会让用户以为开了却不生效。 -->
@@ -2164,12 +2164,24 @@ function deviceLabel(ua: string): string {
   grid-template-columns: 1fr 1fr;
 }
 
+.h1-settings {
+  margin: 0;
+  font-size: 26px;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
+}
+
 .card {
+  /* 分区本身不是一张卡：标题 + 内容直接落在页面上。
+     里面真正的控件组（主题、开关）才是唯一一级面板 —— 否则会出现"卡中卡"。 */
   display: flex;
   flex-direction: column;
-  gap: var(--sp-4);
-  padding: var(--sp-5);
-  border-radius: var(--r-xl);
+  gap: var(--sp-3);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
 }
 
 .card-head {
@@ -2184,12 +2196,24 @@ function deviceLabel(ua: string): string {
   gap: var(--sp-2);
 }
 .card-title {
-  font-size: var(--fs-lg);
-  font-weight: var(--fw-bold);
-  color: var(--t1);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: var(--fw-medium);
+  color: var(--t2);
+}
+/* 铭牌后面拖一条发丝线：分区的边界靠线，不靠卡片 */
+.card-title::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
 }
 .card-desc {
-  font-size: var(--fs-sm);
+  font-size: var(--fs-xs);
+  color: var(--t2);
 }
 
 .persona-content,
@@ -2422,8 +2446,8 @@ details[open] .chev {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  padding: var(--sp-3);
-  border-radius: var(--r-lg);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
 }
 .qt-row {
   display: flex;
@@ -2458,8 +2482,8 @@ details[open] .chev {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-3-5, 14px);
-  border-radius: var(--r-lg);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--r-md);
 }
 .appearance-row {
   display: flex;
@@ -2853,7 +2877,14 @@ details[open] .chev {
   .h1 {
     font-size: var(--fs-xl);
   }
-  .card {
+  .h1-settings {
+  margin: 0;
+  font-size: 26px;
+  font-weight: var(--fw-bold);
+  letter-spacing: -0.02em;
+}
+
+.card {
     padding: var(--sp-4);
   }
   .actions {
