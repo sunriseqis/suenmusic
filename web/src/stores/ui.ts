@@ -169,6 +169,11 @@ export const useUiStore = defineStore('ui', () => {
 
   // ---- 基地址 ----
   const baseUrl = ref(getBaseUrl());
+  /** 已登录但服务端不可达（由 App 监听 client 的事件维护） */
+  const serverDown = ref(false);
+  function setServerDown(v: boolean): void {
+    serverDown.value = v;
+  }
 
   function setBaseUrl(url: string): void {
     applyBaseUrl(url);
@@ -227,6 +232,8 @@ export const useUiStore = defineStore('ui', () => {
     setAccent,
     baseUrl,
     setBaseUrl,
+    serverDown,
+    setServerDown,
     isDesktop,
     initBreakpoint,
     toasts,

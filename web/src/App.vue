@@ -36,12 +36,20 @@ const isPublic = computed(() => route.meta.public === true);
  * 登出后不再提示 —— 本地模式本就该安静工作。
  */
 function onServerUnreachable(): void {
+  ui.setServerDown(true);
   ui.err('服务器无法连接');
 }
-onMounted(() => window.addEventListener('suen:server-unreachable', onServerUnreachable));
-onBeforeUnmount(() =>
-  window.removeEventListener('suen:server-unreachable', onServerUnreachable)
-);
+function onServerOk(): void {
+  ui.setServerDown(false);
+}
+onMounted(() => {
+  window.addEventListener('suen:server-unreachable', onServerUnreachable);
+  window.addEventListener('suen:server-ok', onServerOk);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener('suen:server-unreachable', onServerUnreachable);
+  window.removeEventListener('suen:server-ok', onServerOk);
+});
 
 /**
  * 登录态就绪后，把上次的播放队列摆回播放条（**只就位，不自动出声**）。

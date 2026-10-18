@@ -10,7 +10,6 @@
  */
 import { onMounted, ref } from 'vue';
 import NeuButton from '@/components/neu/NeuButton.vue';
-import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
 import { getBaseUrl } from '@/api/client.ts';
 import {
@@ -49,18 +48,80 @@ function remove(i: number): void {
   status.value.splice(i, 1);
 }
 
-function move(i: number, dir: -1 | 1): void {
-  const j = i + dir;
-  if (j < 0 || j >= draft.value.length) return;
-  const a = draft.value[i];
-  const b = draft.value[j];
-  if (!a || !b) return;
-  draft.value[i] = b;
-  draft.value[j] = a;
-  const sa = status.value[i];
-  status.value[i] = status.value[j];
-  status.value[j] = sa;
+// ---------------------------------------------------------------- 手势
+/**
+ * 两种手势：
+ *  - 行上横滑：左滑露出「删除」，松手超过阈值即删除
+ *  - 序号上竖拖：拖动改优先级
+ *
+ * 页面的纵向滚动不能被吃掉，所以行本身是 `touch-action: pan-y`，
+ * 只有序号把手是 `touch-action: none`。
+ */
+type PressMode = 'swipe' | 'drag';
+const listEl = ref<HTMLElement | null>(null);
+const dragIndex = ref<number | null>(null);
+const swipe = ref<{ i: number; dx: number } | null>(null);
+let press: { i: number; x: number; y: number; mode: PressMode; axis: 'x' | 'y' | null } | null =
+  null;
+
+function startSwipe(i: number, e: PointerEvent): void {
+  if (e.pointerType === 'mouse' && e.button !== 0) return;
+  press = { i, x: e.clientX, y: e.clientY, mode: 'swipe', axis: null };
 }
+function startDrag(i: number, e: PointerEvent): void {
+  e.stopPropagation();
+  press = { i, x: e.clientX, y: e.clientY, mode: 'drag', axis: null };
+  (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+}
+function onMove(e: PointerEvent): void {
+  if (!press) return;
+  const dx = e.clientX - press.x;
+  const dy = e.clientY - press.y;
+
+  if (press.mode === 'swipe') {
+    if (!press.axis) {
+      if (Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy)) press.axis = 'x';
+      else if (Math.abs(dy) > 10) return; // 交给页面滚动
+      else return;
+    }
+    swipe.value = { i: press.i, dx: Math.max(-88, Math.min(0, dx)) };
+    return;
+  }
+
+  // 拖动排序：按指针所在的半区计算目标位置
+  dragIndex.value = press.i;
+  const list = listEl.value;
+  if (!list) return;
+  const rows = [...list.querySelectorAll<HTMLElement>('.srv-row')];
+  const target = rows.findIndex(r => {
+    const b = r.getBoundingClientRect();
+    return e.clientY < b.top + b.height / 2;
+  });
+  const to = target === -1 ? rows.length - 1 : target;
+  const from = press.i;
+  if (to !== from) {
+    const [item] = draft.value.splice(from, 1);
+    const [st] = status.value.splice(from, 1);
+    if (!item) return;
+    draft.value.splice(to, 0, item);
+    status.value.splice(to, 0, st);
+    press.i = to;
+    dragIndex.value = to;
+  }
+}
+function onUp(): void {
+  if (swipe.value && swipe.value.dx < -56 && draft.value.length > 1) {
+    remove(swipe.value.i);
+  }
+  swipe.value = null;
+  dragIndex.value = null;
+  press = null;
+}
+function rowStyle(i: number): Record<string, string> | undefined {
+  if (swipe.value?.i !== i) return undefined;
+  return { transform: `translateX(${swipe.value.dx}px)` };
+}
+
 
 async function save(): Promise<void> {
   setServerList(draft.value);
@@ -88,8 +149,23 @@ async function testAll(): Promise<void> {
 <template>
   <div class="srv-editor" data-role="server-editor">
 
-    <div v-for="(item, i) in draft" :key="i" class="srv-row">
-      <span class="srv-prio neu-num" :title="`优先级 ${i + 1}`">{{ i + 1 }}</span>
+    <div ref="listEl" class="srv-list">
+    <div v-for="(item, i) in draft" :key="i" class="srv-wrap">
+      <div class="srv-swipe" aria-hidden="true">删除</div>
+      <div
+        class="srv-row"
+        :class="{ dragging: dragIndex === i }"
+        :style="rowStyle(i)"
+        @pointerdown="startSwipe(i, $event)"
+        @pointermove="onMove"
+        @pointerup="onUp"
+        @pointercancel="onUp"
+      >
+      <span
+        class="srv-prio neu-num"
+        :title="`优先级 ${i + 1}（拖动排序）`"
+        @pointerdown="startDrag(i, $event)"
+      >{{ i + 1 }}</span>
 
       <div class="srv-input">
         <NeuInput v-model="item.url" placeholder="http://192.168.1.10:3210" />
@@ -108,29 +184,8 @@ async function testAll(): Promise<void> {
         aria-hidden="true"
       />
 
-      <div class="srv-ops">
-        <NeuIconButton
-          icon="chevron-up"
-          label="上移（提高优先级）"
-          size="sm"
-          :disabled="i === 0"
-          @click="move(i, -1)"
-        />
-        <NeuIconButton
-          icon="chevron-down"
-          label="下移（降低优先级）"
-          size="sm"
-          :disabled="i === draft.length - 1"
-          @click="move(i, 1)"
-        />
-        <NeuIconButton
-          icon="trash"
-          label="删除这条"
-          size="sm"
-          :disabled="draft.length <= 1"
-          @click="remove(i)"
-        />
       </div>
+    </div>
     </div>
 
     <div class="srv-actions">
@@ -154,18 +209,62 @@ async function testAll(): Promise<void> {
 .srv-hint code {
   font-size: var(--fs-xs);
 }
-.srv-row {
+.srv-list {
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  box-shadow: inset 0 1px 0 var(--hi);
+  overflow: hidden;
+}
+
+/* 行与右滑删除层叠在一起：行在上，删除在下面 */
+.srv-wrap {
+  position: relative;
+  overflow: hidden;
+}
+.srv-wrap + .srv-wrap {
+  border-top: 1px solid var(--line);
+}
+.srv-swipe {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: var(--sp-4);
+  background: color-mix(in srgb, #d4564a 20%, var(--panel));
+  color: #d4564a;
+  font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
+}
+.srv-row {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
   gap: var(--sp-2);
+  padding: 6px var(--sp-3) 6px var(--sp-2);
+  background: var(--panel);
+  touch-action: pan-y;
+  transition: transform 180ms var(--ease), background-color 180ms var(--ease);
+}
+.srv-row.dragging {
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .srv-prio {
   flex: none;
-  width: 18px;
-  text-align: center;
+  width: 22px;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: var(--fs-sm);
   color: var(--t2);
-  padding-bottom: 12px;
+  touch-action: none;
+  cursor: grab;
 }
 .srv-input {
   flex: 1 1 auto;
@@ -186,13 +285,6 @@ async function testAll(): Promise<void> {
 }
 .srv-dot.unknown {
   background: var(--track, #cbd2da);
-}
-.srv-ops {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding-bottom: 6px;
 }
 .srv-actions {
   display: flex;

@@ -556,6 +556,7 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (!res.ok) throw await parseError(res);
 
   // 204 / 空体：直接返回 undefined，调用方按 void 处理
+  notifyReachable();
   if (res.status === 204) return undefined as T;
   const text = await res.text();
   if (!text) return undefined as T;
@@ -592,7 +593,7 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
   }
 
   if (!res.ok) throw await parseError(res);
-
+  notifyReachable();
   return await res.blob();
 }
 
@@ -604,12 +605,14 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
  * 通过 window 事件交给 UI 层，client 不依赖任何 store。
  */
 let lastUnreachableAt = 0;
+let downNow = false;
 function notifyUnreachable(): void {
   if (!getBaseUrl().trim()) return;
   if (!refreshToken && !accessToken) return;
   const now = Date.now();
   if (now - lastUnreachableAt < 60_000) return;
   lastUnreachableAt = now;
+  downNow = true;
   try {
     window.dispatchEvent(new CustomEvent('suen:server-unreachable'));
   } catch {
@@ -617,9 +620,21 @@ function notifyUnreachable(): void {
   }
 }
 
-/** 登出后重置节流：下次再登录时第一条失败仍要提示 */
+/** 成功响应：把"已断开"状态收回来 */
+function notifyReachable(): void {
+  if (!downNow) return;
+  downNow = false;
+  try {
+    window.dispatchEvent(new CustomEvent('suen:server-ok'));
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 登出后重置：下次再登录时第一条失败仍要提示 */
 export function resetUnreachableNotice(): void {
   lastUnreachableAt = 0;
+  downNow = false;
 }
 
 /**

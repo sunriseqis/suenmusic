@@ -347,6 +347,7 @@ onMounted(() => {
 <template>
   <div class="settings neu-container">
     <h1 class="page-title">设置</h1>
+    <p v-if="session.isLoggedIn && ui.serverDown" class="offline">服务端已断开</p>
 
     <div v-if="serverConfigured" class="tabs-wrap">
       <NeuTabs v-model="activeTab" :items="TABS" />
@@ -689,6 +690,12 @@ onMounted(() => {
   font-weight: var(--fw-bold);
   letter-spacing: -0.02em;
   color: var(--t1);
+}
+
+.offline {
+  margin: calc(var(--sp-3) * -1) 0 0;
+  font-size: var(--fs-xs);
+  color: #d4564a;
 }
 
 .tabs-wrap {
