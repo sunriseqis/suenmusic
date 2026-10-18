@@ -5,20 +5,25 @@
  * 迷你播放条**叠在导航之上**而不是并排 —— 手机竖屏的垂直空间很宝贵，
  * 并排会吃掉两行高度，而叠放时页面滚到底部会自然让位。
  */
-import { onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import PlayerBar from '@/components/PlayerBar.vue';
 import FullPlayer from '@/components/FullPlayer.vue';
 import { registerBackHandler } from '@/native/back.ts';
-import { NAV_ITEMS } from './nav.ts';
+import { navItems } from './nav.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
+import { useUiStore } from '@/stores/ui.ts';
 
 const route = useRoute();
 const player = usePlayerStore();
 const session = useSessionStore();
+const ui = useUiStore();
 
 const isActive = (name: string) => route.name === name;
+
+/** 直连模式隐藏「专属」 */
+const items = computed(() => navItems(!!ui.baseUrl.trim()));
 
 /** 全屏播放页是否展开 */
 const fullOpen = ref(false);
@@ -57,7 +62,7 @@ onBeforeUnmount(offBack);
 
     <nav class="tabbar" aria-label="主导航">
       <router-link
-        v-for="item in NAV_ITEMS"
+        v-for="item in items"
         :key="item.name"
         :to="`/${item.name === 'home' ? '' : item.name}`"
         class="tab neu-focusable"

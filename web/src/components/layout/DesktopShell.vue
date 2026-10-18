@@ -14,7 +14,7 @@ import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuListItem from '@/components/neu/NeuListItem.vue';
 import PlayerBar from '@/components/PlayerBar.vue';
 import DesktopFullPlayer from '@/components/DesktopFullPlayer.vue';
-import { NAV_ITEMS } from './nav.ts';
+import { navItems } from './nav.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useUiStore } from '@/stores/ui.ts';
 
@@ -26,6 +26,9 @@ const ui = useUiStore();
 const detailOpen = ref(false);
 
 const isActive = (name: string) => route.name === name;
+
+/** 直连模式隐藏「专属」 */
+const items = computed(() => navItems(!!ui.baseUrl.trim()));
 
 /** 主题按钮的图标跟随当前模式 */
 const themeIcon = computed(() => {
@@ -48,7 +51,7 @@ const themeLabel = computed(() => {
 
       <nav class="nav" aria-label="主导航">
         <NeuListItem
-          v-for="item in NAV_ITEMS"
+          v-for="item in items"
           :key="item.name"
           :to="`/${item.name === 'home' ? '' : item.name}`"
           :selected="isActive(item.name)"

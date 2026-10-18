@@ -20,3 +20,13 @@ export const NAV_ITEMS: NavItem[] = [
   { name: 'search', label: '搜索', icon: 'search' },
   { name: 'settings', label: '设置', icon: 'settings' },
 ];
+
+/**
+ * 当前可用的导航项。
+ *
+ * 直连模式没有「专属」的数据源（每日推荐需要服务端），
+ * 所以直接不展示这一项 —— 不做"点开必然报错"的入口。
+ */
+export function navItems(hasServer: boolean): NavItem[] {
+  return hasServer ? NAV_ITEMS : NAV_ITEMS.filter(i => i.name !== 'daily');
+}
