@@ -51,7 +51,7 @@ function remove(i: number): void {
 // ---------------------------------------------------------------- 手势
 /**
  * 两种手势：
- *  - 行上横滑：左滑露出「删除」，松手超过阈值即删除
+ *  - 行上横滑：**右滑**露出「删除」，松手超过阈值即删除
  *  - 序号上竖拖：拖动改优先级
  *
  * 页面的纵向滚动不能被吃掉，所以行本身是 `touch-action: pan-y`，
@@ -84,7 +84,7 @@ function onMove(e: PointerEvent): void {
       else if (Math.abs(dy) > 10) return; // 交给页面滚动
       else return;
     }
-    swipe.value = { i: press.i, dx: Math.max(-88, Math.min(0, dx)) };
+    swipe.value = { i: press.i, dx: Math.max(0, Math.min(88, dx)) };
     return;
   }
 
@@ -110,7 +110,7 @@ function onMove(e: PointerEvent): void {
   }
 }
 function onUp(): void {
-  if (swipe.value && swipe.value.dx < -56 && draft.value.length > 1) {
+  if (swipe.value && swipe.value.dx > 56 && draft.value.length > 1) {
     remove(swipe.value.i);
   }
   swipe.value = null;
@@ -232,8 +232,8 @@ async function testAll(): Promise<void> {
   inset: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  padding-right: var(--sp-4);
+  justify-content: flex-start;
+  padding-left: var(--sp-4);
   background: color-mix(in srgb, #d4564a 20%, var(--panel));
   color: #d4564a;
   font-size: var(--fs-xs);
