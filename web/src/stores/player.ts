@@ -86,7 +86,7 @@ const RESUME_TAIL_GUARD_MS = 5_000;
 const SESSION_KEY = 'suenmusic.lastSession';
 
 /** 快照超过这个时长就不再恢复 —— 隔天打开时突然响起昨天的歌很唐突 */
-const SESSION_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 // -------------------------------------------------------------------------
 // 播放模式（五态）
@@ -1459,6 +1459,26 @@ export const usePlayerStore = defineStore('player', () => {
 
     queue.value = snap.queue;
     index.value = snap.index;
+
+    /**
+     * WebView 被系统回收 / Activity 重建，但原生播放服务还活着的情况：
+     * 这时**不能**再 syncNativeQueue —— 那会把正在播放的队列重置，
+     * 用户从车载蓝牙或耳机唤醒时就会听到"断了/队列没了"。
+     * 直接接管原生状态即可。
+     */
+    if (isNativeAudio) {
+      try {
+        const st = await SuenAudio.getStatus();
+        if (st?.playing && st.queueLength > 0) {
+          playing.value = true;
+          positionMs.value = st.positionMs ?? snap.positionMs;
+          durationMs.value = st.durationMs || currentTrack.value?.dt || 0;
+          return true;
+        }
+      } catch {
+        /* 查不到就按冷启动处理 */
+      }
+    }
     // 原始顺序：老快照没有这个字段，退化为"当前顺序即原始顺序"（至少不会更乱）
     sourceOrderIds = snap.sourceIds ?? snap.queue.map(t => t.id);
 
@@ -1511,12 +1531,22 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     if (!ok) {
-      // 恢复失败多半是上游限流。用户并没有主动要求播放任何东西，
-      // 不该在刚打开页面时就甩给他一条报错 —— 安静地撤掉播放条即可。
+      /**
+       * 恢复失败**绝不能清空队列**。
+       *
+       * 之前这里是 `queue=[] + clearSession()`：一次冷启动时的网络抖动
+       * （例如刚从车载蓝牙唤醒、数据还没连上）就把用户攒的队列永久删掉。
+       * 表现正是"唤醒后播放队列没了"，而且再也恢复不回来。
+       *
+       * 现在保留队列与快照，只把状态置为未播放；用户点播放会重新解析，
+       * 下次冷启动也还有机会恢复。
+       */
       errorMessage.value = null;
-      queue.value = [];
-      index.value = -1;
-      clearSession();
+      playing.value = false;
+      positionMs.value = Math.max(0, snap.positionMs);
+      if (!durationMs.value && currentTrack.value?.dt) {
+        durationMs.value = currentTrack.value.dt;
+      }
     }
     return ok;
   }

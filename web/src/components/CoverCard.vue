@@ -52,15 +52,12 @@ const src = computed(() => coverUrl(props.cover, 500));
   position: relative;
   width: 100%;
   aspect-ratio: 1;
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
   overflow: hidden;
-  /* 封面整体凸起，与页面分层 */
-  box-shadow:
-    3px 3px 8px var(--sd),
-    -3px -3px 8px var(--sl);
-  transition:
-    transform var(--dur-mid) var(--ease),
-    box-shadow var(--dur-mid) var(--ease);
+  /* 一块贴上去的板：发丝线 + 顶沿高光，不外投影 */
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
+  transition: border-color var(--dur-mid) var(--ease);
 }
 .art.circle {
   border-radius: 50%;
@@ -68,10 +65,7 @@ const src = computed(() => coverUrl(props.cover, 500));
 
 /* 悬停时微微抬起。幅度很小 —— 软拟物的动效应当是"呼吸"而不是"弹跳" */
 .card:hover .art {
-  transform: translateY(-2px);
-  box-shadow:
-    5px 5px 12px var(--sd),
-    -5px -5px 12px var(--sl);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 
 .art img {
@@ -86,27 +80,23 @@ const src = computed(() => coverUrl(props.cover, 500));
   display: block;
   width: 100%;
   height: 100%;
-  background: var(--bg);
-  box-shadow:
-    inset 3px 3px 8px var(--sd),
-    inset -3px -3px 8px var(--sl);
+  background: var(--panel-2);
 }
 
 .badge {
   position: absolute;
-  right: var(--sp-2);
-  bottom: var(--sp-2);
-  padding: 2px var(--sp-2);
-  border-radius: var(--r-pill);
+  right: 6px;
+  bottom: 6px;
+  padding: 1px 5px;
+  border-radius: 2px;
   background: var(--accent);
-  color: #fff;
-  font-size: 11px;
-  line-height: 1.6;
-  /* 角标压在图片上，必须有阴影才能从杂乱的封面里跳出来 */
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  color: #1a1206;
+  font-size: 10px;
+  line-height: 1.5;
+  letter-spacing: 0.08em;
 }
-:root[data-theme='dark'] .badge {
-  color: #2b1a0e;
+:root[data-theme='light'] .badge {
+  color: #fff;
 }
 
 .meta {
