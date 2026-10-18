@@ -103,20 +103,40 @@ function toggleHarmonyLyrics(enabled: boolean): void {
  * 没有服务端时**整块隐藏服务端 tab** —— 直连模式下那些设置全部无意义，
  * 摆在那里只会让人以为"我是不是没配好"。
  */
+/**
+ * 两个 tab **必须常驻**。
+ *
+ * 曾经按"有没有配服务端"来隐藏「服务端」tab —— 结果没配过的用户
+ * 根本找不到填地址的地方（先有鸡还是先有蛋）。
+ * 现在 tab 常驻，未配置时那个页面只显示地址编辑器，其余分节隐藏。
+ */
+/**
+ * 按**语义**分，不按"谁提供服务"分。
+ *
+ * 曾经的「本机 / 服务端」会让用户先判断"这是谁的功能"再找开关 ——
+ * 而且没配服务端时那个 tab 还是空的。现在：播放 / 数据 / 高级，
+ * 服务端相关全部收进「高级」，未配置时那里只剩地址编辑器。
+ */
+/**
+ * 播放 / 高级常驻；「数据」是服务端数据的入口，只有填了地址才出现。
+ * 界面里不写解释文案 —— 说明放 README。
+ */
 const MAIN_TABS = computed<TabItem[]>(() => {
-  const tabs: TabItem[] = [{ value: 'personal', label: '本机' }];
-  if (ui.baseUrl.trim()) tabs.push({ value: 'system', label: '服务端' });
+  const tabs: TabItem[] = [{ value: 'playback', label: '播放' }];
+  if (ui.baseUrl.trim()) tabs.push({ value: 'data', label: '数据' });
+  tabs.push({ value: 'advanced', label: '高级' });
   return tabs;
 });
-const activeMainTab = ref<'personal' | 'system'>('personal');
 
-/** 服务端地址被清空时把人踢回「本机」，否则会停在一个已经消失的 tab 上 */
+/** 地址被清空时，别把用户留在一个已经消失的 tab 上 */
 watch(
   () => ui.baseUrl,
   v => {
-    if (!v.trim() && activeMainTab.value === 'system') activeMainTab.value = 'personal';
+    if (!v.trim() && activeMainTab.value === 'data') activeMainTab.value = 'playback';
   }
 );
+const activeMainTab = ref<'playback' | 'data' | 'advanced'>('playback');
+
 
 // ---- 主题 ----
 const THEME_TABS: TabItem[] = [
@@ -1124,11 +1144,74 @@ function deviceLabel(ua: string): string {
     </div>
 
     <!-- ==================== 【本机】分区 ==================== -->
-    <template v-if="activeMainTab === 'personal'">
+    <!-- ==================== 【播放】 ==================== -->
+    <template v-if="activeMainTab === 'playback'">
+      <section v-if="isNativeAudio" class="card neu-raised-md" data-section="storage">
+        <div class="card-head">
+          <h2 class="card-title">离线存储与缓存</h2>
+        </div>
+        <OfflineCachePanel />
+      </section>
+
+      <section class="card neu-raised-md" data-section="dislikes">
+        <div class="card-head">
+          <h2 class="card-title">不喜欢</h2>
+        </div>
+
+            <!-- 折叠区：偏好管理（不喜欢的歌曲 / 歌手黑名单） -->
+            <details class="disclosure">
+              <summary class="sum">
+                <NeuIcon name="chevron-right" :size="16" class="chev" />
+                黑名单与偏好过滤
+              </summary>
+
+              <div class="auth-tabs" role="tablist" data-role="pref-tabs">
+                <button
+                  type="button"
+                  role="tab"
+                  class="auth-tab"
+                  :class="{ active: prefTab === 'track' }"
+                  :aria-selected="prefTab === 'track'"
+                  data-auth-tab="track"
+                  @click="prefTab = 'track'"
+                >
+                  不喜欢的歌曲（{{ trackDislikes.length }}）
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class="auth-tab"
+                  :class="{ active: prefTab === 'artist' }"
+                  :aria-selected="prefTab === 'artist'"
+                  data-auth-tab="artist"
+                  @click="prefTab = 'artist'"
+                >
+                  不喜欢的歌手（{{ artistDislikes.length }}）
+                </button>
+              </div>
+
+              <p v-if="dislikeLoading" class="note neu-t2">加载中…</p>
+
+              <ul v-else-if="prefTab === 'track'" class="dislike-list">
+                <li v-for="d in trackDislikes" :key="d.targetId" class="dislike-row">
+                  <span class="d-name neu-ellipsis">{{ d.name || d.targetId }}</span>
+                  <NeuButton variant="ghost" size="sm" @click="undoDislike(d)">恢复推荐</NeuButton>
+                </li>
+                <li v-if="trackDislikes.length === 0" class="note neu-t2">还没有不喜欢过的歌曲。</li>
+              </ul>
+              <ul v-else class="dislike-list">
+                <li v-for="d in artistDislikes" :key="d.targetId" class="dislike-row">
+                  <span class="d-name neu-ellipsis">{{ d.name || d.targetId }}</span>
+                  <NeuButton variant="ghost" size="sm" @click="undoDislike(d)">恢复推荐</NeuButton>
+                </li>
+                <li v-if="artistDislikes.length === 0" class="note neu-t2">还没有不喜欢过的歌手。</li>
+              </ul>
+            </details>
+      </section>
+
       <section class="card neu-raised-md" data-section="appearance">
         <div class="card-head">
           <h2 class="card-title">外观与播放</h2>
-          <p class="card-desc neu-t2">主题、强调色、歌词同步与应用更新</p>
         </div>
 
 
@@ -1205,115 +1288,13 @@ function deviceLabel(ua: string): string {
           </div>
         </div>
       </section>
-
-      <section v-if="isNativeAudio" class="card neu-raised-md" data-section="storage">
-        <div class="card-head">
-          <h2 class="card-title">离线存储与缓存</h2>
-          <p class="card-desc neu-t2">管理设备本地音频缓存（最大 4GB）</p>
-        </div>
-        <OfflineCachePanel />
-      </section>
-
-      <section class="card neu-raised-md" data-section="dislikes">
-        <div class="card-head">
-          <h2 class="card-title">不喜欢</h2>
-          <p class="card-desc neu-t2">被标记的歌曲与歌手不会出现在推荐里；存在本机，可随时恢复</p>
-        </div>
-
-            <!-- 折叠区：偏好管理（不喜欢的歌曲 / 歌手黑名单） -->
-            <details class="disclosure">
-              <summary class="sum">
-                <NeuIcon name="chevron-right" :size="16" class="chev" />
-                黑名单与偏好过滤
-              </summary>
-
-              <div class="auth-tabs" role="tablist" data-role="pref-tabs">
-                <button
-                  type="button"
-                  role="tab"
-                  class="auth-tab"
-                  :class="{ active: prefTab === 'track' }"
-                  :aria-selected="prefTab === 'track'"
-                  data-auth-tab="track"
-                  @click="prefTab = 'track'"
-                >
-                  不喜欢的歌曲（{{ trackDislikes.length }}）
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  class="auth-tab"
-                  :class="{ active: prefTab === 'artist' }"
-                  :aria-selected="prefTab === 'artist'"
-                  data-auth-tab="artist"
-                  @click="prefTab = 'artist'"
-                >
-                  不喜欢的歌手（{{ artistDislikes.length }}）
-                </button>
-              </div>
-
-              <p v-if="dislikeLoading" class="note neu-t2">加载中…</p>
-
-              <ul v-else-if="prefTab === 'track'" class="dislike-list">
-                <li v-for="d in trackDislikes" :key="d.targetId" class="dislike-row">
-                  <span class="d-name neu-ellipsis">{{ d.name || d.targetId }}</span>
-                  <NeuButton variant="ghost" size="sm" @click="undoDislike(d)">恢复推荐</NeuButton>
-                </li>
-                <li v-if="trackDislikes.length === 0" class="note neu-t2">还没有不喜欢过的歌曲。</li>
-              </ul>
-              <ul v-else class="dislike-list">
-                <li v-for="d in artistDislikes" :key="d.targetId" class="dislike-row">
-                  <span class="d-name neu-ellipsis">{{ d.name || d.targetId }}</span>
-                  <NeuButton variant="ghost" size="sm" @click="undoDislike(d)">恢复推荐</NeuButton>
-                </li>
-                <li v-if="artistDislikes.length === 0" class="note neu-t2">还没有不喜欢过的歌手。</li>
-              </ul>
-            </details>
-      </section>
-
-      <section class="card neu-raised-md" data-section="diagnostics">
-        <div class="card-head">
-          <h2 class="card-title">诊断</h2>
-          <p class="card-desc neu-t2">检查搜索、解析、播放这三条直连链路是否正常</p>
-        </div>
-
-        <div class="actions">
-          <NeuButton @click="router.push('/probe')">
-            <NeuIcon name="info" :size="16" />
-            打开直连诊断
-          </NeuButton>
-        </div>
-      </section>
     </template>
 
-    <!-- ==================== 【服务端】分区 ==================== -->
-    <template v-else-if="activeMainTab === 'system'">
-      <!-- 提示条 -->
-      <div class="system-banner neu-inset">
-        <NeuIcon name="info" :size="18" class="banner-icon" />
-        <div class="banner-text">
-          <span class="banner-title">服务端设置</span>
-          <p class="banner-desc neu-t2">
-            这些配置需要你自己的服务端。不配也能正常搜歌、播放、收藏 —— 只是没有多端同步、AI 与高音质凭据。
-          </p>
-        </div>
-      </div>
-
-      <section class="card neu-raised-md" data-section="server">
-        <div class="card-head">
-          <h2 class="card-title">服务端网络与选路</h2>
-          <p class="card-desc neu-t2">
-            管理内网与公网多节点地址，支持自动探测低延迟线路与智能容灾
-          </p>
-        </div>
-
-        <ServerListEditor />
-      </section>
-
+    <!-- ==================== 【数据】只有配置服务端后才出现 ==================== -->
+    <template v-else-if="activeMainTab === 'data'">
       <section class="card neu-raised-md" data-section="security">
         <div class="card-head">
           <h2 class="card-title">账号与设备</h2>
-          <p class="card-desc neu-t2">修改口令、查看并下线正在登录的设备</p>
         </div>
 
         <!-- 折叠项 1：修改口令 -->
@@ -1422,10 +1403,233 @@ function deviceLabel(ua: string): string {
         </details>
       </section>
 
+      <section class="card neu-raised-md" data-section="persona">
+        <div class="card-head">
+          <div class="card-head-row">
+            <h2 class="card-title">音乐画像</h2>
+            <NeuButton
+              variant="ghost"
+              size="sm"
+              :loading="personaRefreshing"
+              :disabled="personaTuning || personaLoading"
+              title="基于当前曲库与行为全量重构画像"
+              @click="handleRefreshPersona"
+            >
+              <NeuIcon name="refresh" :size="14" />
+              {{ personaRefreshing ? '重构中...' : '全量重构' }}
+            </NeuButton>
+          </div>
+        </div>
+
+        <div v-if="personaLoading" class="sessions">
+          <NeuSkeleton :lines="4" height="28px" />
+        </div>
+
+        <div v-else class="persona-content">
+          <!-- AI 摘要正文卡 -->
+          <div class="persona-summary-box neu-inset-deep">
+            <div class="persona-meta-bar">
+              <span class="persona-tag-badge">AI 提炼洞察</span>
+              <span v-if="persona?.updatedAt" class="persona-updated neu-t2">
+                更新于 {{ formatRelative(persona.updatedAt) }}
+              </span>
+            </div>
+
+            <div
+              v-if="persona?.summary"
+              class="persona-markdown"
+              v-html="renderMarkdown(persona.summary)"
+            />
+            <div v-else class="persona-empty neu-t2">
+              <p>尚未生成你的专属画像。</p>
+              <p>在下方输入引导词或点击右上角「全量重构」，让 AI 提炼你的曲库偏好。</p>
+            </div>
+          </div>
+
+          <!-- 折叠区：客观曲库标签分布 -->
+          <details v-if="persona?.profileLines?.length" class="disclosure">
+            <summary class="sum">
+              <NeuIcon name="chevron-right" :size="16" class="chev" />
+              曲库客观分布数据（{{ persona.profileLines.length }} 项）
+            </summary>
+            <div class="persona-objective-list">
+              <div v-for="(line, idx) in persona.profileLines" :key="idx" class="persona-objective-row">
+                <span class="neu-t2">{{ line }}</span>
+              </div>
+            </div>
+          </details>
+
+          <!-- 用户引导微调输入区 -->
+          <div class="persona-tuning-section">
+            <div class="tune-head">
+              <span class="tune-title">引导式画像调优</span>
+              <span class="tune-desc neu-t2">
+                告诉 AI 你的听歌心境、曲风偏好或排斥项，AI 将以你的意志为准绳重构画像
+              </span>
+            </div>
+
+            <div v-if="persona?.lastGuidance" class="last-guidance neu-t2">
+              <span class="guidance-label">上一轮指令：</span>
+              <span class="guidance-text">“{{ persona.lastGuidance }}”</span>
+            </div>
+
+            <div class="tune-input-wrap neu-inset-deep">
+              <textarea
+                v-model="personaGuidance"
+                class="tune-textarea"
+                rows="3"
+                maxlength="300"
+                placeholder="例如：最近想多听点抒情流行，避免快节奏说唱..."
+                :disabled="personaTuning || personaRefreshing"
+                @keydown.ctrl.enter="submitTunePersona"
+                @keydown.meta.enter="submitTunePersona"
+              />
+            </div>
+
+            <p v-if="personaError" class="err" role="alert">{{ personaError }}</p>
+
+            <div class="tune-actions">
+              <span class="char-count neu-t2">{{ personaGuidance.length }}/300</span>
+              <NeuButton
+                variant="primary"
+                :disabled="!personaGuidance.trim() || personaTuning || personaRefreshing"
+                :loading="personaTuning"
+                @click="submitTunePersona"
+              >
+                <NeuIcon name="sparkles" :size="16" />
+                {{ personaTuning ? 'AI 正在提炼重构画像...' : '提交给 AI 调优画像' }}
+              </NeuButton>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="card neu-raised-md" data-section="playlist">
+        <div class="card-head">
+          <h2 class="card-title">数据与备份</h2>
+        </div>
+
+        <div class="playlist-mgmt-v2">
+          <!-- 区块 1：外部歌单导入 -->
+          <div class="playlist-block">
+            <span class="block-label neu-t2">外部歌单导入</span>
+            <div class="playlist-inline-input neu-inset-deep">
+              <input
+                v-model="importQqLink"
+                type="text"
+                class="inline-input-field"
+                placeholder="QQ 音乐歌单链接或纯数字 ID"
+                :disabled="importingQq"
+                @keydown.enter="handleImportQq"
+              />
+              <NeuButton
+                variant="primary"
+                size="sm"
+                :loading="importingQq"
+                :disabled="!importQqLink.trim()"
+                class="inline-input-btn"
+                @click="handleImportQq"
+              >
+                导入
+              </NeuButton>
+            </div>
+          </div>
+
+          <!-- 区块 2：备份与恢复对称网格 -->
+          <div class="playlist-block">
+            <span class="block-label neu-t2">备份与恢复归档</span>
+            <div class="playlist-duo-grid">
+              <!-- 导出 -->
+              <div class="action-tile neu-inset" @click="handleExportSm">
+                <div class="tile-icon neu-raised-xs">
+                  <NeuIcon name="download" :size="18" />
+                </div>
+                <div class="tile-info">
+                  <span class="tile-title">导出备份</span>
+                  <span class="tile-sub neu-t2">归档收藏与偏好记忆</span>
+                </div>
+                <NeuButton
+                  variant="primary"
+                  size="sm"
+                  :loading="exportingSm"
+                  class="tile-btn"
+                  @click.stop="handleExportSm"
+                >
+                  导出 .sm
+                </NeuButton>
+              </div>
+
+              <!-- 恢复 -->
+              <div class="action-tile neu-inset" @click="smFileInput?.click()">
+                <input
+                  ref="smFileInput"
+                  type="file"
+                  accept=".sm"
+                  style="display: none"
+                  @change="handleSmFileSelect"
+                />
+                <div class="tile-icon neu-raised-xs">
+                  <NeuIcon name="upload" :size="18" />
+                </div>
+                <div class="tile-info">
+                  <span class="tile-title">恢复备份</span>
+                  <span class="tile-sub neu-t2">选择 .sm 文件还原曲库</span>
+                </div>
+                <NeuButton
+                  variant="default"
+                  size="sm"
+                  :loading="importingSm"
+                  class="tile-btn"
+                  @click.stop="smFileInput?.click()"
+                >
+                  选择文件
+                </NeuButton>
+              </div>
+            </div>
+          </div>
+
+          <!-- 区块 3：智能曲库去重 -->
+          <div class="playlist-block">
+            <div class="dedup-strip neu-inset">
+              <div class="dedup-strip-info">
+                <div class="strip-icon-title">
+                  <NeuIcon name="sparkles" :size="16" class="strip-icon" />
+                  <span class="strip-title">曲库智能去重</span>
+                </div>
+                <span class="strip-desc neu-t2">
+                  扫描清理重复收藏的歌曲，按歌名与歌手保留最早收藏版本
+                </span>
+              </div>
+              <NeuButton
+                variant="default"
+                size="sm"
+                :loading="dedupChecking"
+                class="strip-btn"
+                @click="handleCheckDedup"
+              >
+                检查重复
+              </NeuButton>
+            </div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- ==================== 【高级】 ==================== -->
+    <template v-else>
+      <section class="card neu-raised-md" data-section="server">
+        <div class="card-head">
+          <h2 class="card-title">服务端网络与选路</h2>
+        </div>
+
+        <ServerListEditor />
+      </section>
+
+      <template v-if="ui.baseUrl.trim()">
       <section class="card neu-raised-md" data-section="auth">
         <div class="card-head">
           <h2 class="card-title">音源授权</h2>
-          <p class="card-desc neu-t2">第三方音源平台凭证绑定与扫码授权</p>
         </div>
 
         <div class="auth-tabs" role="tablist" data-role="auth-tabs">
@@ -1763,234 +1967,9 @@ function deviceLabel(ua: string): string {
         </div>
       </section>
 
-      <section class="card neu-raised-md" data-section="persona">
-        <div class="card-head">
-          <div class="card-head-row">
-            <h2 class="card-title">音乐画像</h2>
-            <NeuButton
-              variant="ghost"
-              size="sm"
-              :loading="personaRefreshing"
-              :disabled="personaTuning || personaLoading"
-              title="基于当前曲库与行为全量重构画像"
-              @click="handleRefreshPersona"
-            >
-              <NeuIcon name="refresh" :size="14" />
-              {{ personaRefreshing ? '重构中...' : '全量重构' }}
-            </NeuButton>
-          </div>
-          <p class="card-desc neu-t2">
-            AI 专属听歌品味记忆 · 每日专属推荐决策核心
-          </p>
-        </div>
-
-        <div v-if="personaLoading" class="sessions">
-          <NeuSkeleton :lines="4" height="28px" />
-        </div>
-
-        <div v-else class="persona-content">
-          <!-- AI 摘要正文卡 -->
-          <div class="persona-summary-box neu-inset-deep">
-            <div class="persona-meta-bar">
-              <span class="persona-tag-badge">AI 提炼洞察</span>
-              <span v-if="persona?.updatedAt" class="persona-updated neu-t2">
-                更新于 {{ formatRelative(persona.updatedAt) }}
-              </span>
-            </div>
-
-            <div
-              v-if="persona?.summary"
-              class="persona-markdown"
-              v-html="renderMarkdown(persona.summary)"
-            />
-            <div v-else class="persona-empty neu-t2">
-              <p>尚未生成你的专属画像。</p>
-              <p>在下方输入引导词或点击右上角「全量重构」，让 AI 提炼你的曲库偏好。</p>
-            </div>
-          </div>
-
-          <!-- 折叠区：客观曲库标签分布 -->
-          <details v-if="persona?.profileLines?.length" class="disclosure">
-            <summary class="sum">
-              <NeuIcon name="chevron-right" :size="16" class="chev" />
-              曲库客观分布数据（{{ persona.profileLines.length }} 项）
-            </summary>
-            <div class="persona-objective-list">
-              <div v-for="(line, idx) in persona.profileLines" :key="idx" class="persona-objective-row">
-                <span class="neu-t2">{{ line }}</span>
-              </div>
-            </div>
-          </details>
-
-          <!-- 用户引导微调输入区 -->
-          <div class="persona-tuning-section">
-            <div class="tune-head">
-              <span class="tune-title">引导式画像调优</span>
-              <span class="tune-desc neu-t2">
-                告诉 AI 你的听歌心境、曲风偏好或排斥项，AI 将以你的意志为准绳重构画像
-              </span>
-            </div>
-
-            <div v-if="persona?.lastGuidance" class="last-guidance neu-t2">
-              <span class="guidance-label">上一轮指令：</span>
-              <span class="guidance-text">“{{ persona.lastGuidance }}”</span>
-            </div>
-
-            <div class="tune-input-wrap neu-inset-deep">
-              <textarea
-                v-model="personaGuidance"
-                class="tune-textarea"
-                rows="3"
-                maxlength="300"
-                placeholder="例如：最近想多听点抒情流行，避免快节奏说唱..."
-                :disabled="personaTuning || personaRefreshing"
-                @keydown.ctrl.enter="submitTunePersona"
-                @keydown.meta.enter="submitTunePersona"
-              />
-            </div>
-
-            <p v-if="personaError" class="err" role="alert">{{ personaError }}</p>
-
-            <div class="tune-actions">
-              <span class="char-count neu-t2">{{ personaGuidance.length }}/300</span>
-              <NeuButton
-                variant="primary"
-                :disabled="!personaGuidance.trim() || personaTuning || personaRefreshing"
-                :loading="personaTuning"
-                @click="submitTunePersona"
-              >
-                <NeuIcon name="sparkles" :size="16" />
-                {{ personaTuning ? 'AI 正在提炼重构画像...' : '提交给 AI 调优画像' }}
-              </NeuButton>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-      <section class="card neu-raised-md" data-section="playlist">
-        <div class="card-head">
-          <h2 class="card-title">数据与备份</h2>
-          <p class="card-desc neu-t2">
-            歌单导入、数据备份恢复及曲库智能去重
-          </p>
-        </div>
-
-        <div class="playlist-mgmt-v2">
-          <!-- 区块 1：外部歌单导入 -->
-          <div class="playlist-block">
-            <span class="block-label neu-t2">外部歌单导入</span>
-            <div class="playlist-inline-input neu-inset-deep">
-              <input
-                v-model="importQqLink"
-                type="text"
-                class="inline-input-field"
-                placeholder="QQ 音乐歌单链接或纯数字 ID"
-                :disabled="importingQq"
-                @keydown.enter="handleImportQq"
-              />
-              <NeuButton
-                variant="primary"
-                size="sm"
-                :loading="importingQq"
-                :disabled="!importQqLink.trim()"
-                class="inline-input-btn"
-                @click="handleImportQq"
-              >
-                导入
-              </NeuButton>
-            </div>
-          </div>
-
-          <!-- 区块 2：备份与恢复对称网格 -->
-          <div class="playlist-block">
-            <span class="block-label neu-t2">备份与恢复归档</span>
-            <div class="playlist-duo-grid">
-              <!-- 导出 -->
-              <div class="action-tile neu-inset" @click="handleExportSm">
-                <div class="tile-icon neu-raised-xs">
-                  <NeuIcon name="download" :size="18" />
-                </div>
-                <div class="tile-info">
-                  <span class="tile-title">导出备份</span>
-                  <span class="tile-sub neu-t2">归档收藏与偏好记忆</span>
-                </div>
-                <NeuButton
-                  variant="primary"
-                  size="sm"
-                  :loading="exportingSm"
-                  class="tile-btn"
-                  @click.stop="handleExportSm"
-                >
-                  导出 .sm
-                </NeuButton>
-              </div>
-
-              <!-- 恢复 -->
-              <div class="action-tile neu-inset" @click="smFileInput?.click()">
-                <input
-                  ref="smFileInput"
-                  type="file"
-                  accept=".sm"
-                  style="display: none"
-                  @change="handleSmFileSelect"
-                />
-                <div class="tile-icon neu-raised-xs">
-                  <NeuIcon name="upload" :size="18" />
-                </div>
-                <div class="tile-info">
-                  <span class="tile-title">恢复备份</span>
-                  <span class="tile-sub neu-t2">选择 .sm 文件还原曲库</span>
-                </div>
-                <NeuButton
-                  variant="default"
-                  size="sm"
-                  :loading="importingSm"
-                  class="tile-btn"
-                  @click.stop="smFileInput?.click()"
-                >
-                  选择文件
-                </NeuButton>
-              </div>
-            </div>
-          </div>
-
-          <!-- 区块 3：智能曲库去重 -->
-          <div class="playlist-block">
-            <div class="dedup-strip neu-inset">
-              <div class="dedup-strip-info">
-                <div class="strip-icon-title">
-                  <NeuIcon name="sparkles" :size="16" class="strip-icon" />
-                  <span class="strip-title">曲库智能去重</span>
-                </div>
-                <span class="strip-desc neu-t2">
-                  扫描清理重复收藏的歌曲，按歌名与歌手保留最早收藏版本
-                </span>
-              </div>
-              <NeuButton
-                variant="default"
-                size="sm"
-                :loading="dedupChecking"
-                class="strip-btn"
-                @click="handleCheckDedup"
-              >
-                检查重复
-              </NeuButton>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="card neu-raised-md" data-section="logout">
-        <div class="actions">
-          <NeuButton variant="danger" block @click="doLogout">退出登录</NeuButton>
-        </div>
-      </section>
-
       <section class="card neu-raised-md" data-section="status">
         <div class="card-head">
           <h2 class="card-title">服务端运行状态</h2>
-          <p class="card-desc neu-t2">服务端环境与注册安全参数</p>
         </div>
 
         <ul v-if="cfg" class="kv">
@@ -2011,6 +1990,13 @@ function deviceLabel(ua: string): string {
           还没取到服务端状态。若一直为空，说明基地址不通。
         </p>
       </section>
+
+      <section class="card neu-raised-md" data-section="logout">
+        <div class="actions">
+          <NeuButton variant="danger" block @click="doLogout">退出登录</NeuButton>
+        </div>
+      </section>
+      </template>
     </template>
 
     <!-- ============ 歌单去重确认弹窗 ============ -->
@@ -2205,6 +2191,15 @@ function deviceLabel(ua: string): string {
   color: var(--t2);
 }
 /* 铭牌后面拖一条发丝线：分区的边界靠线，不靠卡片 */
+.setup-hint {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 2px solid var(--accent);
+  background: var(--panel-2);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
 .card-title::after {
   content: '';
   flex: 1 1 auto;

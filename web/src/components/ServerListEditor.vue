@@ -87,10 +87,6 @@ async function testAll(): Promise<void> {
 
 <template>
   <div class="srv-editor" data-role="server-editor">
-    <p class="neu-t2 srv-hint">
-      顺序即优先级：第 1 条是首选（建议内网），失败时自动往下切。当前生效：
-      <code>{{ active || '（同源）' }}</code>
-    </p>
 
     <div v-for="(item, i) in draft" :key="i" class="srv-row">
       <span class="srv-prio neu-num" :title="`优先级 ${i + 1}`">{{ i + 1 }}</span>
@@ -136,10 +132,6 @@ async function testAll(): Promise<void> {
         />
       </div>
     </div>
-
-    <p v-if="draft.length === 0" class="neu-t2 srv-hint">
-      还没有配置服务器地址。浏览器同源部署时可留空（前端与 API 同域）。
-    </p>
 
     <div class="srv-actions">
       <NeuButton variant="ghost" @click="add">

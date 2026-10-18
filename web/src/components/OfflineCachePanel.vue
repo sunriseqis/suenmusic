@@ -58,7 +58,6 @@ onMounted(refresh);
   <div class="cache" data-role="offline-cache">
     <p class="neu-t2 cache-line">
       已用 <strong>{{ fmt(usedBytes) }}</strong> / 上限 {{ fmt(maxBytes || 4 * 1024 ** 3) }}
-      <span class="neu-t2">· 播过的歌自动落盘，断网可播</span>
     </p>
     <div class="cache-actions">
       <NeuButton variant="ghost" :loading="loading" @click="refresh">刷新</NeuButton>
