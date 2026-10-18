@@ -134,10 +134,8 @@ async function testAll(): Promise<void> {
     </div>
 
     <div class="srv-actions">
-      <NeuButton variant="ghost" @click="add">
-        <span class="srv-add">＋ 添加服务器</span>
-      </NeuButton>
-      <NeuButton variant="ghost" :loading="probing" @click="testAll">测试连通性</NeuButton>
+      <NeuButton @click="add">添加服务器</NeuButton>
+      <NeuButton :loading="probing" @click="testAll">测试连通性</NeuButton>
       <NeuButton variant="primary" @click="save">保存并选路</NeuButton>
     </div>
   </div>
