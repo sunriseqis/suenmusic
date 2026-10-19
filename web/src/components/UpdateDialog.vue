@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: var(--sp-4);
   padding: var(--sp-5);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
 }
 
 .head {

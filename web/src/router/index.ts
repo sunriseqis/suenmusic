@@ -5,13 +5,6 @@ import { useSessionStore } from '@/stores/session.ts';
 
 const routes: RouteRecordRaw[] = [
   {
-    path: '/login',
-    name: 'login',
-    component: () => import('@/views/Login.vue'),
-    // 公开页：未登录也能进
-    meta: { public: true },
-  },
-  {
     path: '/',
     name: 'home',
     component: () => import('@/views/Home.vue'),

@@ -678,7 +678,7 @@ function onScrubCommit(percent: number) {
   align-items: center;
   gap: 3px;
   padding: 2px 7px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   border: none;
   background: transparent;
   color: var(--t2);
@@ -702,15 +702,13 @@ function onScrubCommit(percent: number) {
   width: 210px;
   padding: 6px;
   border-radius: var(--r-lg);
-  background: var(--bg);
+  background: var(--panel);
+  border: 1px solid var(--line);
   z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.18),
-    4px 4px 10px var(--sd),
-    -4px -4px 10px var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .pop-option {
   display: flex;

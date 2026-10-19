@@ -801,8 +801,8 @@ onBeforeUnmount(() => {
   position: absolute;
   top: var(--sp-3);
   left: var(--sp-3);
-  padding: 2px var(--sp-3);
-  border-radius: var(--r-pill);
+  padding: 1px 5px;
+  border-radius: 2px;
   background: rgba(0, 0, 0, 0.5);
   color: #fff;
   font-size: 11px;
@@ -939,40 +939,26 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
   margin-top: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-lg);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--panel);
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);
   color: var(--accent-text);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-  box-shadow:
-    inset calc(1.5px * var(--neu-depth, 1)) calc(1.5px * var(--neu-depth, 1)) calc(4px * var(--neu-depth, 1)) var(--sd),
-    inset calc(-1.5px * var(--neu-depth, 1)) calc(-1.5px * var(--neu-depth, 1)) calc(4px * var(--neu-depth, 1)) var(--sl);
-  transition:
-    background var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease),
-    transform var(--dur-fast) var(--ease);
-}
-:root[data-theme='dark'] .list-play-all {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: inset 0 1px 0 var(--hi);
+  transition: border-color var(--dur-fast) var(--ease);
 }
 .list-play-all:hover {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-:root[data-theme='dark'] .list-play-all:hover {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
 }
 .list-play-all:active {
-  transform: scale(0.99);
-  background: color-mix(in srgb, var(--accent) 22%, transparent);
-  box-shadow:
-    inset calc(2.5px * var(--neu-depth, 1)) calc(2.5px * var(--neu-depth, 1)) calc(6px * var(--neu-depth, 1)) var(--sd),
-    inset calc(-2px * var(--neu-depth, 1)) calc(-2px * var(--neu-depth, 1)) calc(5px * var(--neu-depth, 1)) var(--sl);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
-/* 曲目列表容器：一整块凸起，里面的行保持平（避免逐行加阴影糊成一片） */
+/* 曲目列表：直接落在页面底上，行间用发丝线分格 */
 .list {
-  padding: var(--sp-2);
-  border-radius: var(--r-xl);
+  padding: 0;
 }
 
 /* ---------- 网格卡片 ---------- */

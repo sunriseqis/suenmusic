@@ -122,8 +122,8 @@ const themeLabel = computed(() => {
   flex-direction: column;
   gap: var(--sp-5);
   padding: var(--sp-5) var(--sp-4);
-  /* 侧边栏与主区同底色，靠一条极淡的高光分界（不用 border，避免撑开盒模型） */
-  box-shadow: inset -1px 0 0 var(--sl);
+  /* 侧边栏与主区同底色，靠 1px 发丝线分界 */
+  border-right: 1px solid var(--line);
 }
 
 
@@ -162,9 +162,7 @@ const themeLabel = computed(() => {
   transition: all 0.15s ease;
 }
 .account-dock:hover {
-  box-shadow:
-    inset 2px 2px 4px var(--sd),
-    inset -2px -2px 4px var(--sl);
+  background: var(--panel-2);
 }
 .dock-identity {
   display: flex;

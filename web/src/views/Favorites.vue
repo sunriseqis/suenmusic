@@ -253,12 +253,11 @@ onMounted(() => {
 /* 离线快照提示条 */
 .offline-note {
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
   font-size: var(--fs-xs);
   color: var(--t2);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
 }
 
 .sub {

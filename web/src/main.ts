@@ -69,13 +69,9 @@ onAuthLost(reason => {
   // 收藏的红心集合同理
   favorites.reset();
 
-  if (router.currentRoute.value.name !== 'login') {
-    ui.err(reason.message || '登录已失效，请重新登录');
-    void router.replace({
-      name: 'login',
-      query: { redirect: router.currentRoute.value.fullPath },
-    });
-  }
+  // 不再跳登录页：没有守卫，登录只从设置页的弹层发起。
+  // 这里只负责清状态并告知原因，用户留在原地继续本地播放。
+  ui.err(reason.message || '登录已失效，请重新登录');
 });
 
 /**

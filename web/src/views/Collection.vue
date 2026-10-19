@@ -922,10 +922,9 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
   line-height: 1.8;
   white-space: pre-wrap;
   padding: var(--sp-3) var(--sp-4);
-  border-radius: var(--r-lg);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
 }
 /* 折叠只是**默认态**，不是终态 —— 折叠必须配一个展开入口（见 .desc-toggle）。
    上一版只有 max-height + overflow:hidden，长介绍的后半截永远看不到。 */
@@ -935,14 +934,15 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
 }
 .desc-toggle {
   align-self: flex-start;
-  padding: var(--sp-1) var(--sp-3);
-  border-radius: var(--r-pill);
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 0;
+  background: transparent;
   font-size: var(--fs-xs);
+  letter-spacing: 0.06em;
   color: var(--accent-text);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  cursor: pointer;
 }
 .desc-toggle:focus-visible {
   outline: 2px solid var(--accent-text);
@@ -1002,23 +1002,21 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
   gap: var(--sp-3);
 }
 .simi-chip {
-  padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--r-pill);
+  padding: 8px var(--sp-4);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel);
   font-size: var(--fs-sm);
   color: var(--t1);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
-  transition: box-shadow var(--dur-fast) var(--ease);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease);
 }
 .simi-chip:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
   color: var(--accent-text);
 }
 .simi-chip:active {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  transform: translateY(1px);
 }
 .simi-chip:focus-visible {
   outline: 2px solid var(--accent-text);
@@ -1040,28 +1038,22 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
   min-width: 56px;
   text-align: center;
 }
-/* 页码按钮：当前页拉成小胶囊，与首页指示点同一套语言 */
+/* 页码：辅助控件，不占面板。当前页只换色，不做胶囊 */
 .page-num {
-  min-width: 32px;
-  padding: var(--sp-1) var(--sp-2);
-  border-radius: var(--r-pill);
+  min-width: 28px;
+  padding: var(--sp-1) 2px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
   color: var(--t2);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
-  transition:
-    color var(--dur-fast) var(--ease),
-    box-shadow var(--dur-fast) var(--ease);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease);
 }
 .page-num.is-on {
   color: var(--accent-text);
   font-weight: var(--fw-medium);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
 }
 .page-num:focus-visible,
 .more:focus-visible {
@@ -1075,19 +1067,16 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
 /* 「加载更多」是这一排里唯一会打上游的动作，做成文字按钮以示区别 */
 .more {
   padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--r-pill);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
   font-size: var(--fs-sm);
   color: var(--accent-text);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  cursor: pointer;
 }
 .more:disabled {
   color: var(--t2);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  opacity: 0.6;
 }
 
 .state {
@@ -1096,14 +1085,11 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-7) var(--sp-5);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   text-align: center;
 }
 .warn {
-  box-shadow:
-    3px 3px 7px var(--sd),
-    -3px -3px 7px var(--sl),
-    inset 0 0 0 2px var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 .state-title {
   font-size: var(--fs-lg);
@@ -1120,20 +1106,19 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
-  padding: var(--sp-2) var(--sp-5);
-  border-radius: var(--r-pill);
-  color: var(--accent-text);
+  padding: 10px var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--t1);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
+  cursor: pointer;
 }
 .retry:active {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 @media (max-width: 767px) {

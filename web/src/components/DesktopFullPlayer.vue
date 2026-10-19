@@ -501,9 +501,10 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 380px;
   aspect-ratio: 1;
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
   overflow: hidden;
   flex: none;
+  border: 1px solid var(--line);
 }
 .art img,
 .art-ph {
@@ -514,10 +515,7 @@ onBeforeUnmount(() => {
   display: block;
 }
 .art-ph {
-  background: var(--track);
-  box-shadow:
-    inset 4px 4px 10px var(--sd),
-    inset -4px -4px 10px var(--sl);
+  background: var(--panel-2);
 }
 .art-sheen {
   position: absolute;
@@ -615,7 +613,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: var(--r-pill);
+  border-radius: var(--r-sm);
   border: none;
   background: transparent;
   color: var(--t2);
@@ -639,15 +637,13 @@ onBeforeUnmount(() => {
   width: 220px;
   padding: 6px;
   border-radius: var(--r-lg);
-  background: var(--bg);
+  background: var(--panel);
+  border: 1px solid var(--line);
   z-index: 100;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.15),
-    4px 4px 10px var(--sd),
-    -4px -4px 10px var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 .pop-option {
   display: flex;

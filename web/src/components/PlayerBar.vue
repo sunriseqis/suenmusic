@@ -427,8 +427,9 @@ function onNowClick(e: MouseEvent) {
   gap: var(--sp-5);
   padding: var(--sp-3) var(--sp-5);
   min-height: var(--playerbar-h);
-  /* 与页面同底色，靠一条向上的高光把播放条"抬"起来 */
-  box-shadow: inset 0 1px 0 var(--sl);
+  /* 与页面同底色，靠一条 1px 发丝线分界 */
+  border-top: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 var(--hi);
 }
 
 .now {
@@ -448,17 +449,12 @@ function onNowClick(e: MouseEvent) {
 }
 .cover-ph {
   display: block;
-  background: var(--track);
-  box-shadow:
-    inset 2px 2px 5px var(--sd),
-    inset -2px -2px 5px var(--sl);
+  background: var(--panel-2);
 }
 .cover img {
   object-fit: cover;
-  background: var(--track);
-  box-shadow:
-    2px 2px 5px var(--sd),
-    -2px -2px 5px var(--sl);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
 }
 
 /* 音源状态灯：封面左下角的小圆点 */

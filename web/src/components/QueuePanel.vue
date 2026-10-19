@@ -265,9 +265,10 @@ function onTouchEnd(index: number, trackId: string) {
 }
 
 .list {
+  /* 平铺：行间用发丝线分格，不做卡片容器 */
   list-style: none;
   margin: 0;
-  padding: var(--sp-2);
+  padding: 0;
   overflow-y: auto;
   min-height: 0;
 }
@@ -294,14 +295,11 @@ function onTouchEnd(index: number, trackId: string) {
   font-size: inherit;
 }
 .item:hover .item-main {
-  box-shadow:
-    inset 1px 1px 2px var(--sd),
-    inset -1px -1px 2px var(--sl);
+  background: var(--panel-2);
 }
 .item.current {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: var(--panel-2);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 .item.current .name {
   color: var(--accent-text);
@@ -361,10 +359,7 @@ function onTouchEnd(index: number, trackId: string) {
 }
 .cov-ph {
   display: block;
-  background: var(--track);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  background: var(--panel-2);
 }
 .cov img {
   object-fit: cover;
@@ -394,8 +389,10 @@ function onTouchEnd(index: number, trackId: string) {
 .item-wrapper {
   position: relative;
   overflow: hidden;
-  border-radius: var(--r-md);
-  margin-bottom: 2px;
+  border-radius: 0;
+}
+.item-wrapper + .item-wrapper {
+  border-top: 1px solid var(--line);
 }
 .item-wrapper.is-removing {
   transition: max-height 0.2s var(--ease), margin 0.2s var(--ease), opacity 0.2s var(--ease);

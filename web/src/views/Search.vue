@@ -472,28 +472,27 @@ function openPlaylist(tid: string | number | undefined) {
 }
 
 .list {
-  padding: var(--sp-2);
-  border-radius: var(--r-xl);
+  /* 列表直接落在页面底上，与搜索/收藏同一套 */
+  padding: 0;
 }
 
 .play-all {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-2) var(--sp-4);
-  border-radius: var(--r-pill);
+  padding: 8px var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
   color: var(--accent-text);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
+  cursor: pointer;
 }
 .play-all:active {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 .grid-btn {
@@ -518,7 +517,7 @@ function openPlaylist(tid: string | number | undefined) {
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-7) var(--sp-5);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-md);
   text-align: center;
 }
 .state.plain {
@@ -527,10 +526,7 @@ function openPlaylist(tid: string | number | undefined) {
 }
 .warn {
   /* 限流用强调色描边提示，与真正的失败（红字）区分开 */
-  box-shadow:
-    3px 3px 7px var(--sd),
-    -3px -3px 7px var(--sl),
-    inset 0 0 0 2px var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent-text);
 }
 .state-title {
   font-size: var(--fs-lg);
@@ -547,20 +543,19 @@ function openPlaylist(tid: string | number | undefined) {
   align-items: center;
   gap: var(--sp-2);
   margin-top: var(--sp-2);
-  padding: var(--sp-2) var(--sp-5);
-  border-radius: var(--r-pill);
-  color: var(--accent-text);
+  padding: 10px var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--t1);
   font-size: var(--fs-sm);
   font-weight: var(--fw-medium);
-  background: var(--bg);
-  box-shadow:
-    1px 1px 3px var(--sd),
-    -1px -1px 3px var(--sl);
+  box-shadow: inset 0 1px 0 var(--hi);
+  cursor: pointer;
 }
 .retry:active {
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  transform: translateY(1px);
+  box-shadow: inset 0 2px 7px var(--lo);
 }
 
 @media (max-width: 767px) {

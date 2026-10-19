@@ -357,7 +357,7 @@ onBeforeUnmount(stopPreview);
   flex-direction: column;
   gap: var(--sp-4);
   padding: var(--sp-5);
-  border-radius: var(--r-xl);
+  border-radius: var(--r-lg);
 }
 
 .head {
@@ -405,11 +405,10 @@ onBeforeUnmount(stopPreview);
   justify-content: space-between;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
   font-size: var(--fs-xs);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
 }
 
 /* 原版参照卡：Q 音侧元数据信息（歌名 / 歌手 / 专辑 / 参考时长） */
@@ -418,10 +417,9 @@ onBeforeUnmount(stopPreview);
   align-items: center;
   gap: var(--sp-3);
   padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
 }
 .ref-meta {
   min-width: 0;
@@ -444,7 +442,6 @@ onBeforeUnmount(stopPreview);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: var(--sp-2);
   /* 与全站一致：不显示滚动条 */
   scrollbar-width: none;
 }
@@ -457,11 +454,12 @@ onBeforeUnmount(stopPreview);
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
-  border-radius: var(--r-md);
-  box-shadow:
-    inset 1px 1px 3px var(--sd),
-    inset -1px -1px 3px var(--sl);
+  padding: var(--sp-3);
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+}
+.row:first-child {
+  border-top: 0;
 }
 .meta {
   flex: 1 1 auto;
