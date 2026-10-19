@@ -301,8 +301,28 @@ onMounted(() => {
 }
 
 @media (min-width: 1024px) {
+  /* 标题在左、收藏内搜索在右，列表跨满 */
   .favorites {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 420px;
+    grid-template-areas:
+      'head search'
+      'main main';
+    align-items: end;
+    gap: var(--sp-4) var(--sp-6);
     padding-top: var(--sp-6);
+    padding-bottom: var(--sp-5);
+  }
+  .head {
+    grid-area: head;
+  }
+  .search-row {
+    grid-area: search;
+  }
+  .list,
+  .skeleton,
+  .empty {
+    grid-column: 1 / -1;
   }
   .title {
     font-size: 26px;
