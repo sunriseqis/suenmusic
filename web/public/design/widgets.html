@@ -3,21 +3,22 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SuenMusic · 桌面卡片 2×2 / 2×4</title>
+<title>SuenMusic · 桌面卡片（仪表盘）</title>
 <style>
   :root{
     --bg:#0E0F11; --panel:#15171A; --panel-2:#1A1D21;
-    --line:rgba(255,255,255,.09); --hi:rgba(255,255,255,.06);
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.14); --hi:rgba(255,255,255,.06);
     --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
     --accent:#E8A33D; --accent-text:#F0B45F;
-    --card-bg:#1A1D21;
+    --card-bg:#17191D;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   }
   html.light{
     --bg:#F2F0EA; --panel:#FAF8F3; --panel-2:#EDEAE2;
-    --line:rgba(20,18,14,.12); --hi:rgba(255,255,255,.9);
+    --line:rgba(20,18,14,.12); --line-2:rgba(20,18,14,.18); --hi:rgba(255,255,255,.9);
     --t1:#1B1916; --t2:#6E675C; --t3:#9C958A;
     --accent:#B0650F; --accent-text:#8F4F08;
-    --card-bg:#EDEAE2;
+    --card-bg:#FAF8F3;
   }
   *{box-sizing:border-box}
   body{
@@ -63,91 +64,98 @@
   }
   .preview.s,.preview.m{height:212px}
 
-  /* ---------------- 卡片共用 ---------------- */
-  .widget{position:relative;overflow:hidden;border-radius:18px;border:1px solid var(--line)}
-  .cover-fill{
-    position:absolute;inset:0;
-    background:
-      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.14),transparent 55%),
-      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
-  }
-  .ring{position:absolute;left:24%;right:24%;top:15%;bottom:44%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
-  .scrim{position:absolute;left:0;right:0;bottom:0;height:74%;background:linear-gradient(180deg,transparent,rgba(8,9,10,.72) 58%,rgba(8,9,10,.94))}
-
-  /* ---------------- 2×2：封面 + 一条渐变压字 + 单播放键 ---------------- */
-  .w2{width:160px;height:160px}
-  .w2 .meta{position:absolute;left:12px;right:46px;bottom:13px}
-  .w2 .n{font-size:13px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w2 .s{font-size:10px;color:rgba(255,255,255,.62);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w2 .key{
-    position:absolute;right:10px;bottom:11px;width:30px;height:30px;border-radius:50%;
-    background:var(--accent);display:flex;align-items:center;justify-content:center;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.32);
-  }
-  .w2 .key svg{width:11px;height:11px;fill:#1A1206;margin-left:1px}
-  .prog{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.14)}
-  .prog i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
-
-  /* ---------------- 2×4：封面 + 右上收藏 + 进度 + 运输 ---------------- */
-  .w4{
-    width:340px;height:160px;border-radius:18px;
-    background:var(--card-bg);
-    color:var(--t1);
-    display:flex;gap:14px;padding:14px;
-  }
-  .w4 .cov{
-    width:104px;height:104px;border-radius:10px;flex:none;border:1px solid var(--line);
+  /* ============================================================
+     卡片：仪表盘。所有元素落在发丝线网格里，没有整块封面海报
+     ============================================================ */
+  .widget{
     position:relative;overflow:hidden;
+    background:var(--card-bg);color:var(--t1);
+    border:1px solid var(--line);border-radius:14px;
+  }
+  .cov{
+    display:block;position:relative;overflow:hidden;
+    border:1px solid var(--line);border-radius:6px;
     background:
       radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.12),transparent 55%),
-      linear-gradient(155deg,#3A4048 0%,#22262C 62%,#121418 100%);
+      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
   }
-  .w4 .cov .ring{left:18%;right:18%;top:14%;bottom:30%}
-  .w4 .body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;padding:2px 0}
-  .w4 .top{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
-  .w4 .n{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w4 .s{font-size:11px;color:var(--t2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w4 .fav{width:24px;height:24px;flex:none;border:0;background:transparent;color:var(--t2);display:flex;align-items:center;justify-content:center;padding:0}
-  .w4 .fav svg{width:13px;height:13px;fill:currentColor}
-  .w4 .fav.on{color:var(--accent)}
+  .cov .ring{position:absolute;left:18%;right:18%;top:14%;bottom:30%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
 
-  .w4 .progressrow{display:flex;align-items:center;gap:8px;margin-top:10px}
-  .w4 .bar{flex:1;height:2px;background:var(--line);position:relative}
-  .w4 .bar i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
-  .w4 .times{font-size:9px;color:var(--t3);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .tc{font-family:var(--mono);font-size:9px;letter-spacing:.02em;color:var(--t3);font-variant-numeric:tabular-nums}
+  .bar{position:relative;height:2px;background:var(--line-2);flex:1}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
 
-  .w4 .ctrl{display:flex;align-items:center;gap:14px;margin-top:12px}
-  .w4 .cbtn{width:26px;height:26px;border:0;background:transparent;color:var(--t1);display:flex;align-items:center;justify-content:center;padding:0}
-  .w4 .cbtn svg{width:14px;height:14px;fill:currentColor}
-  .w4 .cbtn.key{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#1A1206;box-shadow:inset 0 1px 0 rgba(255,255,255,.32)}
-  .w4 .cbtn.key svg{width:11px;height:11px;margin-left:1px}
+  .key{
+    width:26px;height:26px;flex:none;border-radius:50%;border:0;
+    background:var(--accent);color:#1A1206;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.30);
+  }
+  .key svg{width:9px;height:9px;fill:currentColor;margin-left:1px}
 
-  /* ---------------- 翻转页：左对齐歌词 + 模糊封面 ---------------- */
-  .w4.flip{padding:0;display:block;background:#0B0C0E;color:#fff}
+  .ic{
+    width:22px;height:22px;border:0;background:transparent;padding:0;
+    color:var(--t2);display:flex;align-items:center;justify-content:center;
+  }
+  .ic svg{width:13px;height:13px;fill:currentColor}
+  .ic.on{color:var(--accent)}
+
+  /* ---------------- 2×2 ---------------- */
+  .w2{width:160px;height:160px;display:flex;flex-direction:column}
+  .w2 .top{flex:1;min-height:0;display:flex;gap:10px;padding:10px}
+  .w2 .cov{width:64px;height:64px;flex:none}
+  .w2 .txt{min-width:0;padding-top:1px}
+  .w2 .n{font-size:13px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .bottom{
+    height:50px;flex:none;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;padding:0 10px;
+  }
+
+  /* ---------------- 2×4 ---------------- */
+  .w4{width:340px;height:160px;display:grid;grid-template-columns:112px minmax(0,1fr) 56px}
+  .w4 .cvcell{border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+  .w4 .cov{width:84px;height:84px}
+
+  .w4 .info{min-width:0;padding:12px 14px;display:flex;flex-direction:column}
+  .w4 .n{font-size:14px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w4 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w4 .pr{margin-top:auto;display:flex;align-items:center;gap:8px}
+
+  .w4 .rail{
+    border-left:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+    padding:9px 0;
+  }
+  .w4 .rail .key{width:34px;height:34px}
+  .w4 .rail .key svg{width:11px;height:11px}
+  .w4 .lr{display:flex;align-items:center;gap:2px}
+
+  /* ---------------- 翻转页（仅 2×4） ---------------- */
+  .w4.flip{color:#fff}
   .w4.flip .blurbg{
-    position:absolute;inset:-24px;
+    position:absolute;inset:-24px;z-index:0;
     background:
       radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.14),transparent 55%),
       linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
     filter:blur(16px);
   }
-  .w4.flip .veil{position:absolute;inset:0;background:linear-gradient(180deg,rgba(8,12,18,.38),rgba(8,12,18,.88))}
-  .w4.flip .page{position:absolute;inset:0;padding:13px 14px;display:flex;flex-direction:column}
-  .w4.flip .fhead{display:flex;align-items:baseline;gap:8px;min-width:0}
-  .w4.flip .ft{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w4.flip .fa{font-size:10px;color:rgba(255,255,255,.62);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
-  .w4.flip .lines{
-    flex:1;display:flex;flex-direction:column;justify-content:center;gap:3px;margin-top:2px;
-  }
+  .w4.flip .veil{position:absolute;inset:0;z-index:0;background:linear-gradient(180deg,rgba(8,12,18,.42),rgba(8,12,18,.88))}
+  .w4.flip .cvcell,.w4.flip .info,.w4.flip .rail{position:relative;z-index:1;border-color:rgba(255,255,255,.14)}
+  .w4.flip .info{justify-content:flex-start}
+  .w4.flip .n{color:#fff}
+  .w4.flip .s{color:rgba(255,255,255,.62)}
+  .w4.flip .lines{display:flex;flex-direction:column;gap:5px;margin-top:auto;padding-bottom:2px}
   .w4.flip .ly{
-    position:relative;padding-left:10px;
+    position:relative;padding-left:8px;
     font-size:10px;line-height:1.35;color:rgba(255,255,255,.50);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .w4.flip .ly.now{font-size:13px;font-weight:700;color:var(--accent-text)}
-  .w4.flip .ly.now::before{content:"";position:absolute;left:0;top:3px;bottom:3px;width:2px;background:var(--accent)}
+  .w4.flip .ly.now{font-size:12px;font-weight:700;color:var(--accent-text)}
+  .w4.flip .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--accent)}
+  .w4.flip .rail .ic{color:rgba(255,255,255,.68)}
 
-  /* ---------------- 页面底部 ---------------- */
+    /* ---------------- 页面底部 ---------------- */
   .foot{margin-top:auto;padding:0 20px 26px;display:flex;flex-direction:column;gap:10px}
   .primary{height:48px;border-radius:10px;border:1px solid color-mix(in srgb,var(--accent) 72%,#000);background:var(--accent);color:#1A1206;font:inherit;font-size:14px;font-weight:600;box-shadow:inset 0 1px 0 rgba(255,255,255,.30)}
   .hint{font-size:10px;color:var(--t3);text-align:center;letter-spacing:.04em}
@@ -176,7 +184,7 @@
   <div class="page-head">
     <div>
       <h1>SuenMusic · 桌面卡片</h1>
-      <p>2×2 单键沉浸 / 2×4 信息完整 / 2×4 翻转歌词</p>
+      <p>仪表盘方向 · 发丝线网格 / 单键运输 / 左对齐歌词</p>
     </div>
     <button class="toggle" id="themeBtn">切换浅色</button>
   </div>
@@ -197,15 +205,18 @@
             <div class="group-head"><span class="k">2 × 2</span><span class="dim">160 × 160</span></div>
             <div class="preview s">
               <div class="widget w2">
-                <span class="cover-fill"></span>
-                <span class="ring"></span>
-                <span class="scrim"></span>
-                <div class="meta">
-                  <div class="n">夜航</div>
-                  <div class="s">林间</div>
+                <div class="top">
+                  <span class="cov"><span class="ring"></span></span>
+                  <div class="txt">
+                    <div class="n">夜航</div>
+                    <div class="s">林间</div>
+                  </div>
                 </div>
-                <span class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></span>
-                <span class="prog"><i></i></span>
+                <div class="bottom">
+                  <span class="tc">1:34</span>
+                  <span class="bar"><i></i></span>
+                  <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                </div>
               </div>
             </div>
           </div>
@@ -214,23 +225,18 @@
             <div class="group-head"><span class="k">4 × 2</span><span class="dim">340 × 160</span></div>
             <div class="preview m">
               <div class="widget w4">
-                <span class="cov"><span class="ring"></span></span>
-                <div class="body">
-                  <div class="top">
-                    <div>
-                      <div class="n">夜航</div>
-                      <div class="s">林间</div>
-                    </div>
-                    <button class="fav on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
-                  </div>
-                  <div class="progressrow">
-                    <span class="bar"><i></i></span>
-                    <span class="times">1:34 / 4:08</span>
-                  </div>
-                  <div class="ctrl">
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                    <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+                <div class="cvcell"><span class="cov"><span class="ring"></span></span></div>
+                <div class="info">
+                  <div class="n">夜航</div>
+                  <div class="s">林间 · 专辑 夜航</div>
+                  <div class="pr"><span class="tc">1:34</span><span class="bar"><i></i></span><span class="tc">4:08</span></div>
+                </div>
+                <div class="rail">
+                  <button class="ic on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+                  <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                  <div class="lr">
+                    <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                    <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
                   </div>
                 </div>
               </div>
@@ -257,38 +263,36 @@
 
         <div class="widgets">
           <div class="widget w4">
-            <span class="cov"><span class="ring"></span></span>
-            <div class="body">
-              <div class="top">
-                <div>
-                  <div class="n">夜航</div>
-                  <div class="s">林间</div>
-                </div>
-                <button class="fav on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
-              </div>
-              <div class="progressrow">
-                <span class="bar"><i></i></span>
-                <span class="times">1:34 / 4:08</span>
-              </div>
-              <div class="ctrl">
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+            <div class="cvcell"><span class="cov"><span class="ring"></span></span></div>
+            <div class="info">
+              <div class="n">夜航</div>
+              <div class="s">林间 · 专辑 夜航</div>
+              <div class="pr"><span class="tc">1:34</span><span class="bar"><i></i></span><span class="tc">4:08</span></div>
+            </div>
+            <div class="rail">
+              <button class="ic on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+              <div class="lr">
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
               </div>
             </div>
           </div>
 
           <div class="row2">
             <div class="widget w2">
-              <span class="cover-fill"></span>
-              <span class="ring"></span>
-              <span class="scrim"></span>
-              <div class="meta">
-                <div class="n">雨停之后</div>
-                <div class="s">陈稚</div>
+              <div class="top">
+                <span class="cov"><span class="ring"></span></span>
+                <div class="txt">
+                  <div class="n">雨停之后</div>
+                  <div class="s">陈稚</div>
+                </div>
               </div>
-              <span class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span>
-              <span class="prog"><i style="width:62%"></i></span>
+              <div class="bottom">
+                <span class="tc">2:12</span>
+                <span class="bar"><i style="width:62%"></i></span>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+              </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
               <span class="appicon"></span>
@@ -317,33 +321,37 @@
           <div class="widget w4 flip">
             <span class="blurbg"></span>
             <span class="veil"></span>
-            <div class="page">
-              <div class="fhead">
-                <span class="ft">夜航</span>
-                <span class="fa">林间</span>
-              </div>
+            <div class="cvcell"><span class="cov"><span class="ring"></span></span></div>
+            <div class="info">
+              <div class="n">夜航</div>
+              <div class="s">林间</div>
               <div class="lines">
                 <div class="ly">把灯调到最暗的那一档</div>
                 <div class="ly">海面没有回声</div>
                 <div class="ly now">我们就一直向前</div>
                 <div class="ly">直到天亮之前</div>
                 <div class="ly">所有方向都叫远方</div>
-                <div class="ly">而你在我的右边</div>
               </div>
+            </div>
+            <div class="rail">
+              <button class="ic"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6-1.4-1.4L12 12.2 7.4 7.6 6 9z"/></svg></button>
             </div>
           </div>
 
           <div class="row2">
             <div class="widget w2">
-              <span class="cover-fill"></span>
-              <span class="ring"></span>
-              <span class="scrim"></span>
-              <div class="meta">
-                <div class="n">雨停之后</div>
-                <div class="s">陈稚</div>
+              <div class="top">
+                <span class="cov"><span class="ring"></span></span>
+                <div class="txt">
+                  <div class="n">雨停之后</div>
+                  <div class="s">陈稚</div>
+                </div>
               </div>
-              <span class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span>
-              <span class="prog"><i style="width:62%"></i></span>
+              <div class="bottom">
+                <span class="tc">2:12</span>
+                <span class="bar"><i style="width:62%"></i></span>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+              </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
               <span class="appicon"></span>
@@ -360,9 +368,9 @@
   </div>
 
   <p class="note">
-    2×2 去掉毛玻璃面板与四键：160 塞不下，只留一个播放键，文字靠底部渐变压住。<br />
-    2×4 收藏移到右上（状态），中段放进度与时长，运输键独立一行。<br />
-    翻转页改为左对齐歌词，当前行 2px 琥珀竖线；标题与歌手收成顶部一行。
+    2×2 不再用整块封面海报：封面缩成 64 的方块，其余让给标题与一条运输带（时间码 + 进度 + 播放键）。<br />
+    2×4 拆成三格：封面 / 信息 / 竖排控制轨，靠 1px 发丝线分隔，像一台机器的三个区。<br />
+    翻转页保留三格结构：封面留在左格，中间换成歌词，右格只剩一个翻回键。
   </p>
 
 <script>
