@@ -12,7 +12,7 @@
  * 一次性任务（登入、黑名单、导入、去重、备份、缓存、主题）走底部弹层。
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -253,18 +253,6 @@ function onDesktopChange(e: MediaQueryListEvent): void {
   isDesktop.value = e.matches;
 }
 
-/**
- * 桌面两栏时，分区数为奇数会在右下留一个空格子。
- * 数一下实际渲染的分区，奇数就让最后一张跨满整行。
- */
-const oddSections = ref(false);
-function syncSectionParity(): void {
-  void nextTick(() => {
-    const n = document.querySelectorAll('.settings > .sec').length;
-    oddSections.value = n % 2 === 1;
-  });
-}
-watch([serverConfigured, () => session.isLoggedIn, isDesktop], syncSectionParity);
 
 const loginAddr = ref(ui.baseUrl);
 const loginUser = ref('');
@@ -444,7 +432,6 @@ async function loadServerData(): Promise<void> {
 
 onMounted(() => {
   desktopMq?.addEventListener('change', onDesktopChange);
-  syncSectionParity();
   void dislikes.ensureLoaded();
   void favorites.ensureLoaded();
   void loadServerData();
@@ -457,7 +444,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="settings neu-container" :class="{ 'odd-sections': oddSections }">
+  <div class="settings neu-container">
     <h1 class="page-title">设置</h1>
     <p v-if="session.isLoggedIn && ui.serverDown" class="offline">服务端已断开</p>
 
@@ -1034,28 +1021,45 @@ onBeforeUnmount(() => {
 }
 
 @media (min-width: 1024px) {
+  /*
+   * 桌面改成一张「表单」：左侧标签列，右侧内容列，分区用发丝线分隔。
+   * 不再用卡片网格 —— 卡片高低不一正是混乱的来源。
+   */
   .settings {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    /* 同一行的两张卡等高：左右底边对齐，不再一高一低 */
-    align-items: stretch;
-    gap: 28px 40px;
+    display: block;
+    max-width: 980px;
+    margin: 0 auto;
     padding-top: var(--sp-6);
     padding-bottom: var(--sp-6);
   }
-  .sec {
-    height: 100%;
+  .page-title {
+    margin-bottom: var(--sp-3);
   }
-  /* 分区数为奇数时，最后一张跨满，避免右下留空格子 */
-  .odd-sections > .sec:last-of-type {
-    grid-column: 1 / -1;
-  }
-  .sec .panel {
-    flex: 1 1 auto;
-  }
-  .page-title,
   .offline {
-    grid-column: 1 / -1;
+    margin-bottom: var(--sp-3);
+  }
+  .tabs-wrap {
+    margin-bottom: var(--sp-4);
+  }
+  .sec {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    align-items: start;
+    gap: 28px;
+    padding: 22px 0;
+    border-top: 1px solid var(--line);
+    margin: 0;
+  }
+  .label {
+    margin: 0;
+    padding-top: 12px;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--t2);
+  }
+  /* 标签列不需要那条延伸线 */
+  .label::after {
+    display: none;
   }
 }
 </style>
