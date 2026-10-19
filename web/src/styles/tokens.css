@@ -62,7 +62,7 @@
 
   /* ---- 布局尺寸 ---- */
   --sidebar-w: 232px;
-  --playerbar-h: 76px;
+  --playerbar-h: 88px;
   --mobile-nav-h: 62px;
   /**
    * 安全区（状态栏 / 手势条）。

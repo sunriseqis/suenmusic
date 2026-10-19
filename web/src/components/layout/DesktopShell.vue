@@ -9,9 +9,7 @@
 import { computed, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import BrandLockup from '@/components/brand/BrandLockup.vue';
-import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuIconButton from '@/components/neu/NeuIconButton.vue';
-import NeuListItem from '@/components/neu/NeuListItem.vue';
 import PlayerBar from '@/components/PlayerBar.vue';
 import DesktopFullPlayer from '@/components/DesktopFullPlayer.vue';
 import { navItems } from './nav.ts';
@@ -29,6 +27,19 @@ const isActive = (name: string) => route.name === name;
 
 /** 直连模式隐藏「专属」 */
 const items = computed(() => navItems(!!ui.baseUrl.trim()));
+/** 设置单独放在「管理」分组 */
+const browseItems = computed(() => items.value.filter(i => i.name !== 'settings'));
+
+/** 侧栏底部显示的服务端主机名（没有配服务端时为空） */
+const serverHost = computed(() => {
+  const raw = ui.baseUrl.trim();
+  if (!raw) return '';
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw.replace(/^https?:\/\//, '');
+  }
+});
 
 /** 主题按钮的图标跟随当前模式 */
 const themeIcon = computed(() => {
@@ -50,16 +61,27 @@ const themeLabel = computed(() => {
       </div>
 
       <nav class="nav" aria-label="主导航">
-        <NeuListItem
-          v-for="item in items"
+        <span class="nav-label">浏览</span>
+        <router-link
+          v-for="item in browseItems"
           :key="item.name"
           :to="`/${item.name === 'home' ? '' : item.name}`"
-          :selected="isActive(item.name)"
-          padding="3"
+          class="nav-item"
+          :class="{ 'is-on': isActive(item.name) }"
         >
-          <NeuIcon :name="item.icon" :size="19" />
-          <span class="label">{{ item.label }}</span>
-        </NeuListItem>
+          {{ item.label }}
+        </router-link>
+
+        <template v-if="items.some(i => i.name === 'settings')">
+          <span class="nav-label nav-label-gap">管理</span>
+          <router-link
+            to="/settings"
+            class="nav-item"
+            :class="{ 'is-on': isActive('settings') }"
+          >
+            设置
+          </router-link>
+        </template>
       </nav>
 
       <div class="foot">
@@ -85,6 +107,11 @@ const themeLabel = computed(() => {
             />
           </div>
         </router-link>
+
+        <div v-if="serverHost" class="server">
+          <span class="neu-ellipsis">{{ serverHost }}</span>
+          <b>{{ session.isLoggedIn ? '已连接' : '未登录' }}</b>
+        </div>
       </div>
     </aside>
 
@@ -140,11 +167,59 @@ const themeLabel = computed(() => {
 .nav {
   display: flex;
   flex-direction: column;
-  gap: var(--sp-1);
+  gap: 2px;
 }
-.label {
-  flex: 1 1 auto;
-  min-width: 0;
+.nav-label {
+  padding: 0 10px 8px;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  color: var(--t3);
+}
+.nav-label-gap {
+  margin-top: 18px;
+}
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  color: var(--t2);
+  font-size: 13px;
+  letter-spacing: 0.02em;
+  text-decoration: none;
+  transition: color var(--dur-fast) var(--ease);
+}
+.nav-item:hover {
+  color: var(--t1);
+}
+.nav-item.is-on {
+  color: var(--t1);
+  background: var(--panel-2);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+.nav-item.is-on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  background: var(--accent);
+}
+.server {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 0 10px;
+  font-size: 10px;
+  color: var(--t3);
+  font-variant-numeric: tabular-nums;
+}
+.server b {
+  font-weight: 400;
+  color: var(--t2);
 }
 
 .foot {
