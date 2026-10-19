@@ -22,6 +22,7 @@ import OfflineCachePanel from '@/components/OfflineCachePanel.vue';
 import ServerListEditor from '@/components/ServerListEditor.vue';
 import AdminUsers from '@/components/AdminUsers.vue';
 import AdminMaintenance from '@/components/AdminMaintenance.vue';
+import AdminAiModels from '@/components/AdminAiModels.vue';
 import Sheet from '@/components/Sheet.vue';
 import { isAndroid } from '@/native/update.ts';
 import {
@@ -39,7 +40,7 @@ import { applyDedupe, previewDedupe, type DupGroup } from '@/offline/dedupe.ts';
 import { applyBackup, buildBackup, downloadBackup } from '@/offline/backup.ts';
 import { loadWebdav, saveWebdav, webdavGet, webdavPut } from '@/offline/webdav.ts';
 import { directQQPlaylist } from '@/api/direct/playlist.ts';
-import { fetchAiModels, fetchPersona, saveAiModels, tunePersona } from '@/api/ai.ts';
+import { fetchPersona, tunePersona } from '@/api/ai.ts';
 import {
   fetchBilibiliStatus,
   logoutBilibili,
@@ -52,7 +53,7 @@ import {
   pollNeteaseQr,
   startNeteaseQr,
 } from '@/api/netease.ts';
-import type { AiSettingsConfigView, PersonaDetail } from '@/api/types.ts';
+import type { PersonaDetail } from '@/api/types.ts';
 
 const ui = useUiStore();
 const session = useSessionStore();
@@ -303,8 +304,7 @@ const persona = ref<PersonaDetail | null>(null);
 const personaOpen = ref(false);
 const guidance = ref('');
 const tuning = ref(false);
-const aiConfig = ref<AiSettingsConfigView | null>(null);
-const assigning = ref(false);
+
 
 async function loadPersona(): Promise<void> {
   try {
@@ -313,13 +313,7 @@ async function loadPersona(): Promise<void> {
     persona.value = null;
   }
 }
-async function loadAi(): Promise<void> {
-  try {
-    aiConfig.value = await fetchAiModels();
-  } catch {
-    aiConfig.value = null;
-  }
-}
+
 async function submitTune(): Promise<void> {
   const text = guidance.value.trim();
   if (!text || tuning.value) return;
@@ -335,28 +329,7 @@ async function submitTune(): Promise<void> {
     tuning.value = false;
   }
 }
-async function assign(task: 'decide' | 'review', id: string): Promise<void> {
-  const cfg = aiConfig.value;
-  if (!cfg || !id) return;
-  assigning.value = true;
-  try {
-    const res = await saveAiModels({
-      profiles: cfg.profiles.map(p => ({
-        id: p.id,
-        name: p.name,
-        baseUrl: p.baseUrl,
-        model: p.model,
-      })),
-      decideProfileId: task === 'decide' ? id : cfg.decideProfileId,
-      reviewProfileId: task === 'review' ? id : cfg.reviewProfileId,
-    });
-    aiConfig.value = res.config;
-  } catch (e) {
-    ui.err(e instanceof Error ? e.message : '保存失败');
-  } finally {
-    assigning.value = false;
-  }
-}
+
 
 // ---------------------------------------------------------------- 音源 / 运行情况
 const biliName = ref('');
@@ -466,7 +439,6 @@ async function loadServerData(): Promise<void> {
   void loadSources();
   if (session.isLoggedIn) {
     void loadPersona();
-    void loadAi();
   }
 }
 
@@ -629,35 +601,8 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-if="session.user?.role === 'admin'" class="sec">
-        <h2 class="label">AI 分配</h2>
-        <div class="panel pad">
-          <div class="field">
-            <span class="field-name">决策</span>
-            <select
-              class="select"
-              :value="aiConfig?.decideProfileId ?? ''"
-              :disabled="assigning"
-              @change="assign('decide', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="p in aiConfig?.profiles ?? []" :key="p.id" :value="p.id">
-                {{ p.name }}
-              </option>
-            </select>
-          </div>
-          <div class="field">
-            <span class="field-name">复核</span>
-            <select
-              class="select"
-              :value="aiConfig?.reviewProfileId ?? ''"
-              :disabled="assigning"
-              @change="assign('review', ($event.target as HTMLSelectElement).value)"
-            >
-              <option v-for="p in aiConfig?.profiles ?? []" :key="p.id" :value="p.id">
-                {{ p.name }}
-              </option>
-            </select>
-          </div>
-        </div>
+        <h2 class="label">AI 模型</h2>
+        <AdminAiModels />
       </section>
     </template>
 
