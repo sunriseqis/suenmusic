@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SuenMusic · 卡片方向对比</title>
+<style>
+  :root{
+    --bg:#0E0F11; --panel:#15171A; --panel-2:#1A1D21;
+    --line:rgba(255,255,255,.09); --hi:rgba(255,255,255,.06);
+    --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
+    --accent:#E8A33D; --accent-text:#F0B45F;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    /* A 方向：纸标签 */
+    --paper:#F0E9DA; --paper-ink:#191510; --paper-dim:#6C6151; --paper-line:rgba(25,21,16,.16); --paper-accent:#C25A18;
+    --card-bg:#17191D;
+  }
+  html.light{
+    --bg:#F2F0EA; --panel:#FAF8F3; --panel-2:#EDEAE2;
+    --line:rgba(20,18,14,.12); --hi:rgba(255,255,255,.9);
+    --t1:#1B1916; --t2:#6E675C; --t3:#9C958A;
+    --accent:#B0650F; --accent-text:#8F4F08;
+    --paper:#FFFDF7; --paper-ink:#191510; --paper-dim:#6C6151; --paper-line:rgba(25,21,16,.14); --paper-accent:#B4530F;
+    --card-bg:#FAF8F3;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:40px 32px 80px;background:#08090A;color:#C9C6BF;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page-head{max-width:1324px;margin:0 auto 24px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .page-head h1{margin:0;font-size:18px;font-weight:600;color:#EDEAE4}
+  .page-head p{margin:6px 0 0;font-size:12px;color:#7C7972}
+  .toggle{height:34px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:transparent;color:#B9B5AC;font:inherit;font-size:12px;cursor:pointer}
+  .toggle:hover{border-color:rgba(255,255,255,.28);color:#EDEAE4}
+
+  .stage{max-width:1324px;margin:0 auto;display:grid;grid-template-columns:repeat(2,390px);gap:28px;justify-content:center}
+  .col{display:flex;flex-direction:column;gap:10px}
+  .caption{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.16em;color:#6B6861;text-transform:uppercase}
+  .caption span:last-child{letter-spacing:.02em;text-transform:none;color:#4E4B45}
+
+  .phone{
+    width:390px;height:844px;overflow:hidden;position:relative;
+    background:var(--bg);color:var(--t1);
+    border:1px solid rgba(255,255,255,.10);border-radius:24px;
+    display:flex;flex-direction:column;
+  }
+  .status{height:44px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;padding:0 22px 6px;font-size:11px;color:rgba(232,230,225,.6);font-variant-numeric:tabular-nums}
+  .home{
+    background:
+      radial-gradient(90% 60% at 80% 0%,rgba(232,163,61,.10),transparent 60%),
+      radial-gradient(80% 60% at 10% 100%,rgba(90,120,160,.10),transparent 60%),
+      linear-gradient(180deg,#14161A,#0A0B0D);
+    padding:0 20px;
+  }
+  .clock{padding:30px 8px 22px}
+  .time{font-size:64px;font-weight:300;letter-spacing:-.04em;color:#F2F0EA;line-height:1}
+  .date{font-size:12px;color:rgba(232,230,225,.55);margin-top:8px}
+  .widgets{display:flex;flex-direction:column;gap:18px}
+  .row2{display:flex;gap:18px;align-items:flex-start}
+  .appicon{width:70px;height:70px;border-radius:16px;border:1px solid rgba(255,255,255,.10);background:linear-gradient(155deg,rgba(255,255,255,.10),rgba(255,255,255,.03))}
+  .dock{margin-top:auto;margin-bottom:22px;height:84px;border-radius:22px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);display:flex;align-items:center;justify-content:space-around;padding:0 18px}
+  .dock .appicon{width:52px;height:52px;border-radius:14px}
+
+  .cov{
+    position:relative;overflow:hidden;
+    background:
+      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.12),transparent 55%),
+      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
+  }
+  .cov .ring{position:absolute;left:18%;right:18%;top:14%;bottom:30%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
+
+  .tc{font-family:var(--mono);font-size:9px;letter-spacing:.02em;font-variant-numeric:tabular-nums}
+  .bar{position:relative;height:2px;flex:1}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:39%}
+
+  .ic{width:22px;height:22px;border:0;background:transparent;padding:0;display:flex;align-items:center;justify-content:center}
+  .ic svg{width:13px;height:13px;fill:currentColor}
+  .key{border:0;display:flex;align-items:center;justify-content:center;border-radius:50%;box-shadow:inset 0 1px 0 rgba(255,255,255,.28)}
+  .key svg{fill:currentColor;margin-left:1px}
+
+  /* ============================================================
+     A · 唱片标签
+     ============================================================ */
+  .a2{
+    width:160px;height:160px;border-radius:14px;overflow:hidden;
+    background:var(--paper);color:var(--paper-ink);
+    border:1px solid rgba(0,0,0,.28);
+    display:flex;flex-direction:column;
+  }
+  .a2 .cov{height:92px;border-bottom:1px solid var(--paper-line)}
+  .a2 .label{flex:1;position:relative;padding:8px 10px}
+  .a2 .n{font-size:12px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a2 .s{font-size:9px;color:var(--paper-dim);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a2 .key{position:absolute;right:8px;bottom:8px;width:24px;height:24px;background:var(--paper-accent);color:#fff}
+  .a2 .key svg{width:9px;height:9px}
+  .a2 .bar{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--paper-line)}
+  .a2 .bar i{background:var(--paper-accent)}
+
+  .a4{
+    width:340px;height:160px;border-radius:14px;overflow:hidden;
+    background:var(--paper);color:var(--paper-ink);
+    border:1px solid rgba(0,0,0,.28);
+    display:flex;
+  }
+  .a4 .cov{width:132px;height:100%;border-right:1px solid var(--paper-line);flex:none}
+  .a4 .label{flex:1;min-width:0;padding:12px 14px;display:flex;flex-direction:column}
+  .a4 .n{font-size:15px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a4 .s{font-size:10px;color:var(--paper-dim);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .a4 .pr{margin-top:auto;display:flex;align-items:center;gap:8px}
+  .a4 .tc{color:var(--paper-dim)}
+  .a4 .bar{background:var(--paper-line)}
+  .a4 .bar i{background:var(--paper-accent)}
+  .a4 .ctrl{display:flex;align-items:center;gap:10px;margin-top:10px}
+  .a4 .ic{color:var(--paper-ink);opacity:.75}
+  .a4 .ic.on{color:var(--paper-accent);opacity:1}
+  .a4 .key{width:28px;height:28px;background:var(--paper-accent);color:#fff}
+  .a4 .key svg{width:10px;height:10px}
+
+  .af{
+    width:340px;height:160px;border-radius:14px;overflow:hidden;position:relative;
+    border:1px solid rgba(0,0,0,.28);
+  }
+  .af .bg{position:absolute;inset:-20px;background:linear-gradient(155deg,#343A42,#101216);filter:blur(14px)}
+  .af .sheet{
+    position:absolute;inset:8px;border-radius:8px;background:var(--paper);color:var(--paper-ink);
+    padding:11px 13px;display:flex;flex-direction:column;
+  }
+  .af .h{display:flex;align-items:baseline;gap:8px}
+  .af .n{font-size:12px;font-weight:700}
+  .af .s{font-size:9px;color:var(--paper-dim)}
+  .af .lines{flex:1;display:flex;flex-direction:column;justify-content:center;gap:3px;margin-top:2px}
+  .af .ly{position:relative;padding-left:8px;font-size:10px;line-height:1.35;color:rgba(25,21,16,.55);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .af .ly.now{font-size:12px;font-weight:700;color:var(--paper-accent)}
+  .af .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--paper-accent)}
+
+  /* ============================================================
+     B · 纯排版
+     ============================================================ */
+  .b2{
+    width:160px;height:160px;border-radius:14px;overflow:hidden;
+    background:var(--card-bg);color:var(--t1);
+    border:1px solid var(--line);
+    display:flex;flex-direction:column;padding:12px;
+  }
+  .b2 .k{font-size:8px;letter-spacing:.22em;color:var(--t3)}
+  .b2 .n{margin-top:auto;font-size:24px;font-weight:600;line-height:1.12;letter-spacing:-.02em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .b2 .s{font-size:10px;color:var(--t2);margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .b2 .row{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .b2 .tc{color:var(--t3)}
+  .b2 .bar{background:var(--line)}
+  .b2 .bar i{background:var(--accent)}
+  .b2 .play{width:18px;height:18px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--accent)}
+  .b2 .play svg{width:11px;height:11px;fill:currentColor}
+
+  .b4{
+    width:340px;height:160px;border-radius:14px;overflow:hidden;
+    background:var(--card-bg);color:var(--t1);
+    border:1px solid var(--line);
+    padding:14px 16px;display:flex;flex-direction:column;
+  }
+  .b4 .k{font-size:8px;letter-spacing:.22em;color:var(--t3);display:flex;justify-content:space-between}
+  .b4 .n{font-size:22px;font-weight:600;line-height:1.15;letter-spacing:-.02em;margin-top:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .b4 .s{font-size:10px;color:var(--t2);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .b4 .row{margin-top:auto;display:flex;align-items:center;gap:10px}
+  .b4 .tc{color:var(--t3)}
+  .b4 .bar{background:var(--line)}
+  .b4 .bar i{background:var(--accent)}
+  .b4 .ctrl{display:flex;align-items:center;gap:6px;margin-left:4px;color:var(--t2)}
+  .b4 .ctrl .ic svg{width:12px;height:12px}
+  .b4 .ctrl .key{width:24px;height:24px;background:var(--accent);color:#1A1206}
+  .b4 .ctrl .key svg{width:8px;height:8px}
+
+  .bf{
+    width:340px;height:160px;border-radius:14px;overflow:hidden;
+    background:var(--card-bg);color:var(--t1);
+    border:1px solid var(--line);
+    padding:12px 16px;display:flex;flex-direction:column;
+  }
+  .bf .h{display:flex;align-items:baseline;justify-content:space-between}
+  .bf .k{font-size:8px;letter-spacing:.22em;color:var(--t3)}
+  .bf .n{font-size:11px;font-weight:600}
+  .bf .lines{flex:1;display:flex;flex-direction:column;justify-content:center;gap:4px;margin-top:2px}
+  .bf .ly{position:relative;padding-left:10px;font-size:11px;line-height:1.35;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bf .ly.now{font-size:14px;font-weight:700;color:var(--accent-text)}
+  .bf .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--accent)}
+
+  .note{max-width:1324px;margin:24px auto 0;font-size:11px;line-height:1.9;color:#6B6861}
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <div>
+      <h1>SuenMusic · 卡片方向对比</h1>
+      <p>左列 A 唱片标签 · 右列 B 纯排版</p>
+    </div>
+    <button class="toggle" id="themeBtn">切换浅色</button>
+  </div>
+
+  <div class="stage">
+    <!-- ================= A1 唱片标签 -->
+    <div class="col">
+      <div class="caption"><span>A / 唱片标签</span><span>纸标签 · 单橙键</span></div>
+      <div class="phone home">
+        <div class="status"><span>9:41</span><span>5G ▮</span></div>
+        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="widgets">
+          <div class="a4">
+            <span class="cov"><span class="ring"></span></span>
+            <div class="label">
+              <div class="n">夜航</div>
+              <div class="s">林间 · 专辑 夜航</div>
+              <div class="pr"><span class="tc">1:34</span><span class="bar"><i></i></span><span class="tc">4:08</span></div>
+              <div class="ctrl">
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+                <button class="ic on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="a2">
+              <span class="cov"><span class="ring"></span></span>
+              <div class="label">
+                <div class="n">雨停之后</div>
+                <div class="s">陈稚</div>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+                <span class="bar"><i style="width:62%"></i></span>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <span class="appicon"></span><span class="appicon"></span>
+            </div>
+          </div>
+        </div>
+        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+      </div>
+    </div>
+
+    <!-- ================= B1 纯排版 -->
+    <div class="col">
+      <div class="caption"><span>B / 纯排版</span><span>无封面 · 大字歌名</span></div>
+      <div class="phone home">
+        <div class="status"><span>9:41</span><span>5G ▮</span></div>
+        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="widgets">
+          <div class="b4">
+            <div class="k"><span>正在播放</span><span>B 站</span></div>
+            <div class="n">夜航</div>
+            <div class="s">林间 · 专辑 夜航</div>
+            <div class="row">
+              <span class="tc">1:34</span>
+              <span class="bar"><i></i></span>
+              <span class="tc">4:08</span>
+              <div class="ctrl">
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="b2">
+              <div class="k">正在播放</div>
+              <div class="n">雨停之后</div>
+              <div class="s">陈稚</div>
+              <div class="row"><span class="tc">2:12</span><span class="bar"><i style="width:62%"></i></span><span class="play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <span class="appicon"></span><span class="appicon"></span>
+            </div>
+          </div>
+        </div>
+        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+      </div>
+    </div>
+
+    <!-- ================= A2 唱片标签 · 翻转 -->
+    <div class="col">
+      <div class="caption"><span>A / 翻转</span><span>纸标签 + 模糊封面</span></div>
+      <div class="phone home">
+        <div class="status"><span>9:41</span><span>5G ▮</span></div>
+        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="widgets">
+          <div class="af">
+            <span class="bg"></span>
+            <div class="sheet">
+              <div class="h"><span class="n">夜航</span><span class="s">林间</span></div>
+              <div class="lines">
+                <div class="ly">把灯调到最暗的那一档</div>
+                <div class="ly">海面没有回声</div>
+                <div class="ly now">我们就一直向前</div>
+                <div class="ly">直到天亮之前</div>
+                <div class="ly">所有方向都叫远方</div>
+              </div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="a2">
+              <span class="cov"><span class="ring"></span></span>
+              <div class="label">
+                <div class="n">雨停之后</div>
+                <div class="s">陈稚</div>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+                <span class="bar"><i style="width:62%"></i></span>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <span class="appicon"></span><span class="appicon"></span>
+            </div>
+          </div>
+        </div>
+        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+      </div>
+    </div>
+
+    <!-- ================= B2 纯排版 · 翻转 -->
+    <div class="col">
+      <div class="caption"><span>B / 翻转</span><span>无底图 · 纯文字</span></div>
+      <div class="phone home">
+        <div class="status"><span>9:41</span><span>5G ▮</span></div>
+        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="widgets">
+          <div class="bf">
+            <div class="h"><span class="k">歌词</span><span class="n">夜航 · 林间</span></div>
+            <div class="lines">
+              <div class="ly">把灯调到最暗的那一档</div>
+              <div class="ly">海面没有回声</div>
+              <div class="ly now">我们就一直向前</div>
+              <div class="ly">直到天亮之前</div>
+              <div class="ly">所有方向都叫远方</div>
+            </div>
+          </div>
+          <div class="row2">
+            <div class="b2">
+              <div class="k">正在播放</div>
+              <div class="n">雨停之后</div>
+              <div class="s">陈稚</div>
+              <div class="row"><span class="tc">2:12</span><span class="bar"><i style="width:62%"></i></span><span class="play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <span class="appicon"></span><span class="appicon"></span>
+            </div>
+          </div>
+        </div>
+        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    A 唱片标签：上半封面、下半纸标签，黑字 + 单橙键；翻转页是一张压住模糊封面的纸。<br />
+    B 纯排版：完全没有封面，靠字号与留白；翻转页也不换材质，只把歌名换成歌词。<br />
+    两版都不使用外阴影；A 的纸色是唯一的"亮面"，B 与 App 使用同一套面板色。
+  </p>
+
+<script>
+  const btn = document.getElementById('themeBtn');
+  btn.addEventListener('click', () => {
+    const light = document.documentElement.classList.toggle('light');
+    btn.textContent = light ? '切换深色' : '切换浅色';
+  });
+</script>
+</body>
+</html>
