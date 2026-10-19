@@ -104,12 +104,19 @@ onBeforeUnmount(offBack);
   display: none;
 }
 
+/*
+ * 底部留白。
+ *
+ * 导航是 shell 网格的第二行，**本身就不覆盖内容** —— 这里再预留一整条
+ * --mobile-nav-h，等于把导航高度又空了一遍，滚到底会看到一大段空白。
+ * 现在只留 breathing room；只有迷你播放条是 fixed 浮层，需要为它让位。
+ */
 .tail {
-  height: calc(var(--mobile-nav-h) + var(--sp-5) + var(--safe-bottom));
+  height: var(--sp-4);
 }
 .tail.has-mini {
-  /* 迷你条约 58px */
-  height: calc(var(--mobile-nav-h) + 58px + var(--sp-5) + var(--safe-bottom));
+  /* 迷你条约 58px，浮在导航上方，会盖住内容底部 */
+  height: calc(58px + var(--sp-4));
 }
 
 .mini-dock {

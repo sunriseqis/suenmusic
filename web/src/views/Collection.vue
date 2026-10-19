@@ -1122,6 +1122,10 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
 }
 
 @media (max-width: 767px) {
+  /* 底部让位由 MobileShell 的 tail 负责，页面不再重复留 48px */
+  .collection {
+    padding-bottom: 0;
+  }
   .head {
     flex-direction: column;
     align-items: center;
