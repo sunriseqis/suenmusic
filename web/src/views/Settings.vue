@@ -1061,5 +1061,25 @@ onBeforeUnmount(() => {
   .label::after {
     display: none;
   }
+  /*
+   * 表单里不再套卡片：面板透明、去边框，行与行之间用发丝线分隔。
+   * 之前每个分区都是一个盒子，盒子里再套面板，视觉上全是边框和空白。
+   */
+  .panel {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+  }
+  .panel > .row,
+  .panel > .row-btn {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .panel > .row + .row,
+  .panel > .row-btn + .row-btn {
+    border-top: 1px solid var(--line);
+  }
 }
 </style>
