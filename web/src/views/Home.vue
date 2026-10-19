@@ -1096,10 +1096,40 @@ onBeforeUnmount(() => {
 }
 
 @media (min-width: 1024px) {
+  /* 桌面：新碟独占一行，新歌与巅峰榜左右分栏 */
   .home {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    grid-template-areas:
+      'head head'
+      'albums albums'
+      'songs charts';
+    align-items: start;
+    gap: var(--sp-6) 36px;
     padding-top: var(--sp-6);
     padding-bottom: var(--sp-5);
-    gap: var(--sp-6);
+  }
+  .head {
+    grid-area: head;
+  }
+  [data-block='new-albums'] {
+    grid-area: albums;
+  }
+  [data-block='new-songs'] {
+    grid-area: songs;
+  }
+  [data-block='toplists'] {
+    grid-area: charts;
+  }
+  /* 骨架 / 错误 / 空态不参与分栏 */
+  .home > .pull-hint,
+  .home > .state,
+  .home > .neu-grid,
+  .home > .block:not([data-block]) {
+    grid-column: 1 / -1;
+  }
+  .toplist-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>
