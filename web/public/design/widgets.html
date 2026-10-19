@@ -155,6 +155,9 @@
   .empty .cov,.empty .well{display:flex;align-items:center;justify-content:center;background:var(--card-bg)}
   .empty .cov .ring{display:none}
   .empty .cov svg,.empty .well svg{width:26px;height:26px;fill:var(--t3);opacity:.55}
+  /* 无曲目：运输键全部灰掉，且不可点 */
+  .empty .ic{opacity:.35;pointer-events:none}
+  .empty .key{background:var(--card-well);color:var(--t3);box-shadow:none;opacity:.8;pointer-events:none}
 
   /* ---------------- 页面底部 ---------------- */
   .foot{margin-top:auto;padding:0 20px 26px;display:flex;flex-direction:column;gap:10px}
