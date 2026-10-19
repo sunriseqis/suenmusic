@@ -3,27 +3,22 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>SuenMusic · 桌面卡片（定稿方向）</title>
+<title>SuenMusic · 桌面卡片（仪表盘）</title>
 <style>
   :root{
     --bg:#0E0F11; --panel:#15171A; --panel-2:#1A1D21;
-    --line:rgba(255,255,255,.09); --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
-    --accent:#E8A33D;
+    --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.14); --hi:rgba(255,255,255,.06);
+    --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
+    --accent:#E8A33D; --accent-text:#F0B45F;
+    --card-bg:#17191D;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    /* 卡片沿用鸿蒙 v4 的令牌 */
-    --card-bg:#2B313C; --card-t1:#E9EDF4; --card-t2:#A5B0C2;
-    --card-accent:#FF8B4A; --card-on:#2B1A0E;
-    --card-sd:rgba(0,0,0,.55); --card-sl:rgba(255,255,255,.07);
-    --card-well:#22262E;
   }
   html.light{
     --bg:#F2F0EA; --panel:#FAF8F3; --panel-2:#EDEAE2;
-    --line:rgba(20,18,14,.12); --t1:#1B1916; --t2:#6E675C; --t3:#9C958A;
-    --accent:#B0650F;
-    --card-bg:#E7ECF3; --card-t1:#3A4557; --card-t2:#586476;
-    --card-accent:#E0783C; --card-on:#FFFFFF;
-    --card-sd:rgba(148,166,190,.55); --card-sl:rgba(255,255,255,.95);
-    --card-well:#DCE3EC;
+    --line:rgba(20,18,14,.12); --line-2:rgba(20,18,14,.18); --hi:rgba(255,255,255,.9);
+    --t1:#1B1916; --t2:#6E675C; --t3:#9C958A;
+    --accent:#B0650F; --accent-text:#8F4F08;
+    --card-bg:#FAF8F3;
   }
   *{box-sizing:border-box}
   body{
@@ -69,83 +64,83 @@
   }
   .preview.s,.preview.m{height:212px}
 
-  /* ---------------- 卡片共用 ---------------- */
-  .widget{position:relative;overflow:hidden;border-radius:18px}
-  .cover-fill{
-    position:absolute;inset:0;
-    background:
-      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.14),transparent 55%),
-      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
+  /* ============================================================
+     卡片：仪表盘。所有元素落在发丝线网格里，没有整块封面海报
+     ============================================================ */
+  .widget{
+    position:relative;overflow:hidden;
+    background:var(--card-bg);color:var(--t1);
+    border:1px solid var(--line);border-radius:14px;
   }
-  .ring{position:absolute;left:24%;right:24%;top:15%;bottom:44%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
-  .scrim{position:absolute;left:0;right:0;bottom:0;height:76%;background:linear-gradient(180deg,transparent,rgba(8,9,10,.68) 52%,rgba(8,9,10,.92))}
-
-  /* 控制键：沿用原卡的软按钮 */
-  .ctrl{display:flex;align-items:center;gap:8px}
-  .cbtn{
-    width:24px;height:24px;border:0;border-radius:50%;padding:0;
-    background:var(--card-bg);color:var(--card-t1);
-    box-shadow:2px 2px 5px var(--card-sd),-2px -2px 5px var(--card-sl);
-    display:flex;align-items:center;justify-content:center;
-  }
-  .cbtn svg{width:12px;height:12px;fill:currentColor}
-  .cbtn.key{width:32px;height:32px;background:var(--card-accent);color:var(--card-on);box-shadow:2px 2px 5px var(--card-sd),-2px -2px 5px var(--card-sl),inset 0 1px 0 rgba(255,255,255,.28)}
-  .cbtn.key svg{width:14px;height:14px;margin-left:1px}
-  .cbtn.on{color:var(--card-accent)}
-
-  /* ---------------- 2×2 ---------------- */
-  .w2{width:160px;height:160px}
-  .w2 .glass{
-    position:absolute;left:0;right:0;bottom:0;
-    padding:10px;border-radius:14px;
-    background:rgba(12,16,24,.38);
-    -webkit-backdrop-filter:blur(22px);
-    backdrop-filter:blur(22px);
-    color:#fff;
-  }
-  .w2 .n{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w2 .s{font-size:10px;color:rgba(255,255,255,.72);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w2 .ctrl{margin-top:8px;justify-content:center}
-  .w2 .cbtn:not(.key){background:#2B313C;color:#E9EDF4}
-
-  /* ---------------- 2×4：歌词直接在卡上 ---------------- */
-  .w4{
-    width:340px;height:160px;border-radius:18px;
-    background:var(--card-bg);color:var(--card-t1);
-    display:flex;gap:12px;padding:12px;
-  }
-  .w4 .cov{
-    width:36%;height:100%;border-radius:12px;flex:none;position:relative;overflow:hidden;
+  .cov{
+    display:block;position:relative;overflow:hidden;
+    border:1px solid var(--line);border-radius:6px;
     background:
       radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.12),transparent 55%),
-      linear-gradient(155deg,#3A4048 0%,#22262C 62%,#121418 100%);
+      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
   }
-  .w4 .cov .ring{left:18%;right:18%;top:14%;bottom:30%}
-  .w4 .body{flex:1;min-width:0;display:flex;flex-direction:column}
-  .w4 .n{font-size:15px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w4 .s{font-size:10px;color:var(--card-t2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w4 .lyrics{margin-top:8px;display:flex;flex-direction:column;gap:2px}
-  .w4 .ly{
-    position:relative;font-size:10px;line-height:1.35;color:var(--card-t2);
-    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  .cov .ring{position:absolute;left:18%;right:18%;top:14%;bottom:30%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
+
+  .tc{font-family:var(--mono);font-size:9px;letter-spacing:.02em;color:var(--t3);font-variant-numeric:tabular-nums}
+  .bar{position:relative;height:2px;background:var(--line-2);flex:1}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
+
+  .key{
+    width:26px;height:26px;flex:none;border-radius:50%;border:0;
+    background:var(--accent);color:#1A1206;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.30);
   }
-  .w4 .ly.now{color:var(--card-accent);font-weight:600;padding-left:8px}
-  .w4 .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--card-accent)}
-  .w4 .ctrl{margin-top:auto;justify-content:flex-start;gap:10px}
-  .w4 .cbtn{width:26px;height:26px}
-  .w4 .cbtn svg{width:13px;height:13px}
-  .w4 .cbtn.key{width:32px;height:32px}
-  .w4 .cbtn.key svg{width:11px;height:11px}
+  .key svg{width:9px;height:9px;fill:currentColor;margin-left:1px}
+
+  .ic{
+    width:22px;height:22px;border:0;background:transparent;padding:0;
+    color:var(--t2);display:flex;align-items:center;justify-content:center;
+  }
+  .ic svg{width:13px;height:13px;fill:currentColor}
+  .ic.on{color:var(--accent)}
+
+  /* ---------------- 2×2 ---------------- */
+  .w2{width:160px;height:160px;display:flex;flex-direction:column}
+  .w2 .top{flex:1;min-height:0;display:flex;gap:10px;padding:10px}
+  .w2 .cov{width:64px;height:64px;flex:none}
+  .w2 .txt{min-width:0;padding-top:1px}
+  .w2 .n{font-size:13px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .bottom{
+    height:50px;flex:none;border-top:1px solid var(--line);
+    display:flex;align-items:center;gap:8px;padding:0 10px;
+  }
+
+  /* ---------------- 2×4 ---------------- */
+  .w4{width:340px;height:160px;display:grid;grid-template-columns:112px minmax(0,1fr) 56px}
+  .w4 .cvcell{border-right:1px solid var(--line);display:flex;align-items:center;justify-content:center}
+  .w4 .cov{width:84px;height:84px}
+
+  .w4 .info{min-width:0;padding:12px 14px;display:flex;flex-direction:column}
+  .w4 .n{font-size:14px;font-weight:600;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w4 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w4 .pr{margin-top:auto;display:flex;align-items:center;gap:8px}
+
+  .w4 .rail{
+    border-left:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+    padding:9px 0;
+  }
+  .w4 .rail .key{width:34px;height:34px}
+  .w4 .rail .key svg{width:11px;height:11px}
+  .w4 .lr{display:flex;align-items:center;gap:2px}
+
+  /* ---------------- 2×4 歌词（正面直接显示） ---------------- */
+  .w4 .lyrics{display:flex;flex-direction:column;gap:3px;margin-top:9px}
+  .w4 .ly{position:relative;font-size:10px;line-height:1.35;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w4 .ly.now{color:var(--accent-text);font-weight:700;padding-left:8px}
+  .w4 .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--accent)}
 
   /* ---------------- 空态 ---------------- */
-  .empty .glass{background:rgba(12,16,24,.28)}
-  .empty .well{
-    position:absolute;inset:0;background:var(--card-well);
-    display:flex;align-items:center;justify-content:center;
-  }
-  .empty .well svg{width:34px;height:34px;fill:var(--card-t2);opacity:.4}
-  .empty.w4 .cov{display:flex;align-items:center;justify-content:center;background:var(--card-well)}
-  .empty.w4 .cov svg{width:30px;height:30px;fill:var(--card-t2);opacity:.4}
+  .empty .cov,.empty .well{display:flex;align-items:center;justify-content:center;background:var(--card-bg)}
+  .empty .cov .ring{display:none}
+  .empty .cov svg,.empty .well svg{width:26px;height:26px;fill:var(--t3);opacity:.55}
 
   /* ---------------- 页面底部 ---------------- */
   .foot{margin-top:auto;padding:0 20px 26px;display:flex;flex-direction:column;gap:10px}
@@ -176,7 +171,7 @@
   <div class="page-head">
     <div>
       <h1>SuenMusic · 桌面卡片</h1>
-      <p>2×2 封面 + 毛玻璃面板 · 2×4 直接显示歌词 · 不翻转</p>
+      <p>仪表盘方向 · 发丝线网格 / 歌词直接进卡 / 不翻转</p>
     </div>
     <button class="toggle" id="themeBtn">切换浅色</button>
   </div>
@@ -197,17 +192,17 @@
             <div class="group-head"><span class="k">2 × 2</span><span class="dim">160 × 160</span></div>
             <div class="preview s">
               <div class="widget w2">
-                <span class="cover-fill"></span>
-                <span class="ring"></span>
-                <div class="glass">
-                  <div class="n">夜航</div>
-                  <div class="s">林间</div>
-                  <div class="ctrl">
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                    <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+                <div class="top">
+                  <span class="cov"><span class="ring"></span></span>
+                  <div class="txt">
+                    <div class="n">夜航</div>
+                    <div class="s">林间</div>
                   </div>
+                </div>
+                <div class="bottom">
+                  <span class="tc">1:34</span>
+                  <span class="bar"><i></i></span>
+                  <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
                 </div>
               </div>
             </div>
@@ -217,20 +212,23 @@
             <div class="group-head"><span class="k">4 × 2</span><span class="dim">340 × 160</span></div>
             <div class="preview m">
               <div class="widget w4">
-                <span class="cov"><span class="ring"></span></span>
-                <div class="body">
+                <div class="cvcell"><span class="cov"><span class="ring"></span></span></div>
+                <div class="info">
                   <div class="n">夜航</div>
-                  <div class="s">林间</div>
+                  <div class="s">林间 · 专辑 夜航</div>
                   <div class="lyrics">
                     <div class="ly">海面没有回声</div>
                     <div class="ly now">我们就一直向前</div>
                     <div class="ly">直到天亮之前</div>
                   </div>
-                  <div class="ctrl">
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                    <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
-                    <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+                  <div class="pr"><span class="tc">1:34</span><span class="bar"><i></i></span><span class="tc">4:08</span></div>
+                </div>
+                <div class="rail">
+                  <button class="ic on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+                  <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                  <div class="lr">
+                    <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                    <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
                   </div>
                 </div>
               </div>
@@ -240,7 +238,7 @@
 
         <div class="foot">
           <button class="primary">添加到桌面</button>
-          <div class="hint">2×2 点按打开应用 · 2×4 直接显示当前三行歌词</div>
+          <div class="hint">2×2 点按打开应用 · 2×4 直接显示三行歌词</div>
         </div>
       </div>
     </div>
@@ -250,50 +248,59 @@
       <div class="caption"><span>02 / 桌面</span><span>2×4 + 2×2</span></div>
       <div class="phone home">
         <div class="status" style="color:rgba(232,230,225,.6)"><span>9:41</span><span>5G ▮</span></div>
-        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="clock">
+          <div class="time">9:41</div>
+          <div class="date">10 月 19 日 · 周一</div>
+        </div>
 
         <div class="widgets">
           <div class="widget w4">
-            <span class="cov"><span class="ring"></span></span>
-            <div class="body">
+            <div class="cvcell"><span class="cov"><span class="ring"></span></span></div>
+            <div class="info">
               <div class="n">夜航</div>
-              <div class="s">林间</div>
+              <div class="s">林间 · 专辑 夜航</div>
               <div class="lyrics">
                 <div class="ly">海面没有回声</div>
                 <div class="ly now">我们就一直向前</div>
                 <div class="ly">直到天亮之前</div>
               </div>
-              <div class="ctrl">
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              <div class="pr"><span class="tc">1:34</span><span class="bar"><i></i></span><span class="tc">4:08</span></div>
+            </div>
+            <div class="rail">
+              <button class="ic on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+              <div class="lr">
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
               </div>
             </div>
           </div>
 
           <div class="row2">
             <div class="widget w2">
-              <span class="cover-fill"></span>
-              <span class="ring"></span>
-              <div class="glass">
-                <div class="n">雨停之后</div>
-                <div class="s">陈稚</div>
-                <div class="ctrl">
-                  <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                  <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
-                  <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
-                  <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              <div class="top">
+                <span class="cov"><span class="ring"></span></span>
+                <div class="txt">
+                  <div class="n">雨停之后</div>
+                  <div class="s">陈稚</div>
                 </div>
+              </div>
+              <div class="bottom">
+                <span class="tc">2:12</span>
+                <span class="bar"><i style="width:62%"></i></span>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
-              <span class="appicon"></span><span class="appicon"></span>
+              <span class="appicon"></span>
+              <span class="appicon"></span>
             </div>
           </div>
         </div>
 
-        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+        <div class="dock">
+          <span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span>
+        </div>
       </div>
     </div>
 
@@ -302,50 +309,62 @@
       <div class="caption"><span>03 / 空态</span><span>还没在听</span></div>
       <div class="phone home">
         <div class="status" style="color:rgba(232,230,225,.6)"><span>9:41</span><span>5G ▮</span></div>
-        <div class="clock"><div class="time">9:41</div><div class="date">10 月 19 日 · 周一</div></div>
+        <div class="clock">
+          <div class="time">9:41</div>
+          <div class="date">10 月 19 日 · 周一</div>
+        </div>
 
         <div class="widgets">
           <div class="widget w4 empty">
-            <span class="cov"><svg viewBox="0 0 24 24"><path d="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h5V3h-7z"/></svg></span>
-            <div class="body">
+            <div class="cvcell"><span class="cov"><svg viewBox="0 0 24 24"><path d="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h5V3h-7z"/></svg></span></div>
+            <div class="info">
               <div class="n">还没在听</div>
               <div class="s">打开 SuenMusic 放首歌</div>
-              <div class="ctrl">
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
-                <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+              <div class="pr"><span class="tc">--:--</span><span class="bar"></span><span class="tc">--:--</span></div>
+            </div>
+            <div class="rail">
+              <button class="ic"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
+              <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+              <div class="lr">
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
               </div>
             </div>
           </div>
 
           <div class="row2">
             <div class="widget w2 empty">
-              <span class="well"><svg viewBox="0 0 24 24"><path d="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h5V3h-7z"/></svg></span>
-              <div class="glass">
-                <div class="n">还没在听</div>
-                <div class="s">打开 SuenMusic 放首歌</div>
-                <div class="ctrl">
-                  <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
-                  <button class="cbtn key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
-                  <button class="cbtn"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+              <div class="top">
+                <span class="cov"><svg viewBox="0 0 24 24"><path d="M12 3v10.6A3.5 3.5 0 1 0 14 17V7h5V3h-7z"/></svg></span>
+                <div class="txt">
+                  <div class="n">还没在听</div>
+                  <div class="s">打开 SuenMusic 放首歌</div>
                 </div>
+              </div>
+              <div class="bottom">
+                <span class="tc">--:--</span>
+                <span class="bar"></span>
+                <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
-              <span class="appicon"></span><span class="appicon"></span>
+              <span class="appicon"></span>
+              <span class="appicon"></span>
             </div>
           </div>
         </div>
 
-        <div class="dock"><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span></div>
+        <div class="dock">
+          <span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span>
+        </div>
       </div>
     </div>
   </div>
 
   <p class="note">
-    回到原卡的结构：2×2 封面全铺 + 毛玻璃面板，2×4 左封面 + 右信息。<br />
-    去掉了翻转：2×4 直接显示三行歌词，当前行用琥珀与 2px 竖线标出 —— 空间够，不需要翻面。<br />
-    空态不再显示歌词，只保留歌名占位与播放键。
+    2×2：封面缩成 64 方块，其余是标题区与运输带（时间码 / 进度 / 播放键）。<br />
+    2×4：三格 —— 封面 / 信息 / 竖排控制轨；歌词直接放在信息格里，当前行琥珀 + 2px 竖线。<br />
+    没有翻转：宽卡空间够，翻面只会多一次点击；空态保留占位与播放键，不显示歌词。
   </p>
 
 <script>
