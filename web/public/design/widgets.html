@@ -102,15 +102,21 @@
 
   /* ---------------- 2×2 ---------------- */
   .w2{width:160px;height:160px;display:flex;flex-direction:column}
-  .w2 .top{flex:1;min-height:0;display:flex;gap:10px;padding:10px}
+  .w2 .top{position:relative;flex:1;min-height:0;display:flex;gap:10px;padding:10px 10px 0}
   .w2 .cov{width:64px;height:64px;flex:none}
   .w2 .txt{min-width:0;padding-top:1px}
   .w2 .n{font-size:13px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .w2 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .prog{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--line-2)}
+  .w2 .prog i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
   .w2 .bottom{
-    height:50px;flex:none;border-top:1px solid var(--line);
-    display:flex;align-items:center;gap:8px;padding:0 10px;
+    height:52px;flex:none;display:flex;align-items:center;gap:4px;padding:0 8px;
   }
+  .w2 .sp{flex:1}
+  .w2 .ic{width:18px;height:18px}
+  .w2 .ic svg{width:11px;height:11px}
+  .w2 .key{width:26px;height:26px}
+  .w2 .key svg{width:9px;height:9px}
 
   /* ---------------- 2×4 ---------------- */
   .w4{width:340px;height:160px;display:grid;grid-template-columns:112px minmax(0,1fr) 56px}
@@ -198,11 +204,15 @@
                     <div class="n">夜航</div>
                     <div class="s">林间</div>
                   </div>
+                  <span class="prog"><i></i></span>
                 </div>
                 <div class="bottom">
                   <span class="tc">1:34</span>
-                  <span class="bar"><i></i></span>
+                  <span class="sp"></span>
+                  <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
                   <button class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></button>
+                  <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+                  <button class="ic"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
                 </div>
               </div>
             </div>
@@ -284,11 +294,15 @@
                   <div class="n">雨停之后</div>
                   <div class="s">陈稚</div>
                 </div>
+                <span class="prog"><i style="width:62%"></i></span>
               </div>
               <div class="bottom">
                 <span class="tc">2:12</span>
-                <span class="bar"><i style="width:62%"></i></span>
+                <span class="sp"></span>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
                 <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
@@ -340,11 +354,15 @@
                   <div class="n">还没在听</div>
                   <div class="s">打开 SuenMusic 放首歌</div>
                 </div>
+                <span class="prog"></span>
               </div>
               <div class="bottom">
                 <span class="tc">--:--</span>
-                <span class="bar"></span>
+                <span class="sp"></span>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></button>
                 <button class="key"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></button>
+                <button class="ic"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
               </div>
             </div>
             <div style="display:flex;flex-direction:column;gap:18px">
@@ -362,7 +380,7 @@
   </div>
 
   <p class="note">
-    2×2：封面缩成 64 方块，其余是标题区与运输带（时间码 / 进度 / 播放键）。<br />
+    2×2：封面 64 方块；底部一条运输带塞进上一首 / 播放 / 下一首 / 收藏，进度线压在分区上。<br />
     2×4：三格 —— 封面 / 信息 / 竖排控制轨；歌词直接放在信息格里，当前行琥珀 + 2px 竖线。<br />
     没有翻转：宽卡空间够，翻面只会多一次点击；空态保留占位与播放键，不显示歌词。
   </p>
