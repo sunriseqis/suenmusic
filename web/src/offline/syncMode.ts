@@ -11,9 +11,9 @@
  * 既不是 ApiError 也没有 401 分支能兜住。所以是"没配就别发"，不是"发了再容错"。
  */
 
-import { getAccessToken, getBaseUrl } from '@/api/client.ts';
+import { getAccessToken, hasBackend } from '@/api/client.ts';
 
 /** 有服务端且已登录。只有这种情况下的网络写入才有意义 */
 export function serverReady(): boolean {
-  return getBaseUrl().trim().length > 0 && getAccessToken() !== null;
+  return hasBackend() && getAccessToken() !== null;
 }

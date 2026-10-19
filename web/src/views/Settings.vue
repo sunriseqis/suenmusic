@@ -28,6 +28,7 @@ import {
   setBluetoothLyricsEnabled,
 } from '@/native/audio.ts';
 import { useUiStore } from '@/stores/ui.ts';
+import { hasBackend } from '@/api/client.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { useDislikesStore } from '@/stores/dislikes.ts';
@@ -226,7 +227,8 @@ async function downloadWebdav(): Promise<void> {
 }
 
 // ---------------------------------------------------------------- 服务端 / 登录
-const serverConfigured = computed(() => ui.baseUrl.trim().length > 0);
+/* 浏览器同源即后端；原生必须显式配置地址 */
+const serverConfigured = computed(() => hasBackend());
 const TABS = computed(() => {
   const tabs = [{ value: 'local', label: '本机' }];
   if (serverConfigured.value) {
@@ -272,9 +274,12 @@ async function doLogin(): Promise<void> {
   loginBusy.value = true;
   loginErr.value = '';
   try {
-    const addr = loginAddr.value.trim().replace(/\/+$/, '');
-    if (!addr) throw new Error('请填写服务端地址');
-    if (addr !== ui.baseUrl) ui.setBaseUrl(addr);
+    /* 浏览器同源，不需要地址；只有原生壳才读这一栏 */
+    if (isNativeAudio) {
+      const addr = loginAddr.value.trim().replace(/\/+$/, '');
+      if (!addr) throw new Error('请填写服务端地址');
+      if (addr !== ui.baseUrl) ui.setBaseUrl(addr);
+    }
     await session.login(loginUser.value, loginPass.value);
     loginPass.value = '';
     sheet.value = null;
@@ -656,7 +661,7 @@ onBeforeUnmount(() => {
 
     <!-- ==================== 高级 ==================== -->
     <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
-      <section class="sec">
+      <section v-if="isNativeAudio" class="sec">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
       </section>
@@ -806,7 +811,7 @@ onBeforeUnmount(() => {
     </Sheet>
 
     <Sheet :open="sheet === 'login'" title="登入" @close="sheet = null">
-      <div class="field">
+      <div v-if="isNativeAudio" class="field">
         <span class="field-name">服务端</span>
         <NeuInput v-model="loginAddr" placeholder="http://192.168.1.10:3210" />
       </div>

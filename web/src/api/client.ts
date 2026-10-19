@@ -14,6 +14,7 @@
  * （通过 `onSessionChanged` 订阅），依赖是单向的。
  */
 
+import { Capacitor } from '@capacitor/core';
 import type { ApiErrorBody, AuthSession } from './types.ts';
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,17 @@ function readBaseUrl(): string {
 
 export function getBaseUrl(): string {
   return baseUrl;
+}
+
+/**
+ * 有没有后端。
+ *
+ * 浏览器里**同源就是后端**：前端本来就是服务端的一部分，
+ * 由它自己的静态资源服务发出，`/api` 直接打同源即可，不需要填地址。
+ * 原生壳没有同源概念，必须显式配置基地址；没配才是「直连模式」。
+ */
+export function hasBackend(): boolean {
+  return Capacitor.isNativePlatform() ? baseUrl.trim().length > 0 : true;
 }
 
 export function setBaseUrl(url: string): void {
@@ -607,7 +619,7 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
 let lastUnreachableAt = 0;
 let downNow = false;
 function notifyUnreachable(): void {
-  if (!getBaseUrl().trim()) return;
+  if (!hasBackend()) return;
   if (!refreshToken && !accessToken) return;
   const now = Date.now();
   if (now - lastUnreachableAt < 60_000) return;

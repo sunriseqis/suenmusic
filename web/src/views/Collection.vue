@@ -22,7 +22,7 @@ import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import CoverCard from '@/components/CoverCard.vue';
 import ArtistLinks from '@/components/ArtistLinks.vue';
-import { ApiError, getBaseUrl } from '@/api/client.ts';
+import { ApiError, hasBackend } from '@/api/client.ts';
 import { directArtistSongs } from '@/api/direct/catalog.ts';
 import { directAlbum, directToplist } from '@/api/direct/home.ts';
 import {
@@ -187,7 +187,7 @@ function moreAlbums() {
 /** 取下一批歌曲。追加时按 id 去重：搜索分页并不保证不重叠 */
 async function loadMoreSongs(name: string, seq: number) {
   // 直连模式一次取完，没有"下一批"
-  if (!getBaseUrl().trim()) {
+  if (!hasBackend()) {
     songsHasMore.value = false;
     return;
   }
@@ -400,7 +400,7 @@ async function load() {
   try {
     switch (props.kind) {
       case 'toplist': {
-        const res = !getBaseUrl().trim()
+        const res = !hasBackend()
           ? await directToplist(props.id)
           : await fetchToplist(props.id, { limit: 200 });
         title.value = res.topInfo?.name || '排行榜';
@@ -419,7 +419,7 @@ async function load() {
         break;
       }
       case 'album': {
-        const res = !getBaseUrl().trim()
+        const res = !hasBackend()
           ? await directAlbum(props.id)
           : await fetchAlbum(props.id);
         title.value = res.album.name;
@@ -436,7 +436,7 @@ async function load() {
       }
       case 'artist': {
         // 直连模式没有歌手详情/专辑接口，用「按名搜索 + 歌手过滤」拼一个能听的页面
-        if (!getBaseUrl().trim()) {
+        if (!hasBackend()) {
           const name = artistName.value || props.id;
           singerName.value = name;
           const songs = await directArtistSongs(name);

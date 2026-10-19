@@ -21,7 +21,7 @@ import {
   type TrackAnchorInfo,
 } from '@/api/playback.ts';
 import type { AnchorTrackMeta, BiliCandidate } from '@/api/playback.ts';
-import { getBaseUrl, resolveUrl } from '@/api/client.ts';
+import { hasBackend, resolveUrl } from '@/api/client.ts';
 import { biliResolveAudio } from '@/api/direct/upstream.ts';
 import {
   getLocalAnchor,
@@ -38,7 +38,7 @@ const player = usePlayerStore();
 
 /** 没配服务端 = 直连模式：候选搜索、锚点存取全部走本机 */
 function isLocal(): boolean {
-  return !getBaseUrl().trim();
+  return !hasBackend();
 }
 const ui = useUiStore();
 

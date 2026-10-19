@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { getBaseUrl } from '@/api/client.ts';
+import { hasBackend } from '@/api/client.ts';
 import type { RouteRecordRaw } from 'vue-router';
 import { useSessionStore } from '@/stores/session.ts';
 
@@ -103,7 +103,7 @@ router.beforeEach(async to => {
   }
 
   // 直连模式没有「专属」：地址栏直达也送回首页，避免一个必然失败的页面
-  if (to.name === 'daily' && !getBaseUrl().trim()) {
+  if (to.name === 'daily' && !hasBackend()) {
     return { name: 'home' };
   }
 

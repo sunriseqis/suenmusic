@@ -26,8 +26,7 @@ import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import { fetchHome } from '@/api/catalog.ts';
 import { directHome } from '@/api/direct/home.ts';
-import { serverReady } from '@/offline/syncMode.ts';
-import { ApiError } from '@/api/client.ts';
+import { ApiError, hasBackend } from '@/api/client.ts';
 import { isNativeAudio } from '@/native/audio.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
@@ -72,7 +71,8 @@ const headText = computed(() => {
 });
 
 /** 当前是不是"没配服务端"的直连模式 —— 首页空状态的文案要区分开 */
-const localMode = computed(() => !serverReady());
+/* 浏览器同源即后端；只有原生且没配地址才是直连 */
+const localMode = computed(() => !hasBackend());
 
 const hasAnything = computed(() => {
   const d = data.value;
