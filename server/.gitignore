@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.log
+
+# SQLite 数据文件（含 WAL / 共享内存）
+data/*.db
+data/*.db-journal
+data/*.db-wal
+data/*.db-shm

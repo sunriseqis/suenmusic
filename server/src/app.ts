@@ -1,0 +1,196 @@
+/**
+ * Fastify 应用组装。
+ *
+ * 与 `src/index.ts`（进程入口）分开，是为了让验收脚本能直接
+ * `buildApp()` + `app.inject()` / `listen(0)` 起一个临时实例，
+ * 不必真的去抢配置里的端口。
+ */
+
+import Fastify from 'fastify';
+import fastifyStatic from '@fastify/static';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { config } from './config.ts';
+import { createLogger } from './logger.ts';
+import { AppError } from './http/errors.ts';
+import { registerAuthRoutes } from './routes/auth.ts';
+import { registerAdminRoutes } from './routes/admin.ts';
+import { registerAiSettingsRoutes } from './routes/ai-settings.ts';
+import { registerBilibiliRoutes } from './routes/bilibili.ts';
+import { registerNeteaseRoutes } from './routes/netease.ts';
+import { registerDailyRoutes } from './routes/daily.ts';
+import { registerCatalogRoutes } from './routes/catalog.ts';
+import { registerFavoriteRoutes } from './routes/favorites.ts';
+import { registerHealthRoutes } from './routes/health.ts';
+import { registerHistoryRoutes } from './routes/history.ts';
+import { registerPlaylistRoutes } from './routes/playlists.ts';
+import { registerPlazaRoutes } from './routes/plaza.ts';
+import { registerResolveRoutes } from './routes/resolve.ts';
+import { registerStreamRoutes } from './routes/stream.ts';
+import { registerUpdateRoutes } from './routes/update.ts';
+
+const log = createLogger('http');
+
+export const SERVER_VERSION = '0.1.0';
+
+/** 音频代理需要客户端能读到这些响应头，否则进度条拿不到总长度 */
+const EXPOSED_HEADERS = 'Content-Range, Content-Length, Accept-Ranges, Content-Type';
+
+const ALLOWED_HEADERS = 'Content-Type, Authorization, Range, X-Device-Id';
+
+function applyCors(req: FastifyRequest, reply: FastifyReply): void {
+  const origin = req.headers.origin;
+  if (!origin) return;
+
+  const allowed = config.corsOrigins;
+  const wildcard = allowed.includes('*');
+  if (!wildcard && !allowed.includes(origin)) return;
+
+  // 不依赖 Cookie（令牌走 Authorization 头），因此通配来源不构成 CSRF 风险
+  reply.header('Access-Control-Allow-Origin', wildcard ? '*' : origin);
+  if (!wildcard) reply.header('Vary', 'Origin');
+  reply.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, PUT, DELETE, OPTIONS');
+  reply.header('Access-Control-Allow-Headers', ALLOWED_HEADERS);
+  reply.header('Access-Control-Expose-Headers', EXPOSED_HEADERS);
+  reply.header('Access-Control-Max-Age', '86400');
+}
+
+export function buildApp(): FastifyInstance {
+  const app = Fastify({
+    // 用自研 logger：结构化、无颜色，能直接被 docker logs / journalctl 读
+    logger: false,
+    // 反代后面取真实客户端 IP（登录节流依赖它）
+    trustProxy: true,
+    // 请求体上限 256KB：这个服务没有任何大体积上传，收紧可减少攻击面
+    bodyLimit: 256 * 1024,
+    // AI 深度长任务（画像重构、多轮选歌）耗时较长，显式设置 900 秒连接与请求超时：
+    // 与 AI 调用处的预算配套 —— 调用处 600s（画像/选曲）/900s（审核），
+    // 客户端 700s。顺序要保证「服务端先于客户端给出结论」，否则用户只会看到超时。
+    connectionTimeout: 900_000,
+    requestTimeout: 900_000,
+  });
+
+  // ---- CORS 与预检 ----
+  app.addHook('onRequest', async (req, reply) => {
+    applyCors(req, reply);
+    if (req.method === 'OPTIONS') {
+      reply.code(204).send();
+    }
+  });
+
+  // ---- 访问日志 ----
+  app.addHook('onResponse', async (req, reply) => {
+    const ms = reply.elapsedTime;
+    const line = `${req.method} ${req.url} ${reply.statusCode} ${ms.toFixed(1)}ms`;
+    const level = reply.statusCode >= 500 ? 'error' : reply.statusCode >= 400 ? 'warn' : 'debug';
+    log[level](line);
+  });
+
+  // ---- 统一错误体 ----
+  app.setErrorHandler((err, req, reply) => {
+    if (err instanceof AppError) {
+      reply.code(err.status).send({ error: { code: err.code, message: err.message } });
+      return;
+    }
+
+    // fastify 自身的请求解析错误（畸形 JSON、超长 body 等）
+    const status = (err as { statusCode?: number }).statusCode ?? 500;
+    if (status >= 400 && status < 500) {
+      reply.code(status).send({
+        error: {
+          code: 'bad_request',
+          message: '请求格式不正确',
+        },
+      });
+      return;
+    }
+
+    log.error(`未处理异常 ${req.method} ${req.url}`, (err as Error).stack ?? String(err));
+    reply.code(500).send({
+      error: { code: 'internal_error', message: '服务端内部错误' },
+    });
+  });
+
+  // ---- 前端静态资源（单端口部署）----
+  // 目标是「一个进程、一个端口」同时伺服前端和 API，替掉原来的 nginx 容器。
+  // 关键约束：**只有存在 index.html 才接管**。server 镜像（server/Dockerfile）
+  // 里只 COPY 了 src/，没有前端产物 —— 那种情况下必须保持「纯 API」行为不变。
+  const webRoot = existsSync(join(config.webRoot, 'index.html')) ? config.webRoot : null;
+  // index.html 读一次就够：SPA 回退会命中它，缓存起来避免每次读盘
+  const indexHtml = webRoot ? readFileSync(join(webRoot, 'index.html'), 'utf8') : null;
+
+  if (webRoot && indexHtml) {
+    app.register(fastifyStatic, {
+      root: webRoot,
+      // 缓存策略不在这里设：@fastify/static 内部是
+      // `setHeaders(res, path)` → `reply.headers(send算出的值)`，
+      // 后者会覆盖前者（实测 max-age 被重置成 0）。所以放到下面的 onSend 钩子里。
+    });
+    log.info(`前端静态资源已挂载：${webRoot}（单端口部署）`);
+  }
+
+  // ---- 前端缓存策略 ----
+  // 放在 onSend 而不是 @fastify/static 的 setHeaders：后者先被调用、
+  // 紧接着 send 计算出的 Cache-Control 会覆盖它（实测 max-age 会被重置为 0）。
+  // onSend 在响应落地前执行，顺序才对。
+  //   · /assets/*  带内容哈希 → 可以 immutable 长缓存
+  //   · *.html    入口文件   → 绝不能缓存，否则前端发版后客户端一直拿旧的
+  app.addHook('onSend', async (req, reply, payload) => {
+    const path = (req.url ?? '').split('?')[0];
+    if (path.startsWith('/api/')) return payload;
+    if (path.endsWith('.html')) {
+      reply.header('Cache-Control', 'no-cache');
+    } else if (path.includes('/assets/')) {
+      reply.header('Cache-Control', 'public, max-age=2592000, immutable');
+    }
+    return payload;
+  });
+
+  app.setNotFoundHandler((req, reply) => {
+    // API 未命中仍然是 JSON 404 —— 这是契约，客户端靠状态码判断
+    if (req.url.startsWith('/api/') || req.url === '/api') {
+      reply.code(404).send({
+        error: {
+          code: 'not_found',
+          message: `接口不存在：${req.method} ${req.url}`,
+        },
+      });
+      return;
+    }
+
+    // 其余路径交给前端路由（Vue Router 的 history 模式）
+    if (indexHtml) {
+      reply.header('Cache-Control', 'no-cache');
+      reply.type('text/html; charset=utf-8');
+      reply.send(indexHtml);
+      return;
+    }
+
+    reply.code(404).send({
+      error: {
+        code: 'not_found',
+        message: `不存在：${req.method} ${req.url}`,
+      },
+    });
+  });
+
+  // ---- 路由 ----
+  registerHealthRoutes(app, SERVER_VERSION);
+  registerAuthRoutes(app);
+  registerAdminRoutes(app);
+  registerBilibiliRoutes(app);
+  registerNeteaseRoutes(app);
+  registerDailyRoutes(app);
+  registerAiSettingsRoutes(app);
+  registerCatalogRoutes(app);
+  registerPlazaRoutes(app);
+  registerPlaylistRoutes(app);
+  registerFavoriteRoutes(app);
+  registerHistoryRoutes(app);
+  registerResolveRoutes(app);
+  registerStreamRoutes(app);
+  registerUpdateRoutes(app);
+
+  return app;
+}

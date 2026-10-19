@@ -10,6 +10,7 @@ output/*
 
 # ---- 依赖 ----
 node_modules/
+server/node_modules
 .oh_modules/
 oh_modules/
 .pnp

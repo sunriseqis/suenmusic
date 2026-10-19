@@ -1,0 +1,51 @@
+{
+  "name": "suenmusic-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SuenMusic 服务端 —— QQ 音乐元数据 + B 站多维置信度音源匹配",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --watch src/index.ts",
+    "start": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/index.ts",
+    "verify": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/verify.ts",
+    "db:init": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/db-init.ts",
+    "db:backup": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/db-backup.ts",
+    "user:add": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/user-add.ts",
+    "test:db": "node --disable-warning=ExperimentalWarning src/scripts/db-test.ts",
+    "test:qr": "node --disable-warning=ExperimentalWarning src/scripts/qr-test.ts",
+    "test:resolver": "node --disable-warning=ExperimentalWarning src/scripts/resolver-test.ts",
+    "test:api": "node --disable-warning=ExperimentalWarning src/scripts/api-test.ts",
+    "test:business": "node --disable-warning=ExperimentalWarning src/scripts/business-test.ts",
+    "test:plaza": "node --disable-warning=ExperimentalWarning src/scripts/plaza-test.ts",
+    "test:cli": "node --disable-warning=ExperimentalWarning src/scripts/cli-test.ts",
+    "acceptance": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/acceptance.ts",
+    "test": "npm run typecheck && npm run test:db && npm run test:qr && npm run test:resolver && npm run test:api && npm run test:cli && npm run test:business && npm run test:plaza",
+    "typecheck": "tsc --noEmit",
+    "simi:preview": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/simi-preview.ts",
+    "backfill:artists": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/backfill-artists.ts",
+    "daily:explain": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/daily-explain.ts",
+    "ai:test": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/test-curator-flow.ts",
+    "ai:tag": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/ai-tag.ts",
+    "ai:flow": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/ai-flow.ts",
+    "library:health": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env src/scripts/library-health.ts"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.3.0",
+    "axios": "^1.20.0",
+    "crypto-js": "^4.2.0",
+    "fastify": "^5.2.1",
+    "jsdom": "^30.0.1",
+    "node-forge": "^1.4.0",
+    "pac-proxy-agent": "^9.1.0",
+    "qrcode": "^1.5.4",
+    "tunnel": "^0.0.6",
+    "undici": "^8.10.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  }
+}
