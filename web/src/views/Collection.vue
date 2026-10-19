@@ -1169,4 +1169,23 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
     padding-bottom: var(--sp-5);
   }
 }
+
+@media (min-width: 1024px) {
+  .collection {
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-5);
+    gap: var(--sp-5);
+  }
+  .head {
+    gap: 32px;
+  }
+  .art {
+    width: 200px;
+    height: 200px;
+    border-radius: var(--r-lg);
+  }
+  .desc-box {
+    max-width: 820px;
+  }
+}
 </style>
