@@ -85,6 +85,29 @@ function mockApiPlugin(): Plugin {
      * 每日专属推荐：给「不喜欢按钮 + 推荐理由卡片」一个可看的场景。
      * 没有这一条时，假服务端的专属页只会是空态，播放页那张卡永远出不来。
      */
+    '/api/home': {
+      welcomePhrase: '今晚听点安静的',
+      newAlbums: [
+          { id: 'qq_al_1', mid: 'al_1', name: '示例专辑 1', picUrl: '', publishTime: '2026-10-11', description: '', company: '示例唱片', type: '专辑', size: 1, artists: [{ id: 'qq_ar_1', mid: 'ar_1', name: '歌手 1', picUrl: '' }], artist: { name: '歌手 1' } },
+          { id: 'qq_al_2', mid: 'al_2', name: '示例专辑 2', picUrl: '', publishTime: '2026-10-12', description: '', company: '示例唱片', type: '专辑', size: 1, artists: [{ id: 'qq_ar_2', mid: 'ar_2', name: '歌手 2', picUrl: '' }], artist: { name: '歌手 2' } },
+          { id: 'qq_al_3', mid: 'al_3', name: '示例专辑 3', picUrl: '', publishTime: '2026-10-13', description: '', company: '示例唱片', type: '专辑', size: 1, artists: [{ id: 'qq_ar_3', mid: 'ar_3', name: '歌手 3', picUrl: '' }], artist: { name: '歌手 3' } },
+          { id: 'qq_al_4', mid: 'al_4', name: '示例专辑 4', picUrl: '', publishTime: '2026-10-14', description: '', company: '示例唱片', type: '专辑', size: 1, artists: [{ id: 'qq_ar_4', mid: 'ar_4', name: '歌手 4', picUrl: '' }], artist: { name: '歌手 4' } }
+      ],
+      newSongs: [
+          { id: 'qq_home_1', mid: 'home_1', name: '示例歌曲 1', ar: [{ id: 'qq_ar_1', mid: 'ar_1', name: '歌手 1', picUrl: '' }], artists: [{ id: 'qq_ar_1', mid: 'ar_1', name: '歌手 1', picUrl: '' }], al: { id: 'qq_al_1', mid: 'al_1', name: '示例专辑 1', picUrl: '' }, album: { id: 'qq_al_1', name: '示例专辑 1', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } },
+          { id: 'qq_home_2', mid: 'home_2', name: '示例歌曲 2', ar: [{ id: 'qq_ar_2', mid: 'ar_2', name: '歌手 2', picUrl: '' }], artists: [{ id: 'qq_ar_2', mid: 'ar_2', name: '歌手 2', picUrl: '' }], al: { id: 'qq_al_2', mid: 'al_2', name: '示例专辑 2', picUrl: '' }, album: { id: 'qq_al_2', name: '示例专辑 2', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } },
+          { id: 'qq_home_3', mid: 'home_3', name: '示例歌曲 3', ar: [{ id: 'qq_ar_3', mid: 'ar_3', name: '歌手 3', picUrl: '' }], artists: [{ id: 'qq_ar_3', mid: 'ar_3', name: '歌手 3', picUrl: '' }], al: { id: 'qq_al_3', mid: 'al_3', name: '示例专辑 3', picUrl: '' }, album: { id: 'qq_al_3', name: '示例专辑 3', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } },
+          { id: 'qq_home_4', mid: 'home_4', name: '示例歌曲 4', ar: [{ id: 'qq_ar_4', mid: 'ar_4', name: '歌手 4', picUrl: '' }], artists: [{ id: 'qq_ar_4', mid: 'ar_4', name: '歌手 4', picUrl: '' }], al: { id: 'qq_al_4', mid: 'al_4', name: '示例专辑 4', picUrl: '' }, album: { id: 'qq_al_4', name: '示例专辑 4', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } },
+          { id: 'qq_home_5', mid: 'home_5', name: '示例歌曲 5', ar: [{ id: 'qq_ar_5', mid: 'ar_5', name: '歌手 5', picUrl: '' }], artists: [{ id: 'qq_ar_5', mid: 'ar_5', name: '歌手 5', picUrl: '' }], al: { id: 'qq_al_5', mid: 'al_5', name: '示例专辑 5', picUrl: '' }, album: { id: 'qq_al_5', name: '示例专辑 5', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } },
+          { id: 'qq_home_6', mid: 'home_6', name: '示例歌曲 6', ar: [{ id: 'qq_ar_6', mid: 'ar_6', name: '歌手 6', picUrl: '' }], artists: [{ id: 'qq_ar_6', mid: 'ar_6', name: '歌手 6', picUrl: '' }], al: { id: 'qq_al_6', mid: 'al_6', name: '示例专辑 6', picUrl: '' }, album: { id: 'qq_al_6', name: '示例专辑 6', picUrl: '' }, dt: 240000, duration: 240, playable: true, matched: true, privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } } }
+      ],
+      toplists: [
+          { id: 'qq_top_1', name: '飙升榜', picUrl: '', updateFrequency: '每日更新' },
+          { id: 'qq_top_2', name: '热歌榜', picUrl: '', updateFrequency: '每日更新' },
+          { id: 'qq_top_3', name: '新歌榜', picUrl: '', updateFrequency: '每日更新' },
+          { id: 'qq_top_4', name: '流行指数', picUrl: '', updateFrequency: '每日更新' }
+      ],
+    },
     '/api/recommend/daily': {
       status: 'ready',
       date: '2026-10-19',
