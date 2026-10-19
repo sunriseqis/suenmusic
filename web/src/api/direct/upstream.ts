@@ -15,6 +15,7 @@
  * 模拟"装了 app 但没登录"这一档 —— 也就是要验证的那一档。
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
+import { clearCachedCredentials, sourceCookieForUrl } from '../sources.ts';
 import { parseDuration } from './matcher.ts';
 
 /**
@@ -64,17 +65,30 @@ export async function httpJson(
   url: string,
   opts: { method?: string; headers?: Record<string, string>; params?: Record<string, string>; data?: unknown } = {}
 ): Promise<HttpResult> {
+  /*
+   * 直连时带上客户端缓存的登录 cookie（服务端下发，见 api/sources.ts）。
+   * 只对 bilibili / 网易云域名生效；没有缓存就不加，保持原来的匿名行为。
+   */
+  const headers: Record<string, string> = { ...(opts.headers ?? {}) };
+  const cached = sourceCookieForUrl(url);
+  if (cached) {
+    headers.Cookie = headers.Cookie ? `${headers.Cookie}; ${cached}` : cached;
+  }
+
   if (Capacitor.isNativePlatform()) {
     const res = await CapacitorHttp.request({
       url,
       method: opts.method ?? 'GET',
-      headers: opts.headers ?? {},
+      headers,
       ...(opts.params ? { params: opts.params } : {}),
       ...(opts.data !== undefined ? { data: opts.data } : {}),
       connectTimeout: 15000,
       readTimeout: 20000,
     });
     // 原生侧已经解析过 JSON；字符串形式就再解一次，非 JSON 保留原文
+    if (cached && (res.status === 401 || res.status === 403 || res.status === 412)) {
+      clearCachedCredentials();
+    }
     const raw = res.data;
     if (raw !== null && typeof raw === 'object') {
       return { status: res.status, json: raw, text: JSON.stringify(raw), viaNative: true };
@@ -86,9 +100,12 @@ export async function httpJson(
   const qs = opts.params ? '?' + new URLSearchParams(opts.params).toString() : '';
   const res = await fetch(url + qs, {
     method: opts.method ?? 'GET',
-    headers: opts.headers ?? {},
+    headers,
     ...(opts.data !== undefined ? { body: JSON.stringify(opts.data) } : {}),
   });
+  if (cached && (res.status === 401 || res.status === 403 || res.status === 412)) {
+    clearCachedCredentials();
+  }
   const text = await res.text();
   return { status: res.status, json: safeParse(text), text, viaNative: false };
 }

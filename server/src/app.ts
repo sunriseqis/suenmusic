@@ -16,6 +16,7 @@ import { createLogger } from './logger.ts';
 import { AppError } from './http/errors.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
+import { registerSourceRoutes } from './routes/sources.ts';
 import { registerAiSettingsRoutes } from './routes/ai-settings.ts';
 import { registerBilibiliRoutes } from './routes/bilibili.ts';
 import { registerNeteaseRoutes } from './routes/netease.ts';
@@ -179,6 +180,7 @@ export function buildApp(): FastifyInstance {
   registerHealthRoutes(app, SERVER_VERSION);
   registerAuthRoutes(app);
   registerAdminRoutes(app);
+  registerSourceRoutes(app);
   registerBilibiliRoutes(app);
   registerNeteaseRoutes(app);
   registerDailyRoutes(app);
