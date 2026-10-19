@@ -1,0 +1,621 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SuenMusic · 桌面端静态稿 1280×800</title>
+<style>
+  /* ============================================================
+     哑光硬件 · 桌面端静态稿
+     约束：不用外阴影 / 厚度只给播放键 / 琥珀只表状态 / 禁胶囊
+     ============================================================ */
+  :root{
+    --bg:#0E0F11;
+    --panel:#15171A;
+    --panel-2:#1A1D21;
+    --line:rgba(255,255,255,.075);
+    --hi:rgba(255,255,255,.06);
+    --lo:rgba(0,0,0,.55);
+    --t1:#E8E6E1;
+    --t2:#8D8A83;
+    --t3:#5F5C56;
+    --accent:#E8A33D;
+    --accent-text:#F0B45F;
+    --danger:#D4564A;
+    --r-sm:6px;
+    --r-md:10px;
+    --r-lg:14px;
+    --r-xl:18px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px;
+    --sp-5:24px; --sp-6:32px; --sp-7:48px;
+  }
+  html.light{
+    --bg:#F2F0EA;
+    --panel:#FAF8F3;
+    --panel-2:#EDEAE2;
+    --line:rgba(20,18,14,.12);
+    --hi:rgba(255,255,255,.9);
+    --lo:rgba(0,0,0,.14);
+    --t1:#1B1916;
+    --t2:#6E675C;
+    --t3:#9C958A;
+    --accent:#B0650F;
+    --accent-text:#8F4F08;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    padding:40px 32px 64px;
+    background:#08090A;
+    color:#C9C6BF;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page-head{
+    max-width:1280px;margin:0 auto 28px;
+    display:flex;align-items:flex-end;justify-content:space-between;gap:24px;
+  }
+  .page-head h1{margin:0;font-size:18px;font-weight:600;letter-spacing:.01em;color:#EDEAE4}
+  .page-head p{margin:6px 0 0;font-size:12px;color:#7C7972;letter-spacing:.02em}
+  .toggle{
+    height:34px;padding:0 14px;border:1px solid rgba(255,255,255,.14);
+    border-radius:10px;background:transparent;color:#B9B5AC;font:inherit;font-size:12px;
+    cursor:pointer;letter-spacing:.04em;
+  }
+  .toggle:hover{border-color:rgba(255,255,255,.28);color:#EDEAE4}
+
+  .stage{max-width:1280px;margin:0 auto;display:flex;flex-direction:column;gap:12px}
+  .caption{
+    display:flex;align-items:baseline;justify-content:space-between;
+    margin:28px 0 0;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6B6861;
+  }
+  .caption span:last-child{letter-spacing:.02em;text-transform:none;color:#4E4B45}
+
+  .frame{
+    width:1280px;height:800px;overflow:hidden;
+    background:var(--bg);color:var(--t1);
+    border:1px solid rgba(255,255,255,.09);border-radius:14px;
+    position:relative;flex:none;
+  }
+
+  /* ---------------- 壳 ---------------- */
+  .shell{
+    width:100%;height:100%;
+    display:grid;
+    grid-template-columns:232px minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) 88px;
+    grid-template-areas:"side main" "side player";
+  }
+  .side{
+    grid-area:side;border-right:1px solid var(--line);
+    display:flex;flex-direction:column;gap:var(--sp-6);
+    padding:var(--sp-6) var(--sp-4);
+  }
+  .brand{display:flex;align-items:center;gap:10px;padding:0 8px}
+  .brand-mark{
+    width:22px;height:22px;border-radius:4px;background:var(--accent);
+    position:relative;flex:none;
+  }
+  .brand-mark::after{
+    content:"";position:absolute;inset:5px 5px 9px 5px;border-radius:1px;
+    background:var(--bg);
+  }
+  .brand-name{font-size:13px;font-weight:600;letter-spacing:.16em;color:var(--t1)}
+  .brand-sub{font-size:9px;letter-spacing:.22em;color:var(--t3);margin-left:auto}
+
+  .nav{display:flex;flex-direction:column;gap:2px}
+  .nav-label{
+    padding:0 8px 8px;font-size:10px;letter-spacing:.2em;color:var(--t3);
+  }
+  .nav-item{
+    position:relative;display:flex;align-items:center;
+    height:40px;padding:0 10px;border-radius:var(--r-md);
+    color:var(--t2);font-size:13px;letter-spacing:.02em;
+  }
+  .nav-item.is-on{color:var(--t1);background:var(--panel-2);box-shadow:inset 0 1px 0 var(--hi)}
+  .nav-item.is-on::before{
+    content:"";position:absolute;left:0;top:10px;bottom:10px;width:2px;background:var(--accent);
+  }
+  .nav-count{margin-left:auto;font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums}
+  .nav-item.is-on .nav-count{color:var(--t2)}
+
+  .side-foot{margin-top:auto;display:flex;flex-direction:column;gap:12px}
+  .account{
+    display:flex;align-items:center;gap:10px;height:52px;padding:0 10px;
+    border-radius:var(--r-md);border:1px solid var(--line);background:var(--panel);
+  }
+  .avatar{
+    width:28px;height:28px;border-radius:var(--r-sm);flex:none;
+    background:linear-gradient(135deg,#33373C,#202329);
+    border:1px solid var(--line);
+  }
+  .acc-name{font-size:12px;color:var(--t1)}
+  .acc-sub{font-size:10px;color:var(--t3)}
+  .acc-dot{width:5px;height:5px;border-radius:50%;background:var(--accent);margin-left:auto}
+
+  /* ---------------- 主区 ---------------- */
+  .main{grid-area:main;overflow:hidden;padding:var(--sp-6) var(--sp-7) var(--sp-5)}
+  .main-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:var(--sp-6)}
+  .main-title{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0}
+  .main-sub{font-size:11px;letter-spacing:.18em;color:var(--t2);margin:6px 0 0}
+  .head-actions{display:flex;gap:8px}
+
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    height:34px;padding:0 14px;border-radius:var(--r-md);
+    border:1px solid var(--line);background:var(--panel);color:var(--t1);
+    font:inherit;font-size:12px;box-shadow:inset 0 1px 0 var(--hi);cursor:pointer;
+  }
+  .btn.primary{
+    background:var(--accent);border-color:color-mix(in srgb,var(--accent) 70%,#000);
+    color:#1A1206;font-weight:600;
+  }
+
+  /* 新碟 */
+  .section-head{display:flex;align-items:center;gap:16px;margin-bottom:14px}
+  .section-title{
+    font-size:10px;letter-spacing:.2em;color:var(--t2);white-space:nowrap;
+  }
+  .section-rule{flex:1;height:1px;background:var(--line)}
+  .section-more{font-size:11px;color:var(--t2)}
+
+  .posters{display:grid;grid-template-columns:repeat(4,1fr);gap:20px}
+  .poster{cursor:default}
+  .poster-art{
+    position:relative;width:100%;aspect-ratio:1;border-radius:var(--r-md);
+    border:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hi);
+    background:
+      radial-gradient(120% 90% at 18% 12%,rgba(255,255,255,.10),transparent 55%),
+      linear-gradient(150deg,#2A2E34 0%,#191C21 58%,#111317 100%);
+    overflow:hidden;
+  }
+  .poster-art::after{
+    content:"";position:absolute;left:14%;right:14%;top:22%;bottom:22%;
+    border:1px solid rgba(255,255,255,.10);border-radius:2px;
+  }
+  .poster-art .badge{
+    position:absolute;left:8px;top:8px;padding:1px 5px;border-radius:2px;
+    background:rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.12);
+    font-size:9px;letter-spacing:.08em;color:#E8E6E1;
+  }
+  .poster-name{margin:10px 0 0;font-size:13px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .poster-artist{margin:3px 0 0;font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* 两栏内容 */
+  .cols{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:36px;margin-top:var(--sp-6)}
+
+  .tracks{display:flex;flex-direction:column}
+  .track{
+    display:grid;grid-template-columns:24px 40px minmax(0,1fr) 120px 44px;
+    align-items:center;gap:12px;height:56px;
+    border-top:1px solid var(--line);
+  }
+  .track:first-child{border-top:0}
+  .track-num{font-size:11px;color:var(--t3);text-align:center;font-variant-numeric:tabular-nums}
+  .track.is-on .track-num{color:var(--accent)}
+  .track-cov{
+    width:36px;height:36px;border-radius:var(--r-sm);border:1px solid var(--line);
+    background:linear-gradient(145deg,#262A30,#16191D);
+  }
+  .track-main{min-width:0}
+  .track-name{font-size:13px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .track.is-on .track-name{color:var(--accent-text)}
+  .track-artist{font-size:11px;color:var(--t2);margin-top:2px}
+  .track-album{font-size:11px;color:var(--t3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .track-dur{font-size:11px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
+
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .chart{
+    border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);
+    padding:12px;display:flex;gap:12px;align-items:center;
+  }
+  .chart-art{
+    width:52px;height:52px;border-radius:var(--r-sm);flex:none;
+    border:1px solid var(--line);
+    background:
+      radial-gradient(100% 100% at 20% 10%,rgba(232,163,61,.22),transparent 60%),
+      linear-gradient(160deg,#23272D,#15181C);
+  }
+  .chart-name{font-size:12px;color:var(--t1)}
+  .chart-sub{font-size:10px;color:var(--t3);margin-top:4px;letter-spacing:.04em}
+
+  /* ---------------- 播放条 ---------------- */
+  .playerbar{
+    grid-area:player;border-top:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hi);
+    display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) minmax(0,1fr);
+    align-items:center;gap:32px;padding:0 var(--sp-5);
+  }
+  .now{display:flex;align-items:center;gap:12px;min-width:0}
+  .now-art{
+    width:48px;height:48px;border-radius:var(--r-md);flex:none;
+    border:1px solid var(--line);
+    background:linear-gradient(150deg,#2B3037,#171A1E);
+  }
+  .now-text{min-width:0}
+  .now-name{font-size:13px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .now-artist{font-size:11px;color:var(--t2);margin-top:2px}
+
+  .transport{display:flex;flex-direction:column;gap:8px}
+  .transport-btns{display:flex;align-items:center;justify-content:center;gap:18px}
+  .icon-btn{
+    width:30px;height:30px;border:0;background:transparent;color:var(--t2);
+    display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border-radius:var(--r-sm);
+  }
+  .icon-btn:hover{color:var(--t1);background:var(--panel-2)}
+  .icon-btn svg{width:15px;height:15px;fill:currentColor}
+  .play-btn{
+    width:44px;height:44px;border-radius:50%;border:1px solid color-mix(in srgb,var(--accent) 72%,#000);
+    background:var(--accent);color:#1A1206;display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.32),0 1px 0 rgba(0,0,0,.5);
+    cursor:pointer;
+  }
+  .play-btn svg{width:16px;height:16px;fill:currentColor;margin-left:2px}
+
+  .progress-row{display:flex;align-items:center;gap:10px}
+  .time{font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums;width:32px}
+  .time.right{text-align:right}
+  .bar{position:relative;flex:1;height:2px;background:var(--line);border-radius:1px}
+  .bar-fill{position:absolute;left:0;top:0;bottom:0;width:38%;background:var(--accent)}
+  .bar-knob{
+    position:absolute;left:38%;top:50%;width:9px;height:9px;border-radius:50%;
+    background:var(--accent);transform:translate(-50%,-50%);
+  }
+  .bar-buffer{position:absolute;left:0;top:0;bottom:0;width:52%;background:rgba(255,255,255,.10)}
+
+  .bar-right{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+  .vol{width:84px;height:2px;background:var(--line);position:relative;border-radius:1px}
+  .vol i{position:absolute;left:0;top:0;bottom:0;width:62%;background:var(--t2)}
+  .pill-state{
+    font-size:9px;letter-spacing:.14em;color:var(--t2);
+    padding:2px 6px;border:1px solid var(--line);border-radius:2px;
+  }
+
+  /* ---------------- 全屏播放页 ---------------- */
+  .fullscreen{
+    width:100%;height:100%;
+    display:grid;grid-template-rows:64px minmax(0,1fr) 118px;
+    padding:0 var(--sp-7);
+    background:
+      radial-gradient(90% 70% at 18% 20%,rgba(232,163,61,.06),transparent 60%),
+      var(--bg);
+  }
+  .fs-head{display:flex;align-items:center;gap:16px}
+  .fs-meta{flex:1;text-align:center;font-size:9px;letter-spacing:.22em;color:var(--t3)}
+  .fs-body{display:grid;grid-template-columns:420px minmax(0,1fr);gap:64px;align-items:center}
+
+  .fs-left{display:flex;flex-direction:column;gap:18px}
+  .fs-art{
+    width:100%;aspect-ratio:1;border-radius:var(--r-lg);border:1px solid var(--line);
+    box-shadow:inset 0 1px 0 var(--hi);
+    background:
+      radial-gradient(120% 90% at 20% 12%,rgba(255,255,255,.09),transparent 55%),
+      linear-gradient(150deg,#2C3138 0%,#181B20 60%,#101216 100%);
+    position:relative;overflow:hidden;
+  }
+  .fs-art::after{
+    content:"";position:absolute;left:12%;right:12%;top:20%;bottom:20%;
+    border:1px solid rgba(255,255,255,.08);border-radius:2px;
+  }
+  .fs-title{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:0}
+  .fs-sub{font-size:12px;color:var(--t2);margin:6px 0 0}
+  .fs-actions{display:flex;gap:8px;margin-top:2px}
+
+  .lyrics{display:flex;flex-direction:column;gap:22px;padding-right:24px}
+  .ly{font-size:19px;line-height:1.5;color:var(--t3);letter-spacing:.01em}
+  .ly.near{color:var(--t2)}
+  .ly.now{color:var(--accent-text);font-size:23px;font-weight:600}
+
+  .fs-foot{display:flex;flex-direction:column;justify-content:center;gap:14px;padding-bottom:10px}
+  .fs-foot .transport{width:min(100%,560px);margin:0 auto}
+  .fs-bottom{display:flex;align-items:center;justify-content:space-between;margin-top:2px}
+  .fs-bottom .icon-btn{width:34px;height:34px}
+
+  .note{
+    max-width:1280px;margin:16px auto 0;font-size:11px;line-height:1.8;color:#6B6861;
+  }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <div>
+      <h1>SuenMusic · 桌面端静态稿</h1>
+      <p>1280 × 800 · 哑光硬件 · 侧边栏 / 播放条 / 全屏播放页</p>
+    </div>
+    <button class="toggle" id="themeBtn">切换浅色</button>
+  </div>
+
+  <div class="stage">
+    <!-- ============================================ 主界面 -->
+    <div class="caption"><span>01 / 主界面</span><span>sidebar 232 · player bar 88</span></div>
+    <div class="frame">
+      <div class="shell">
+        <aside class="side">
+          <div class="brand">
+            <span class="brand-mark"></span>
+            <span class="brand-name">SUENMUSIC</span>
+            <span class="brand-sub">1.5</span>
+          </div>
+
+          <nav class="nav">
+            <div class="nav-label">浏览</div>
+            <a class="nav-item is-on">首页</a>
+            <a class="nav-item">搜索</a>
+            <a class="nav-item">收藏<span class="nav-count">28</span></a>
+            <div class="nav-label" style="margin-top:18px">管理</div>
+            <a class="nav-item">设置</a>
+          </nav>
+
+          <div class="side-foot">
+            <div class="account">
+              <span class="avatar"></span>
+              <div>
+                <div class="acc-name">本机模式</div>
+                <div class="acc-sub">未登录</div>
+              </div>
+              <span class="acc-dot"></span>
+            </div>
+          </div>
+        </aside>
+
+        <main class="main">
+          <div class="main-head">
+            <div>
+              <h2 class="main-title">首页</h2>
+              <p class="main-sub">新碟首发 · 新歌首发 · 巅峰榜</p>
+            </div>
+            <div class="head-actions">
+              <button class="btn">刷新</button>
+              <button class="btn primary">播放全部</button>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <span class="section-title">新碟首发</span>
+            <span class="section-rule"></span>
+            <span class="section-more">全部 12 张</span>
+          </div>
+
+          <div class="posters">
+            <div class="poster">
+              <div class="poster-art"><span class="badge">10-18</span></div>
+              <p class="poster-name">夜航</p>
+              <p class="poster-artist">林间</p>
+            </div>
+            <div class="poster">
+              <div class="poster-art"><span class="badge">10-18</span></div>
+              <p class="poster-name">雨停之后</p>
+              <p class="poster-artist">陈稚</p>
+            </div>
+            <div class="poster">
+              <div class="poster-art"><span class="badge">10-17</span></div>
+              <p class="poster-name">慢速列车</p>
+              <p class="poster-artist">北纬三十</p>
+            </div>
+            <div class="poster">
+              <div class="poster-art"><span class="badge">10-17</span></div>
+              <p class="poster-name">海滨旅馆</p>
+              <p class="poster-artist">伍拾</p>
+            </div>
+          </div>
+
+          <div class="cols">
+            <section>
+              <div class="section-head">
+                <span class="section-title">新歌首发</span>
+                <span class="section-rule"></span>
+              </div>
+              <div class="tracks">
+                <div class="track is-on">
+                  <span class="track-num">01</span>
+                  <span class="track-cov"></span>
+                  <span class="track-main">
+                    <span class="track-name">夜航</span>
+                    <span class="track-artist">林间</span>
+                  </span>
+                  <span class="track-album">夜航</span>
+                  <span class="track-dur">4:08</span>
+                </div>
+                <div class="track">
+                  <span class="track-num">02</span>
+                  <span class="track-cov"></span>
+                  <span class="track-main">
+                    <span class="track-name">光芒</span>
+                    <span class="track-artist">陈稚</span>
+                  </span>
+                  <span class="track-album">雨停之后</span>
+                  <span class="track-dur">3:33</span>
+                </div>
+                <div class="track">
+                  <span class="track-num">03</span>
+                  <span class="track-cov"></span>
+                  <span class="track-main">
+                    <span class="track-name">正或反</span>
+                    <span class="track-artist">北纬三十</span>
+                  </span>
+                  <span class="track-album">慢速列车</span>
+                  <span class="track-dur">4:27</span>
+                </div>
+              </div>
+            </section>
+
+            <section>
+              <div class="section-head">
+                <span class="section-title">巅峰榜</span>
+                <span class="section-rule"></span>
+              </div>
+              <div class="charts">
+                <div class="chart">
+                  <span class="chart-art"></span>
+                  <div>
+                    <div class="chart-name">飙升榜</div>
+                    <div class="chart-sub">刚刚更新</div>
+                  </div>
+                </div>
+                <div class="chart">
+                  <span class="chart-art"></span>
+                  <div>
+                    <div class="chart-name">热歌榜</div>
+                    <div class="chart-sub">每日更新</div>
+                  </div>
+                </div>
+                <div class="chart">
+                  <span class="chart-art"></span>
+                  <div>
+                    <div class="chart-name">新歌榜</div>
+                    <div class="chart-sub">每日更新</div>
+                  </div>
+                </div>
+                <div class="chart">
+                  <span class="chart-art"></span>
+                  <div>
+                    <div class="chart-name">流行指数</div>
+                    <div class="chart-sub">每周更新</div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <footer class="playerbar">
+          <div class="now">
+            <span class="now-art"></span>
+            <div class="now-text">
+              <div class="now-name">夜航</div>
+              <div class="now-artist">林间</div>
+            </div>
+            <button class="icon-btn" title="收藏">
+              <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg>
+            </button>
+          </div>
+
+          <div class="transport">
+            <div class="transport-btns">
+              <button class="icon-btn" title="随机">
+                <svg viewBox="0 0 24 24"><path d="M16 3h5v5h-2V6.4l-3.3 3.3-1.4-1.4L17.6 5H16V3zM3 6h3.6l2.7 2.7-1.4 1.4L5.6 8H3V6zm13 12h1.6l-3.3-3.3 1.4-1.4L19 16.6V14h2v7h-5v-3zM3 18h2.6l12-12H16V4h5v2.6L8.6 18H3v-2z"/></svg>
+              </button>
+              <button class="icon-btn" title="上一首">
+                <svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg>
+              </button>
+              <button class="play-btn" title="播放">
+                <svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg>
+              </button>
+              <button class="icon-btn" title="下一首">
+                <svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg>
+              </button>
+              <button class="icon-btn" title="列表循环">
+                <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+              </button>
+            </div>
+            <div class="progress-row">
+              <span class="time">1:34</span>
+              <span class="bar"><i class="bar-buffer"></i><i class="bar-fill"></i><i class="bar-knob"></i></span>
+              <span class="time right">4:08</span>
+            </div>
+          </div>
+
+          <div class="bar-right">
+            <span class="pill-state">B 站</span>
+            <button class="icon-btn" title="音质">HQ</button>
+            <button class="icon-btn" title="队列">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>
+            </button>
+            <span class="vol"><i></i></span>
+            <button class="icon-btn" title="更多">
+              <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- ============================================ 全屏播放 -->
+    <div class="caption"><span>02 / 全屏播放页</span><span>封面 420 · 歌词 23px 当前行</span></div>
+    <div class="frame">
+      <div class="fullscreen">
+        <header class="fs-head">
+          <button class="icon-btn" title="收起">
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6-1.4-1.4L12 12.2 7.4 7.6 6 9z"/></svg>
+          </button>
+          <div class="fs-meta">正在播放 · 首页 · 新歌首发</div>
+          <button class="icon-btn" title="更多">
+            <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          </button>
+        </header>
+
+        <div class="fs-body">
+          <div class="fs-left">
+            <div class="fs-art"></div>
+            <div>
+              <h2 class="fs-title">夜航</h2>
+              <p class="fs-sub">林间 · 夜航</p>
+            </div>
+            <div class="fs-actions">
+              <button class="btn">收藏</button>
+              <button class="btn">修正音源</button>
+            </div>
+          </div>
+
+          <div class="lyrics">
+            <div class="ly">把灯调到最暗的那一档</div>
+            <div class="ly near">海面没有回声</div>
+            <div class="ly now">我们就一直向前</div>
+            <div class="ly near">直到天亮之前</div>
+            <div class="ly">所有方向都叫远方</div>
+          </div>
+        </div>
+
+        <footer class="fs-foot">
+          <div class="transport">
+            <div class="progress-row">
+              <span class="time">1:34</span>
+              <span class="bar"><i class="bar-buffer"></i><i class="bar-fill"></i><i class="bar-knob"></i></span>
+              <span class="time right">4:08</span>
+            </div>
+            <div class="transport-btns">
+              <button class="icon-btn" title="随机">
+                <svg viewBox="0 0 24 24"><path d="M16 3h5v5h-2V6.4l-3.3 3.3-1.4-1.4L17.6 5H16V3zM3 6h3.6l2.7 2.7-1.4 1.4L5.6 8H3V6zm13 12h1.6l-3.3-3.3 1.4-1.4L19 16.6V14h2v7h-5v-3zM3 18h2.6l12-12H16V4h5v2.6L8.6 18H3v-2z"/></svg>
+              </button>
+              <button class="icon-btn" title="上一首">
+                <svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg>
+              </button>
+              <button class="play-btn" title="暂停">
+                <svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg>
+              </button>
+              <button class="icon-btn" title="下一首">
+                <svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg>
+              </button>
+              <button class="icon-btn" title="列表循环">
+                <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="fs-bottom">
+            <button class="icon-btn" title="收藏">
+              <svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg>
+            </button>
+            <span class="pill-state">B 站 · 1080P</span>
+            <button class="icon-btn" title="队列">
+              <svg viewBox="0 0 24 24"><path d="M4 6h16v2H4V6zm0 5h16v2H4v-2zm0 5h10v2H4v-2z"/></svg>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <p class="note">
+      说明：封面与头像为占位块（无外链素材）；琥珀只用于当前项、进度与状态；<br />
+      全站只有播放键是凸起的零件，其余控件无底色或仅有 1px 发丝线。
+    </p>
+  </div>
+
+<script>
+  const btn = document.getElementById('themeBtn');
+  btn.addEventListener('click', () => {
+    const light = document.documentElement.classList.toggle('light');
+    btn.textContent = light ? '切换深色' : '切换浅色';
+  });
+</script>
+</body>
+</html>
