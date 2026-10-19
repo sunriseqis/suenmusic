@@ -726,8 +726,12 @@ function onScrubCommit(percent: number) {
  * 卡片是这条状态的必要信息，封面让位。
  */
 .full.has-reco .cover-wrap {
-  width: min(58vw, 232px);
-  margin-bottom: var(--sp-3);
+  width: min(52vw, 208px);
+  margin-bottom: var(--sp-2);
+}
+/* 卡片上沿不再额外留空：这几个像素正是压住进度条的余量 */
+.full.has-reco .m-info-card {
+  margin-top: 0;
 }
 
 .info {
