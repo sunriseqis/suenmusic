@@ -12,7 +12,7 @@
  * 一次性任务（登入、黑名单、导入、去重、备份、缓存、主题）走底部弹层。
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -226,6 +226,18 @@ const TABS = computed(() => {
 });
 const activeTab = ref('local');
 
+/**
+ * 桌面浏览器不分 tab：一屏足够放下「本机 / 智能 / 高级」。
+ * 移动端仍保留分段，避免一页滚到底。
+ */
+const desktopMq = typeof window !== 'undefined'
+  ? window.matchMedia('(min-width: 1024px)')
+  : null;
+const isDesktop = ref(desktopMq?.matches ?? false);
+function onDesktopChange(e: MediaQueryListEvent): void {
+  isDesktop.value = e.matches;
+}
+
 const loginAddr = ref(ui.baseUrl);
 const loginUser = ref('');
 const loginPass = ref('');
@@ -351,10 +363,13 @@ async function loadServerData(): Promise<void> {
 }
 
 onMounted(() => {
+  desktopMq?.addEventListener('change', onDesktopChange);
   void dislikes.ensureLoaded();
   void favorites.ensureLoaded();
   void loadServerData();
 });
+
+onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange));
 </script>
 
 <template>
@@ -362,12 +377,12 @@ onMounted(() => {
     <h1 class="page-title">设置</h1>
     <p v-if="session.isLoggedIn && ui.serverDown" class="offline">服务端已断开</p>
 
-    <div v-if="serverConfigured" class="tabs-wrap">
+    <div v-if="serverConfigured && !isDesktop" class="tabs-wrap">
       <NeuTabs v-model="activeTab" :items="TABS" />
     </div>
 
     <!-- ==================== 本机 ==================== -->
-    <template v-if="!serverConfigured || activeTab === 'local'">
+    <template v-if="!serverConfigured || isDesktop || activeTab === 'local'">
       <section class="sec">
         <h2 class="label">播放</h2>
         <div class="panel">
@@ -462,7 +477,7 @@ onMounted(() => {
     </template>
 
     <!-- ==================== 智能 ==================== -->
-    <template v-else-if="activeTab === 'smart'">
+    <template v-if="serverConfigured && (isDesktop || activeTab === 'smart')">
       <section class="sec">
         <h2 class="label">画像</h2>
         <div class="panel">
@@ -533,7 +548,7 @@ onMounted(() => {
     </template>
 
     <!-- ==================== 高级 ==================== -->
-    <template v-else>
+    <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
       <section class="sec sec-wide">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
@@ -617,7 +632,7 @@ onMounted(() => {
 
     <Sheet :open="sheet === 'dedupe'" title="去重" @close="sheet = null">
       <p v-if="dupBusy" class="hint">检查中…</p>
-      <template v-else>
+      <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
         <p v-if="dupMsg" class="hint">{{ dupMsg }}</p>
         <NeuButton
           v-if="dupGroups.length > 0"
