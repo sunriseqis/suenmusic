@@ -217,6 +217,12 @@ export function getTokenEpoch(userId: number): number {
  * 只供 CLI 与运维使用，**不经任何 HTTP 端点暴露** ——
  * 本项目刻意不做管理员体系，所以没有任何"查所有用户"的接口。
  */
+/** 删除账号；关联的令牌/收藏/历史由外键级联清理 */
+export function deleteUser(userId: number): boolean {
+  const res = getDatabase().prepare('DELETE FROM users WHERE id = ?').run(userId);
+  return toNumber(res.changes) > 0;
+}
+
 /** 设置角色（只允许 admin / member） */
 export function setUserRole(userId: number, role: 'admin' | 'member'): boolean {
   const res = getDatabase()

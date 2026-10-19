@@ -14,8 +14,9 @@ import {
   setUserRole,
   updatePassword,
   countUsers,
+  deleteUser,
 } from '../db/repo/users.ts';
-import { registrationAllowed } from '../services/auth.ts';
+import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { getDatabase } from '../db/index.ts';
 import { config } from '../config.ts';
 import { readFileSync, statSync, unlinkSync } from 'node:fs';
@@ -81,17 +82,44 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   app.get('/api/admin/settings', async req => {
     requireAdmin(req);
-    return { allowRegistration: registrationAllowed() };
+    return { allowRegistration: registrationAllowed(), passwordMinLength: passwordMinLength() };
   });
 
   app.patch('/api/admin/settings', async req => {
     requireAdmin(req);
     const body = asRecord(req.body);
-    if (typeof body.allowRegistration !== 'boolean') {
-      throw badRequest('allowRegistration 必须是布尔值');
+
+    if (typeof body.allowRegistration === 'boolean') {
+      setSetting('allow_registration', body.allowRegistration ? '1' : '0');
     }
-    setSetting('allow_registration', body.allowRegistration ? '1' : '0');
-    return { ok: true, allowRegistration: body.allowRegistration };
+    if (typeof body.passwordMinLength === 'number') {
+      if (body.passwordMinLength < 8 || body.passwordMinLength > 64) {
+        throw badRequest('口令长度需在 8–64 之间');
+      }
+      setSetting('password_min_length', String(Math.floor(body.passwordMinLength)));
+    }
+
+    return {
+      ok: true,
+      allowRegistration: registrationAllowed(),
+      passwordMinLength: passwordMinLength(),
+    };
+  });
+
+  /** 删除成员。不能删自己，也不能删掉最后一个管理员 */
+  app.delete('/api/admin/users/:id', async req => {
+    const admin = requireAdmin(req);
+    const id = Number((req.params as { id?: string }).id);
+    if (!Number.isInteger(id) || id <= 0) throw badRequest('用户 id 不合法');
+    const target = findUserById(id);
+    if (!target) throw notFound('用户不存在');
+    if (target.id === admin.id) throw badRequest('不能删除当前登录的账号');
+    if (target.role === 'admin') {
+      const admins = listUsers().filter(u => u.role === 'admin');
+      if (admins.length <= 1) throw badRequest('至少保留一个管理员');
+    }
+    deleteUser(id);
+    return { ok: true };
   });
 
   /**

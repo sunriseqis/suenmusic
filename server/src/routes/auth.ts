@@ -9,7 +9,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { config } from '../config.ts';
 import * as authService from '../services/auth.ts';
-import { PASSWORD_MIN_LENGTH } from '../utils/password.ts';
 import { countUsers } from '../db/repo/users.ts';
 import { findValidRefreshToken, listActiveTokens, revokeRefreshToken } from '../db/repo/tokens.ts';
 import { optionalUser, requireUser } from '../http/require-auth.ts';
@@ -60,7 +59,7 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       allowRegistration: authService.registrationAllowed(),
       hasUsers,
       /** 口令强度下限，供前端做即时预校验，避免提交后才报错 */
-      passwordMinLength: PASSWORD_MIN_LENGTH,
+      passwordMinLength: authService.passwordMinLength(),
     };
   });
 

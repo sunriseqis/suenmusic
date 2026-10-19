@@ -15,6 +15,7 @@ import type { PublicUser } from '@/api/types.ts';
 const ui = useUiStore();
 const users = ref<PublicUser[]>([]);
 const allowRegistration = ref(false);
+const minLength = ref(8);
 const username = ref('');
 const password = ref('');
 const busy = ref(false);
@@ -23,10 +24,11 @@ async function load(): Promise<void> {
   try {
     const [u, s] = await Promise.all([
       http.get<{ users: PublicUser[] }>('/api/admin/users'),
-      http.get<{ allowRegistration: boolean }>('/api/admin/settings'),
+      http.get<{ allowRegistration: boolean; passwordMinLength: number }>('/api/admin/settings'),
     ]);
     users.value = u.users;
     allowRegistration.value = s.allowRegistration;
+    minLength.value = s.passwordMinLength;
   } catch (e) {
     ui.err(e instanceof ApiError ? e.message : '读取账号失败');
   }
@@ -71,6 +73,29 @@ async function resetPassword(u: PublicUser): Promise<void> {
   }
 }
 
+async function saveMinLength(): Promise<void> {
+  try {
+    const res = await http.patch<{ passwordMinLength: number }>('/api/admin/settings', {
+      passwordMinLength: minLength.value,
+    });
+    minLength.value = res.passwordMinLength;
+    ui.ok('口令策略已更新');
+  } catch (e) {
+    ui.err(e instanceof ApiError ? e.message : '保存失败');
+  }
+}
+
+async function removeUser(u: PublicUser): Promise<void> {
+  if (!window.confirm(`删除账号 ${u.username}？收藏与历史会一并删除。`)) return;
+  try {
+    await http.delete(`/api/admin/users/${u.id}`);
+    ui.ok('已删除');
+    await load();
+  } catch (e) {
+    ui.err(e instanceof ApiError ? e.message : '删除失败');
+  }
+}
+
 async function toggleRegistration(v: boolean): Promise<void> {
   allowRegistration.value = v;
   try {
@@ -98,6 +123,7 @@ onMounted(load);
         >
           {{ u.role === 'admin' ? '降为成员' : '设为管理员' }}
         </button>
+        <button type="button" class="link danger" @click="removeUser(u)">删除</button>
       </div>
     </div>
 
@@ -110,6 +136,12 @@ onMounted(load);
     <div class="row">
       <span class="name">开放注册</span>
       <NeuSwitch :model-value="allowRegistration" @update:model-value="toggleRegistration" />
+    </div>
+
+    <div class="row">
+      <span class="name">口令最短长度</span>
+      <input v-model.number="minLength" class="num" type="number" min="8" max="64" />
+      <button type="button" class="link" @click="saveMinLength">保存</button>
     </div>
   </div>
 </template>

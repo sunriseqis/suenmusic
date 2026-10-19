@@ -15,6 +15,7 @@ import { toNumber } from '../db/index.ts';
 import * as tokensRepo from '../db/repo/tokens.ts';
 import * as usersRepo from '../db/repo/users.ts';
 import { getSetting } from '../db/repo/settings.ts';
+import { PASSWORD_MIN_LENGTH } from '../utils/password.ts';
 import { InvalidUsernameError, UsernameTakenError, WeakPasswordError } from '../db/repo/users.ts';
 import type { PublicUser } from '../db/repo/users.ts';
 import { signJwt, verifyJwt } from '../utils/jwt.ts';
@@ -158,6 +159,16 @@ function issueSession(user: PublicUser, userAgent = ''): AuthSession {
  * 首个账号永远放行；之后以管理员的开关（app_settings.allow_registration）为准，
  * 没设置过才回落到环境变量。这样界面上的开关能立即生效，不必重启。
  */
+/**
+ * 有效口令长度：管理员可调高，但不能低于代码里的硬下限。
+ * 返回给登录页做预校验，也在注册时兜底。
+ */
+export function passwordMinLength(): number {
+  const raw = Number(getSetting('password_min_length'));
+  if (!Number.isFinite(raw) || raw <= PASSWORD_MIN_LENGTH) return PASSWORD_MIN_LENGTH;
+  return Math.min(Math.floor(raw), 64);
+}
+
 export function registrationAllowed(): boolean {
   if (usersRepo.countUsers() === 0) return true;
   const v = getSetting('allow_registration');
@@ -171,6 +182,10 @@ export function register(input: Credentials): AuthSession {
   // 否则关掉注册就再也建不出第一个账号了
   if (!registrationAllowed()) {
     throw forbidden('本服务已关闭注册');
+  }
+  const minLen = passwordMinLength();
+  if (password.length < minLen) {
+    throw badRequest(`口令至少 ${minLen} 位`);
   }
 
   try {
