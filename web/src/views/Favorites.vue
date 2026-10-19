@@ -299,4 +299,13 @@ onMounted(() => {
     line-height: 1.5;
   }
 }
+
+@media (min-width: 1024px) {
+  .favorites {
+    padding-top: var(--sp-6);
+  }
+  .title {
+    font-size: 26px;
+  }
+}
 </style>

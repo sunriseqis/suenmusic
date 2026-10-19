@@ -1094,4 +1094,12 @@ onBeforeUnmount(() => {
     margin-top: var(--sp-3);
   }
 }
+
+@media (min-width: 1024px) {
+  .home {
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-5);
+    gap: var(--sp-6);
+  }
+}
 </style>

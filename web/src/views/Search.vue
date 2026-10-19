@@ -578,4 +578,14 @@ function openPlaylist(tid: string | number | undefined) {
     flex: 1 1 0;
   }
 }
+
+@media (min-width: 1024px) {
+  .search {
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-5);
+  }
+  .h1 {
+    font-size: 26px;
+  }
+}
 </style>

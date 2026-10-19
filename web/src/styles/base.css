@@ -173,6 +173,12 @@ button {
   }
 }
 
+@media (min-width: 1024px) {
+  .neu-container {
+    padding: 0 var(--sp-7);
+  }
+}
+
 /* 网格：卡片自适应列数 */
 .neu-grid {
   display: grid;

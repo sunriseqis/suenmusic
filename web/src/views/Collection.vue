@@ -1162,4 +1162,11 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
     font-size: var(--fs-xl);
   }
 }
+
+@media (min-width: 1024px) {
+  .collection {
+    padding-top: var(--sp-6);
+    padding-bottom: var(--sp-5);
+  }
+}
 </style>
