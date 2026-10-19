@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SuenMusic · 小组件静态稿 390×844</title>
+<style>
+  :root{
+    --bg:#0E0F11; --panel:#15171A; --panel-2:#1A1D21;
+    --line:rgba(255,255,255,.09); --hi:rgba(255,255,255,.06);
+    --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
+    --accent:#E8A33D; --accent-text:#F0B45F;
+    --r-sm:6px; --r-md:10px; --r-lg:14px; --r-xl:18px;
+  }
+  html.light{
+    --bg:#F2F0EA; --panel:#FAF8F3; --panel-2:#EDEAE2;
+    --line:rgba(20,18,14,.12); --hi:rgba(255,255,255,.9);
+    --t1:#1B1916; --t2:#6E675C; --t3:#9C958A;
+    --accent:#B0650F; --accent-text:#8F4F08;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:40px 32px 80px;background:#08090A;color:#C9C6BF;
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page-head{max-width:880px;margin:0 auto 24px;display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+  .page-head h1{margin:0;font-size:18px;font-weight:600;color:#EDEAE4}
+  .page-head p{margin:6px 0 0;font-size:12px;color:#7C7972}
+  .toggle{height:34px;padding:0 14px;border:1px solid rgba(255,255,255,.14);border-radius:10px;background:transparent;color:#B9B5AC;font:inherit;font-size:12px;cursor:pointer}
+  .toggle:hover{border-color:rgba(255,255,255,.28);color:#EDEAE4}
+
+  .stage-row{max-width:880px;margin:0 auto;display:flex;gap:32px;align-items:flex-start;justify-content:center;flex-wrap:wrap}
+  .col{display:flex;flex-direction:column;gap:10px}
+  .caption{display:flex;justify-content:space-between;font-size:10px;letter-spacing:.16em;color:#6B6861;text-transform:uppercase}
+  .caption span:last-child{letter-spacing:.02em;text-transform:none;color:#4E4B45}
+
+  .phone{
+    width:390px;height:844px;overflow:hidden;position:relative;flex:none;
+    background:var(--bg);color:var(--t1);
+    border:1px solid rgba(255,255,255,.10);border-radius:24px;
+    display:flex;flex-direction:column;
+  }
+
+  /* ---------- 状态栏 / 导航 ---------- */
+  .status{
+    height:44px;flex:none;display:flex;align-items:flex-end;justify-content:space-between;
+    padding:0 22px 6px;font-size:11px;letter-spacing:.04em;color:var(--t2);
+    font-variant-numeric:tabular-nums;
+  }
+  .nav{height:52px;flex:none;display:flex;align-items:center;padding:0 16px;gap:8px}
+  .nav .back{
+    width:32px;height:32px;display:flex;align-items:center;justify-content:center;
+    border:0;background:transparent;color:var(--t1);cursor:pointer;border-radius:var(--r-sm);
+  }
+  .nav .back svg{width:16px;height:16px;fill:currentColor}
+  .nav .title{font-size:17px;font-weight:600;letter-spacing:.01em;margin:0 auto;padding-right:32px}
+
+  /* ---------- 尺寸切换：文字 + 下划线 ---------- */
+  .sizes{
+    flex:none;display:flex;gap:26px;padding:0 20px;height:42px;align-items:center;
+    border-bottom:1px solid var(--line);
+  }
+  .size-tab{
+    position:relative;padding:0 0 12px;margin-bottom:-1px;
+    font-size:13px;color:var(--t2);letter-spacing:.04em;
+  }
+  .size-tab.on{color:var(--t1)}
+  .size-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent)}
+
+  /* ---------- 预览区 ---------- */
+  .preview{
+    flex:none;padding:26px 20px 20px;display:flex;flex-direction:column;align-items:center;gap:14px;
+  }
+  .preview-bg{
+    width:100%;height:290px;border-radius:var(--r-md);
+    border:1px solid var(--line);
+    background:
+      radial-gradient(70% 50% at 20% 0%,rgba(232,163,61,.06),transparent 60%),
+      repeating-linear-gradient(90deg,rgba(255,255,255,.022) 0 1px,transparent 1px 48px),
+      repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0 1px,transparent 1px 48px),
+      var(--panel);
+    display:flex;align-items:center;justify-content:center;
+  }
+  .dim{font-size:10px;letter-spacing:.16em;color:var(--t3);font-variant-numeric:tabular-nums}
+
+  /* ---------- 小组件本体 ---------- */
+  .widget{
+    position:relative;overflow:hidden;
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.10);
+    color:#F2F0EA;
+  }
+  .w-2{
+    width:160px;height:160px;border-radius:18px;
+    background:
+      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.14),transparent 55%),
+      linear-gradient(155deg,#33383F 0%,#1B1E23 62%,#111317 100%);
+  }
+  .w-2 .art-ring{
+    position:absolute;left:22%;right:22%;top:16%;bottom:34%;
+    border:1px solid rgba(255,255,255,.10);border-radius:2px;
+  }
+  .w-2 .scrim{
+    position:absolute;left:0;right:0;bottom:0;height:72%;
+    background:linear-gradient(180deg,transparent,rgba(8,9,10,.78) 62%,rgba(8,9,10,.92));
+  }
+  .w-2 .meta{position:absolute;left:12px;right:12px;bottom:14px}
+  .w-2 .n{font-size:13px;font-weight:600;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-2 .s{font-size:10px;color:rgba(232,230,225,.62);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-2 .play{
+    position:absolute;right:10px;bottom:38px;
+    width:26px;height:26px;border-radius:50%;
+    background:var(--accent);display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+  }
+  .play svg{width:9px;height:9px;fill:#1A1206;margin-left:1px}
+  .prog{position:absolute;left:0;right:0;bottom:0;height:2px;background:rgba(255,255,255,.12)}
+  .prog i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
+
+  .w-4{
+    width:340px;height:160px;border-radius:18px;
+    background:var(--panel);
+    border-color:var(--line);
+    box-shadow:inset 0 1px 0 var(--hi);
+    display:flex;align-items:center;gap:14px;padding:14px;
+    color:var(--t1);
+  }
+  .w-4 .cov{
+    width:104px;height:104px;border-radius:var(--r-md);flex:none;
+    border:1px solid var(--line);
+    background:
+      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.12),transparent 55%),
+      linear-gradient(155deg,#33383F 0%,#1B1E23 62%,#111317 100%);
+  }
+  .w-4 .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .w-4 .n{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-4 .s{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w-4 .bar{margin-top:8px;position:relative;height:2px;background:var(--line)}
+  .w-4 .bar i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
+  .w-4 .times{display:flex;justify-content:space-between;font-size:9px;color:var(--t3);margin-top:5px;font-variant-numeric:tabular-nums}
+  .w-4 .ctrl{display:flex;align-items:center;gap:10px;margin-top:8px}
+  .w-4 .ctrl .mini{width:14px;height:14px;fill:var(--t2)}
+  .w-4 .ctrl .key{
+    width:30px;height:30px;border-radius:50%;background:var(--accent);
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
+  }
+  .w-4 .ctrl .key svg{width:10px;height:10px;fill:#1A1206;margin-left:1px}
+
+  /* ---------- 样式选项 ---------- */
+  .section-label{
+    padding:0 20px 8px;font-size:10px;letter-spacing:.2em;color:var(--t3);
+  }
+  .opts{margin:0 20px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);overflow:hidden}
+  .opt{
+    min-height:46px;display:flex;align-items:center;justify-content:space-between;
+    padding:0 16px;font-size:13px;color:var(--t1);
+  }
+  .opt + .opt{border-top:1px solid var(--line)}
+  .opt .dot{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .opt .ring{width:8px;height:8px;border-radius:50%;border:1px solid var(--line)}
+
+  .foot{margin-top:auto;padding:14px 20px 26px;display:flex;flex-direction:column;gap:10px}
+  .primary{
+    height:48px;border-radius:var(--r-md);border:1px solid color-mix(in srgb,var(--accent) 72%,#000);
+    background:var(--accent);color:#1A1206;font:inherit;font-size:14px;font-weight:600;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.30);cursor:pointer;
+  }
+  .hint{font-size:10px;color:var(--t3);text-align:center;letter-spacing:.04em}
+
+  /* ---------- 桌面场景 ---------- */
+  .home{
+    background:
+      radial-gradient(90% 60% at 80% 0%,rgba(232,163,61,.10),transparent 60%),
+      radial-gradient(80% 60% at 10% 100%,rgba(90,120,160,.10),transparent 60%),
+      linear-gradient(180deg,#14161A,#0A0B0D);
+    padding:0 20px;
+  }
+  .home .clock{padding:38px 8px 30px}
+  .home .time{font-size:64px;font-weight:300;letter-spacing:-.04em;color:#F2F0EA;line-height:1}
+  .home .date{font-size:12px;color:rgba(232,230,225,.55);margin-top:8px;letter-spacing:.04em}
+  .home .widgets{display:flex;flex-direction:column;gap:18px}
+  .home .row2{display:flex;gap:18px;align-items:flex-start}
+  .appicon{
+    width:70px;height:70px;border-radius:16px;border:1px solid rgba(255,255,255,.10);
+    background:linear-gradient(155deg,rgba(255,255,255,.10),rgba(255,255,255,.03));
+  }
+  .dock{
+    margin-top:auto;margin-bottom:22px;height:84px;border-radius:22px;
+    background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);
+    display:flex;align-items:center;justify-content:space-around;padding:0 18px;
+  }
+  .dock .appicon{width:52px;height:52px;border-radius:14px}
+
+  .note{max-width:880px;margin:22px auto 0;font-size:11px;line-height:1.8;color:#6B6861}
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <div>
+      <h1>SuenMusic · 小组件</h1>
+      <p>390 × 844 · 选择页 + 桌面场景 · 哑光硬件</p>
+    </div>
+    <button class="toggle" id="themeBtn">切换浅色</button>
+  </div>
+
+  <div class="stage-row">
+    <!-- ================================================= 选择页 -->
+    <div class="col">
+      <div class="caption"><span>01 / 小组件页</span><span>小 · 160 × 160</span></div>
+      <div class="phone">
+        <div class="status"><span>9:41</span><span>5G ▮</span></div>
+
+        <header class="nav">
+          <button class="back"><svg viewBox="0 0 24 24"><path d="M14.7 5.3 8 12l6.7 6.7 1.4-1.4L10.8 12l5.3-5.3z"/></svg></button>
+          <h1 class="title">小组件</h1>
+        </header>
+
+        <div class="sizes">
+          <span class="size-tab on">小</span>
+          <span class="size-tab">中</span>
+          <span class="size-tab">大</span>
+        </div>
+
+        <div class="preview">
+          <div class="preview-bg">
+            <div class="widget w-2">
+              <span class="art-ring"></span>
+              <span class="scrim"></span>
+              <span class="play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span>
+              <div class="meta">
+                <div class="n">夜航</div>
+                <div class="s">林间</div>
+              </div>
+              <span class="prog"><i></i></span>
+            </div>
+          </div>
+          <div class="dim">160 × 160</div>
+        </div>
+
+        <div class="section-label">样式</div>
+        <div class="opts">
+          <div class="opt"><span>封面</span><span class="dot"></span></div>
+          <div class="opt"><span>歌词</span><span class="ring"></span></div>
+          <div class="opt"><span>进度</span><span class="ring"></span></div>
+        </div>
+
+        <div class="foot">
+          <button class="primary">添加到桌面</button>
+          <div class="hint">长按桌面空白处也可以添加</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================================================= 桌面场景 -->
+    <div class="col">
+      <div class="caption"><span>02 / 桌面</span><span>中号 4 × 2 · 小号 2 × 2</span></div>
+      <div class="phone home">
+        <div class="status" style="color:rgba(232,230,225,.6)"><span>9:41</span><span>5G ▮</span></div>
+
+        <div class="clock">
+          <div class="time">9:41</div>
+          <div class="date">10 月 19 日 · 周一</div>
+        </div>
+
+        <div class="widgets">
+          <div class="widget w-4">
+            <span class="cov"></span>
+            <div class="body">
+              <div class="n">夜航</div>
+              <div class="s">林间 · 专辑 夜航</div>
+              <div class="bar"><i></i></div>
+              <div class="times"><span>1:34</span><span>4:08</span></div>
+              <div class="ctrl">
+                <svg class="mini" viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg>
+                <span class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></span>
+                <svg class="mini" viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="row2">
+            <div class="widget w-2">
+              <span class="art-ring"></span>
+              <span class="scrim"></span>
+              <span class="play"><svg viewBox="0 0 24 24"><path d="M8 5l11 7-11 7V5z"/></svg></span>
+              <div class="meta">
+                <div class="n">雨停之后</div>
+                <div class="s">陈稚</div>
+              </div>
+              <span class="prog"><i style="width:62%"></i></span>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:18px">
+              <span class="appicon"></span>
+              <span class="appicon"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="dock">
+          <span class="appicon"></span><span class="appicon"></span><span class="appicon"></span><span class="appicon"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    两个小组件共用一套：发丝线描边、18px 圆角、琥珀只表示播放状态与进度。<br />
+    小号只留封面 + 歌名 + 播放键；中号加时长与上一首/下一首，不加多余信息。
+  </p>
+
+<script>
+  const btn = document.getElementById('themeBtn');
+  btn.addEventListener('click', () => {
+    const light = document.documentElement.classList.toggle('light');
+    btn.textContent = light ? '切换深色' : '切换浅色';
+  });
+</script>
+</body>
+</html>
