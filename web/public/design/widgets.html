@@ -103,10 +103,15 @@
   /* ---------------- 2×2 ---------------- */
   .w2{width:160px;height:160px;display:flex;flex-direction:column}
   .w2 .top{position:relative;flex:1;min-height:0;display:flex;gap:10px;padding:10px 10px 0}
-  .w2 .cov{width:64px;height:64px;flex:none}
-  .w2 .txt{min-width:0;padding-top:1px}
-  .w2 .n{font-size:13px;font-weight:600;line-height:1.25;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .w2 .s{font-size:10px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .w2 .cov{width:52px;height:52px;flex:none}
+  .w2 .txt{min-width:0;padding-top:0}
+  /* 2×2 的宽度只够两行：不再单行省略，改成 2 行截断 */
+  .w2 .n{
+    font-size:12.5px;font-weight:600;line-height:1.28;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+    overflow:hidden;word-break:break-word;
+  }
+  .w2 .s{font-size:9.5px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .w2 .prog{position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--line-2)}
   .w2 .prog i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--accent)}
   .w2 .top .tc{position:absolute;right:10px;bottom:6px}
@@ -207,7 +212,7 @@
                 <div class="top">
                   <span class="cov"><span class="ring"></span></span>
                   <div class="txt">
-                    <div class="n">夜航</div>
+                    <div class="n">夜航（深夜钢琴版）</div>
                     <div class="s">林间</div>
                   </div>
                   <button class="ic fav on"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
