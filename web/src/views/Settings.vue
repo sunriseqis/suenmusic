@@ -531,7 +531,8 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="sec">
+      <!-- 桌面端主题由左下角按钮切换；浏览器也没有应用更新 -->
+      <section v-if="!isDesktop || isNativeAudio" class="sec">
         <h2 class="label">设备</h2>
         <div class="panel">
           <div v-if="isNativeAudio" class="row">
@@ -555,7 +556,7 @@ onBeforeUnmount(() => {
               </NeuButton>
             </div>
           </div>
-          <button type="button" class="row row-btn" @click="sheet = 'theme'">
+          <button v-if="!isDesktop" type="button" class="row row-btn" @click="sheet = 'theme'">
             <span class="row-name">主题</span>
             <span class="row-val">{{ themeLabel }}</span>
           </button>
