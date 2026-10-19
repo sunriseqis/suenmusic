@@ -126,27 +126,27 @@
   .filter{flex:1;height:36px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);display:flex;align-items:center;padding:0 12px;font-size:12px;color:var(--t3)}
   .sortby{font-size:11px;color:var(--t2)}
 
-  /* ---------------- 设置 ---------------- */
-  .settings{display:grid;grid-template-columns:196px minmax(0,1fr);gap:44px;height:100%}
-  .subnav{display:flex;flex-direction:column;gap:2px;padding-top:2px}
-  .subnav-item{height:38px;display:flex;align-items:center;padding:0 10px;border-radius:var(--r-md);font-size:13px;color:var(--t2)}
-  .subnav-item.is-on{color:var(--t1);background:var(--panel-2);box-shadow:inset 0 1px 0 var(--hi);position:relative}
-  .subnav-item.is-on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:2px;background:var(--accent)}
-  .set-body{min-width:0;display:flex;flex-direction:column;gap:26px;padding-right:8px}
-  .set-group{display:flex;flex-direction:column}
-  .set-label{font-size:10px;letter-spacing:.2em;color:var(--t3);margin-bottom:8px}
-  .set-panel{border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);overflow:hidden}
-  .set-row{min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 16px;font-size:13px}
+  /* ---------------- 设置 · 三卡并列 ---------------- */
+  .acct-strip{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel)}
+  .acct-strip .avatar{width:38px;height:38px;border-radius:var(--r-sm);font-size:12px}
+  .acct-meta{flex:1;min-width:0}
+  .acct-meta .n{font-size:13px;display:flex;align-items:center;gap:8px}
+  .acct-meta .s{font-size:11px;color:var(--t3);margin-top:3px}
+  .set-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}
+  .set-card{border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel);overflow:hidden;align-self:start}
+  .set-card-head{padding:14px 16px 12px;font-size:10px;letter-spacing:.2em;color:var(--t2);border-bottom:1px solid var(--line);display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .set-card-head span{font-size:10px;letter-spacing:0;color:var(--t3)}
+  .set-row{min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;font-size:13px}
   .set-row + .set-row{border-top:1px solid var(--line)}
-  .set-row .val{font-size:12px;color:var(--t2)}
-  .seg{display:flex;gap:14px;font-size:12px;color:var(--t2)}
+  .set-row .val{font-size:11px;color:var(--t2);text-align:right}
+  .seg{display:flex;gap:12px;font-size:11px;color:var(--t2)}
   .seg b{font-weight:400;color:var(--t1);position:relative;padding-bottom:3px}
   .seg b::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--accent)}
-  .acct-card{display:flex;align-items:center;gap:14px;padding:16px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel)}
-  .acct-card .avatar{width:40px;height:40px;border-radius:var(--r-sm);font-size:13px}
-  .acct-meta{flex:1;min-width:0}
-  .acct-meta .n{font-size:14px;display:flex;align-items:center;gap:8px}
-  .acct-meta .s{font-size:11px;color:var(--t3);margin-top:3px}
+  .status-strip{margin-top:16px;display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--r-md);background:var(--panel)}
+  .status-strip div{padding:14px 16px;display:flex;flex-direction:column;gap:6px}
+  .status-strip div + div{border-left:1px solid var(--line)}
+  .status-strip span{font-size:10px;letter-spacing:.16em;color:var(--t3)}
+  .status-strip b{font-size:13px;font-weight:500;color:var(--t1)}
 
   /* ---------------- 详情 ---------------- */
   .detail-head{display:flex;gap:28px}
@@ -189,35 +189,22 @@
   /* ---------------- 全屏播放 · 控制台 ---------------- */
   .fs{width:100%;height:100%;display:grid;grid-template-rows:56px minmax(0,1fr) 104px;padding:0 var(--sp-7);background:radial-gradient(80% 60% at 22% 10%,rgba(232,163,61,.05),transparent 60%),var(--bg)}
   .fs-head{display:flex;align-items:center;gap:16px;border-bottom:1px solid var(--line)}
-  .fs-head .where{font-size:9px;letter-spacing:.22em;color:var(--t3);margin-left:auto;text-transform:uppercase}
-  .fs-body{display:grid;grid-template-columns:340px minmax(0,1fr) 300px;gap:48px;padding:28px 0 20px;min-height:0}
+  .fs-head .where{font-size:9px;letter-spacing:.22em;color:var(--t3);margin:0 auto 0 12px;text-transform:uppercase}
+  .fs-body{display:grid;grid-template-columns:360px minmax(0,1fr);gap:80px;padding:36px 0 24px;min-height:0;align-items:center}
 
   .fs-left{display:flex;flex-direction:column;min-width:0}
   .fs-art{width:100%;aspect-ratio:1;border-radius:var(--r-lg);border:1px solid var(--line);box-shadow:inset 0 1px 0 var(--hi);background:radial-gradient(120% 90% at 20% 12%,rgba(255,255,255,.09),transparent 55%),linear-gradient(150deg,#2C3138 0%,#181B20 60%,#101216 100%);position:relative;overflow:hidden}
   .fs-art::after{content:"";position:absolute;left:12%;right:12%;top:20%;bottom:20%;border:1px solid rgba(255,255,255,.08)}
   .fs-title{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:18px 0 0}
-  .fs-sub{font-size:12px;color:var(--t2);margin:6px 0 0}
-  .fs-meta{margin-top:16px;border-top:1px solid var(--line)}
-  .fs-meta div{display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:11px;color:var(--t2)}
-  .fs-meta span:first-child{color:var(--t3);letter-spacing:.1em}
-  .fs-actions{display:flex;gap:8px;margin-top:18px}
+  .fs-sub{font-size:13px;color:var(--t2);margin:8px 0 0}
+  .fs-album{font-size:12px;color:var(--t3);margin:6px 0 0}
+  .fs-album a{color:inherit;text-decoration:none;border-bottom:1px solid var(--line)}
 
   .fs-lyrics{min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:center;gap:20px;padding-right:8px}
   .ly{font-size:17px;line-height:1.5;color:var(--t3);position:relative;padding-left:16px}
   .ly.near{color:var(--t2)}
   .ly.now{color:var(--accent-text);font-size:21px;font-weight:600}
   .ly.now::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:2px;background:var(--accent)}
-
-  .fs-queue{display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--line);padding-left:24px}
-  .q-label{font-size:10px;letter-spacing:.2em;color:var(--t3);margin-bottom:10px}
-  .q-row{display:grid;grid-template-columns:20px minmax(0,1fr) 34px;gap:10px;align-items:center;height:44px;border-top:1px solid var(--line);font-size:12px}
-  .q-row:first-of-type{border-top:0}
-  .q-num{font-size:10px;color:var(--t3);font-variant-numeric:tabular-nums}
-  .q-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .q-row.is-on .q-name{color:var(--accent-text)}
-  .q-row.is-on .q-num{color:var(--accent)}
-  .q-dur{font-size:10px;color:var(--t3);text-align:right;font-variant-numeric:tabular-nums}
-  .q-more{margin-top:auto;padding-top:10px;font-size:11px;color:var(--t3)}
 
   .fs-foot{border-top:1px solid var(--line);display:flex;flex-direction:column;justify-content:center;gap:12px}
   .fs-foot .progress-row{gap:12px}
@@ -470,7 +457,7 @@
     </div>
 
     <!-- ============================================================ 04 设置 -->
-    <div class="caption"><span>04 / 设置</span><span>桌面走左侧子导航 · 账号与服务端常驻</span></div>
+    <div class="caption"><span>04 / 设置</span><span>三块并排 · 不分 tab · 账号常驻</span></div>
     <div class="frame">
       <div class="shell">
         <aside class="side">
@@ -490,50 +477,50 @@
         </aside>
 
         <main class="main">
-          <div class="settings">
-            <div class="subnav">
-              <div class="nav-label">设置</div>
-              <div class="subnav-item is-on">播放</div>
-              <div class="subnav-item">数据</div>
-              <div class="subnav-item">高级</div>
+          <div class="main-head" style="margin-bottom:18px">
+            <div><h2 class="main-title">设置</h2><p class="main-sub">播放 · 资料库 · 高级</p></div>
+          </div>
+
+          <div class="acct-strip">
+            <span class="avatar">D</span>
+            <div class="acct-meta">
+              <div class="n">demo <span class="acc-dot"></span></div>
+              <div class="s">suen.local · 内网 · 令牌有效</div>
             </div>
+            <button class="btn sm">登出</button>
+          </div>
 
-            <div class="set-body">
-              <div class="acct-card">
-                <span class="avatar">D</span>
-                <div class="acct-meta">
-                  <div class="n">demo <span class="acc-dot"></span></div>
-                  <div class="s">suen.local · 内网 · 令牌有效</div>
-                </div>
-                <button class="btn sm">登出</button>
-              </div>
+          <div class="set-cols">
+            <section class="set-card">
+              <div class="set-card-head">播放 <span>本机</span></div>
+              <div class="set-row"><span>缓存</span><span class="val">1.2 GB / 4 GB</span></div>
+              <div class="set-row"><span>音质</span><span class="val">自动</span></div>
+              <div class="set-row"><span>跨设备续播</span><span class="val">开</span></div>
+              <div class="set-row"><span>主题</span><span class="seg"><b>深色</b><span>浅色</span><span>跟随系统</span></span></div>
+            </section>
 
-              <div class="set-group">
-                <div class="set-label">播放</div>
-                <div class="set-panel">
-                  <div class="set-row"><span>缓存</span><span class="val">1.2 GB / 4 GB</span></div>
-                  <div class="set-row"><span>音质</span><span class="val">自动</span></div>
-                  <div class="set-row"><span>跨设备续播</span><span class="val">开</span></div>
-                </div>
-              </div>
+            <section class="set-card">
+              <div class="set-card-head">资料库 <span>本机</span></div>
+              <div class="set-row"><span>黑名单</span><span class="val">歌曲 3 · 歌手 1</span></div>
+              <div class="set-row"><span>歌单导入</span><span class="val">QQ 歌单链接</span></div>
+              <div class="set-row"><span>去重</span><span class="val">检查收藏</span></div>
+              <div class="set-row"><span>数据备份</span><span class="val">文件 · WebDAV</span></div>
+            </section>
 
-              <div class="set-group">
-                <div class="set-label">资料库</div>
-                <div class="set-panel">
-                  <div class="set-row"><span>黑名单</span><span class="val">歌曲 3 · 歌手 1</span></div>
-                  <div class="set-row"><span>歌单导入</span><span class="val">QQ 歌单链接</span></div>
-                  <div class="set-row"><span>去重</span><span class="val">本机收藏</span></div>
-                  <div class="set-row"><span>数据备份</span><span class="val">文件 · WebDAV</span></div>
-                </div>
-              </div>
+            <section class="set-card">
+              <div class="set-card-head">高级 <span>服务端</span></div>
+              <div class="set-row"><span>服务端</span><span class="val">suen.local · 内网 8ms</span></div>
+              <div class="set-row"><span>音源授权</span><span class="val">B 站 · 已授权</span></div>
+              <div class="set-row"><span>AI 分配</span><span class="val">决策 / 复核</span></div>
+              <div class="set-row"><span>运行状态</span><span class="val">正常</span></div>
+            </section>
+          </div>
 
-              <div class="set-group">
-                <div class="set-label">外观</div>
-                <div class="set-panel">
-                  <div class="set-row"><span>主题</span><span class="seg"><b>深色</b><span>浅色</span><span>跟随系统</span></span></div>
-                </div>
-              </div>
-            </div>
+          <div class="status-strip">
+            <div><span>服务端</span><b>正常</b></div>
+            <div><span>在线设备</span><b>2</b></div>
+            <div><span>版本</span><b>1.5.0</b></div>
+            <div><span>已运行</span><b>3 天 4 小时</b></div>
           </div>
         </main>
 
@@ -621,30 +608,21 @@
     </div>
 
     <!-- ============================================================ 06 全屏播放 -->
-    <div class="caption"><span>06 / 全屏播放 · 重新设计</span><span>封面 / 歌词 / 队列 三栏 · 不是把移动端放大</span></div>
+    <div class="caption"><span>06 / 全屏播放 · 重新设计</span><span>封面 / 歌手 / 专辑 / 歌词 · 音源收进右上三点</span></div>
     <div class="frame">
       <div class="fs">
         <header class="fs-head">
           <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6-1.4-1.4L12 12.2 7.4 7.6 6 9z"/></svg></button>
-          <span class="badge-src" style="margin-left:4px">B 站</span>
           <span class="where">正在播放 · 专辑 夜航</span>
-          <button class="icon-btn"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+          <button class="icon-btn" title="更多"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
         </header>
 
         <div class="fs-body">
           <div class="fs-left">
             <div class="fs-art"></div>
             <h2 class="fs-title">夜航</h2>
-            <p class="fs-sub">林间 · 夜航</p>
-            <div class="fs-meta">
-              <div><span>音源</span><span>B 站 · 1080P</span></div>
-              <div><span>时长</span><span>4:08</span></div>
-              <div><span>音质</span><span>192 kbps</span></div>
-            </div>
-            <div class="fs-actions">
-              <button class="btn">收藏</button>
-              <button class="btn">修正音源</button>
-            </div>
+            <p class="fs-sub">林间</p>
+            <p class="fs-album"><a>专辑 · 夜航</a> · 2026</p>
           </div>
 
           <div class="fs-lyrics">
@@ -655,24 +633,13 @@
             <div class="ly">所有方向都叫远方</div>
             <div class="ly">而你在我的右边</div>
           </div>
-
-          <aside class="fs-queue">
-            <div class="q-label">接下来播放</div>
-            <div class="q-row is-on"><span class="q-num">01</span><span class="q-name">夜航</span><span class="q-dur">4:08</span></div>
-            <div class="q-row"><span class="q-num">02</span><span class="q-name">天亮之前</span><span class="q-dur">3:44</span></div>
-            <div class="q-row"><span class="q-num">03</span><span class="q-name">潮汐表</span><span class="q-dur">4:12</span></div>
-            <div class="q-row"><span class="q-num">04</span><span class="q-name">无声的回声</span><span class="q-dur">5:01</span></div>
-            <div class="q-row"><span class="q-num">05</span><span class="q-name">靠岸</span><span class="q-dur">4:36</span></div>
-            <div class="q-row"><span class="q-num">06</span><span class="q-name">雨停之后</span><span class="q-dur">3:58</span></div>
-            <div class="q-more">打开完整队列</div>
-          </aside>
         </div>
 
         <footer class="fs-foot">
           <div class="progress-row"><span class="time">1:34</span><span class="bar"><i class="bar-buffer"></i><i class="bar-fill"></i><i class="bar-knob"></i></span><span class="time right">4:08</span></div>
           <div class="transport">
             <div class="fs-mode">
-              <button class="icon-btn"><svg viewBox="0 0 24 24"><path d="M16 3h5v5h-2V6.4l-3.3 3.3-1.4-1.4L17.6 5H16V3zM3 6h3.6l2.7 2.7-1.4 1.4L5.6 8H3V6zm13 12h1.6l-3.3-3.3 1.4-1.4L19 16.6V14h2v7h-5v-3zM3 18h2.6l12-12H16V4h5v2.6L8.6 18H3v-2z"/></svg></button>
+              <button class="icon-btn" title="收藏"><svg viewBox="0 0 24 24"><path d="M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5C19 15.65 12 20 12 20z"/></svg></button>
               <span style="font-size:11px;color:var(--t3)">顺序播放</span>
             </div>
             <div class="transport-btns">
