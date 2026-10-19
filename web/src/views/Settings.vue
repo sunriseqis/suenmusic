@@ -549,7 +549,7 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
 
     <!-- ==================== 高级 ==================== -->
     <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
-      <section class="sec sec-wide">
+      <section class="sec">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
       </section>
@@ -929,17 +929,20 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
   .settings {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    align-items: start;
+    /* 同一行的两张卡等高：左右底边对齐，不再一高一低 */
+    align-items: stretch;
     gap: 28px 40px;
     padding-top: var(--sp-6);
     padding-bottom: var(--sp-6);
   }
+  .sec {
+    height: 100%;
+  }
+  .sec .panel {
+    flex: 1 1 auto;
+  }
   .page-title,
   .offline {
-    grid-column: 1 / -1;
-  }
-  /* 多服务端要放下地址行与操作，占满整行 */
-  .sec-wide {
     grid-column: 1 / -1;
   }
 }
