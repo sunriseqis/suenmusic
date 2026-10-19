@@ -534,7 +534,7 @@ onMounted(() => {
 
     <!-- ==================== 高级 ==================== -->
     <template v-else>
-      <section class="sec">
+      <section class="sec sec-wide">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
       </section>
@@ -921,6 +921,10 @@ onMounted(() => {
   }
   .page-title,
   .offline {
+    grid-column: 1 / -1;
+  }
+  /* 多服务端要放下地址行与操作，占满整行 */
+  .sec-wide {
     grid-column: 1 / -1;
   }
 }
