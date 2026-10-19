@@ -114,4 +114,28 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKey));
 .sheet-leave-to .sheet {
   transform: translateY(100%);
 }
+
+/* 桌面：从底部抽屉改成居中对话框 —— 底部弹出在 1280 上操作跨度太大 */
+@media (min-width: 1024px) {
+  .scrim {
+    align-items: center;
+    padding: var(--sp-6);
+  }
+  .sheet {
+    max-width: 560px;
+    max-height: min(80vh, 720px);
+    padding: 18px 20px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+  }
+  .grip {
+    display: none;
+  }
+  .sheet-enter-from .sheet,
+  .sheet-leave-to .sheet {
+    transform: translateY(12px) scale(0.98);
+    opacity: 0;
+  }
+}
 </style>
