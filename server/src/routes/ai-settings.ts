@@ -10,7 +10,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../http/require-auth.ts';
+import { requireAdmin, requireUser } from '../http/require-auth.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
   getAiSettingsConfig,
@@ -28,12 +28,12 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
   // ---- 模型配置 ----
 
   app.get('/api/ai/models', async req => {
-    requireUser(req);
+    requireAdmin(req);
     return getAiSettingsConfigView();
   });
 
   app.post('/api/ai/models', async req => {
-    requireUser(req);
+    requireAdmin(req);
     const body = req.body as {
       profiles?: Array<{
         id?: string;
@@ -72,7 +72,7 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/ai/models/test', async req => {
-    requireUser(req);
+    requireAdmin(req);
     const body = (req.body ?? {}) as {
       id?: string;
       baseUrl?: string;

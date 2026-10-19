@@ -21,6 +21,7 @@ import NeuTabs from '@/components/neu/NeuTabs.vue';
 import OfflineCachePanel from '@/components/OfflineCachePanel.vue';
 import ServerListEditor from '@/components/ServerListEditor.vue';
 import AdminUsers from '@/components/AdminUsers.vue';
+import AdminMaintenance from '@/components/AdminMaintenance.vue';
 import Sheet from '@/components/Sheet.vue';
 import { isAndroid } from '@/native/update.ts';
 import {
@@ -627,7 +628,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="sec">
+      <section v-if="session.user?.role === 'admin'" class="sec">
         <h2 class="label">AI 分配</h2>
         <div class="panel pad">
           <div class="field">
@@ -667,7 +668,7 @@ onBeforeUnmount(() => {
         <ServerListEditor />
       </section>
 
-      <section class="sec">
+      <section v-if="session.user?.role === 'admin'" class="sec">
         <h2 class="label">音源授权</h2>
         <div class="panel">
           <div class="row">
@@ -688,6 +689,11 @@ onBeforeUnmount(() => {
       <section v-if="session.user?.role === 'admin'" class="sec">
         <h2 class="label">账号管理</h2>
         <AdminUsers />
+      </section>
+
+      <section v-if="session.user?.role === 'admin'" class="sec">
+        <h2 class="label">数据维护</h2>
+        <AdminMaintenance />
       </section>
 
       <section class="sec">

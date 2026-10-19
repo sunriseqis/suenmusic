@@ -13,7 +13,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../http/require-auth.ts';
+import { requireAdmin, requireUser } from '../http/require-auth.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
   getBilibiliStatus,
@@ -29,7 +29,7 @@ export function registerBilibiliRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/bilibili/qrcode', async req => {
-    requireUser(req);
+    requireAdmin(req);
     try {
       return await startQrLogin();
     } catch (err) {
@@ -39,7 +39,7 @@ export function registerBilibiliRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/bilibili/qrcode/:key', async req => {
-    requireUser(req);
+    requireAdmin(req);
     const key = String((req.params as { key?: string })?.key ?? '').trim();
     if (!key) throw badRequest('缺少 qrcode_key');
 
@@ -51,7 +51,7 @@ export function registerBilibiliRoutes(app: FastifyInstance): void {
   });
 
   app.delete('/api/bilibili/account', async req => {
-    requireUser(req);
+    requireAdmin(req);
     return logoutBilibili();
   });
 }

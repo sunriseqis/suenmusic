@@ -16,6 +16,11 @@ import {
   countUsers,
 } from '../db/repo/users.ts';
 import { registrationAllowed } from '../services/auth.ts';
+import { getDatabase } from '../db/index.ts';
+import { config } from '../config.ts';
+import { readFileSync, statSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { badRequest, notFound } from '../http/errors.ts';
 
 function asRecord(body: unknown): Record<string, unknown> {
@@ -87,5 +92,51 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     }
     setSetting('allow_registration', body.allowRegistration ? '1' : '0');
     return { ok: true, allowRegistration: body.allowRegistration };
+  });
+
+  /**
+   * 运行情况：给管理员面板用。
+   * 数据库大小直接从文件取，进程信息来自 process。
+   */
+  app.get('/api/admin/health', async req => {
+    requireAdmin(req);
+    let dbBytes = 0;
+    try {
+      dbBytes = statSync(config.dbPath).size;
+    } catch {
+      dbBytes = 0;
+    }
+    return {
+      ok: true,
+      version: process.env.npm_package_version || '0.1.0',
+      uptimeSec: Math.round(process.uptime()),
+      dbBytes,
+      users: countUsers(),
+    };
+  });
+
+  /**
+   * 下载数据库备份。
+   *
+   * 用 `VACUUM INTO` 生成一致性快照（直接拷 .db 在 WAL 模式下可能缺数据），
+   * 读成 Buffer 再删临时文件；家庭实例的库不大，这样最简单。
+   */
+  app.get('/api/admin/backup', async (req, reply) => {
+    requireAdmin(req);
+    const file = join(tmpdir(), `suenmusic-backup-${Date.now()}.db`);
+    try {
+      getDatabase().exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);
+      const buf = readFileSync(file);
+      const stamp = new Date().toISOString().slice(0, 10);
+      reply.header('Content-Type', 'application/octet-stream');
+      reply.header('Content-Disposition', `attachment; filename="suenmusic-${stamp}.db"`);
+      return reply.send(buf);
+    } finally {
+      try {
+        unlinkSync(file);
+      } catch {
+        /* 临时文件删不掉不影响下载结果 */
+      }
+    }
   });
 }

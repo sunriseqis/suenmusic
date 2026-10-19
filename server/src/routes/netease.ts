@@ -11,7 +11,7 @@
  */
 
 import type { FastifyInstance } from 'fastify';
-import { requireUser } from '../http/require-auth.ts';
+import { requireAdmin, requireUser } from '../http/require-auth.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
   getNeteaseStatus,
@@ -27,7 +27,7 @@ export function registerNeteaseRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/netease/qrcode', async req => {
-    requireUser(req);
+    requireAdmin(req);
     try {
       return await startNeteaseQrLogin();
     } catch (err) {
@@ -36,7 +36,7 @@ export function registerNeteaseRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/netease/qrcode/:key', async req => {
-    requireUser(req);
+    requireAdmin(req);
     const key = String((req.params as { key?: string })?.key ?? '').trim();
     if (!key) throw badRequest('缺少 qrcode_key');
 
@@ -48,7 +48,7 @@ export function registerNeteaseRoutes(app: FastifyInstance): void {
   });
 
   app.delete('/api/netease/account', async req => {
-    requireUser(req);
+    requireAdmin(req);
     return logoutNetease();
   });
 }
