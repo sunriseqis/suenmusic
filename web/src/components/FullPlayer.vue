@@ -333,7 +333,7 @@ function onScrubCommit(percent: number) {
             <!-- 推荐理由卡片：仅在专属推荐曲目展示，内置两级不喜欢；普通曲目纯净居中，无多余按键 -->
             <div
               v-if="track?.recommendReason"
-              class="m-info-card neu-inset"
+              class="m-info-card"
               @click.stop
             >
               <div class="m-card-top">
@@ -787,29 +787,34 @@ function onScrubCommit(percent: number) {
 }
 
 /* 移动端推荐理由卡片 */
+/* 推荐卡：与正文同宽，靠发丝线划出范围，不再用凹陷。
+   90% 宽度会让它比上面的歌名短一截，看着像没对齐。 */
 .m-info-card {
   margin-top: var(--sp-2);
-  padding: 8px 12px;
-  border-radius: var(--r-md);
+  padding: 10px 12px;
   width: 100%;
-  max-width: 90%;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
   box-sizing: border-box;
 }
 .m-card-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  gap: var(--sp-3);
+  margin-bottom: 6px;
 }
 .m-card-tag {
   font-size: 10px;
-  font-weight: var(--fw-semibold);
-  color: var(--accent);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.16em;
+  color: var(--t2);
 }
 .m-card-text {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.6;
   color: var(--t2);
   text-align: left;
 }
@@ -822,15 +827,16 @@ function onScrubCommit(percent: number) {
 .dislike-trigger-btn {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px 7px;
+  gap: 4px;
+  min-height: 30px;
+  padding: 0 9px;
   border-radius: var(--r-sm);
-  border: none;
-  background: transparent;
+  border: 1px solid var(--line);
+  background: var(--panel);
   color: var(--t2);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
-  transition: all var(--dur-fast) var(--ease);
+  transition: color var(--dur-fast) var(--ease);
 }
 .dislike-trigger-btn:hover,
 .dislike-trigger-btn.is-open {

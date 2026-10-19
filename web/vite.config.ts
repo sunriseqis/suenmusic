@@ -81,6 +81,62 @@ function mockApiPlugin(): Plugin {
       lastGuidance: '少一点电音',
       updatedAt: now - 864e5,
     },
+    /**
+     * 每日专属推荐：给「不喜欢按钮 + 推荐理由卡片」一个可看的场景。
+     * 没有这一条时，假服务端的专属页只会是空态，播放页那张卡永远出不来。
+     */
+    '/api/recommend/daily': {
+      status: 'ready',
+      date: '2026-10-19',
+      greeting: '今天的曲子偏安静，适合夜里听。',
+      tracks: [
+        {
+          id: 'qq_demo_1',
+          mid: 'demo_1',
+          name: '夜航',
+          ar: [{ id: 'qq_ar_demo_1', mid: 'ar_1', name: '林间', picUrl: '' }],
+          artists: [{ id: 'qq_ar_demo_1', mid: 'ar_1', name: '林间', picUrl: '' }],
+          al: { id: 'qq_al_demo_1', mid: 'al_1', name: '夜航', picUrl: '' },
+          album: { id: 'qq_al_demo_1', name: '夜航', picUrl: '' },
+          dt: 248000,
+          duration: 248,
+          playable: true,
+          matched: true,
+          privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } },
+          recommendReason: '和你最近常听的华语人声接近，但编曲更安静一点。',
+        },
+        {
+          id: 'qq_demo_2',
+          mid: 'demo_2',
+          name: '雨停之后',
+          ar: [{ id: 'qq_ar_demo_2', mid: 'ar_2', name: '陈稚', picUrl: '' }],
+          artists: [{ id: 'qq_ar_demo_2', mid: 'ar_2', name: '陈稚', picUrl: '' }],
+          al: { id: 'qq_al_demo_2', mid: 'al_2', name: '雨停之后', picUrl: '' },
+          album: { id: 'qq_al_demo_2', name: '雨停之后', picUrl: '' },
+          dt: 213000,
+          duration: 213,
+          playable: true,
+          matched: true,
+          privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } },
+          recommendReason: '你收藏过同一位制作人的作品，这首的配器更克制。',
+        },
+        {
+          id: 'qq_demo_3',
+          mid: 'demo_3',
+          name: '慢速列车',
+          ar: [{ id: 'qq_ar_demo_3', mid: 'ar_3', name: '北纬三十', picUrl: '' }],
+          artists: [{ id: 'qq_ar_demo_3', mid: 'ar_3', name: '北纬三十', picUrl: '' }],
+          al: { id: 'qq_al_demo_3', mid: 'al_3', name: '慢速列车', picUrl: '' },
+          album: { id: 'qq_al_demo_3', name: '慢速列车', picUrl: '' },
+          dt: 267000,
+          duration: 267,
+          playable: true,
+          matched: true,
+          privilege: { playMaxbr: 320000, maxbr: 320000, freeTrialPrivilege: { resConsumable: false } },
+          recommendReason: '夜间时段你更常听慢歌，这首的鼓点密度更低。',
+        },
+      ],
+    },
     '/api/health': { ok: true, version: '1.0.0-demo' },
   };
 
