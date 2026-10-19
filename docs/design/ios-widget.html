@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SuenMusic · iOS 卡片静态</title>
+<style>
+  :root{
+    --bg:#0E0F11; --card:#17191D; --t1:#E8E6E1; --t2:#8D8A83; --t3:#5F5C56;
+    --amber:#E8A33D; --line:rgba(255,255,255,.10);
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;gap:56px;
+    background:
+      radial-gradient(80% 60% at 20% 0%,rgba(232,163,61,.12),transparent 60%),
+      radial-gradient(70% 60% at 90% 100%,rgba(80,110,150,.14),transparent 60%),
+      linear-gradient(180deg,#15171B,#08090B);
+    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Noto Sans SC","PingFang SC",sans-serif;
+    color:var(--t1);padding:48px;
+  }
+  .col{display:flex;flex-direction:column;gap:14px}
+  .cap{font-size:10px;letter-spacing:.18em;color:#7C7972;text-transform:uppercase;display:flex;justify-content:space-between}
+  .cap span:last-child{letter-spacing:.02em;text-transform:none}
+  .widget{
+    background:var(--card);border:1px solid var(--line);border-radius:22px;
+    overflow:hidden;position:relative;
+  }
+  .w2{width:158px;height:158px;padding:12px;display:flex;flex-direction:column}
+  .w4{width:338px;height:158px;display:flex}
+
+  .cov{border-radius:7px;flex:none;position:relative;overflow:hidden;border:1px solid var(--line);
+    background:
+      radial-gradient(120% 90% at 22% 12%,rgba(255,255,255,.14),transparent 55%),
+      linear-gradient(155deg,#343A42 0%,#1B1E23 62%,#101216 100%);
+  }
+  .cov .ring{position:absolute;left:20%;right:20%;top:16%;bottom:32%;border:1px solid rgba(255,255,255,.10);border-radius:2px}
+  .meta{display:flex;flex-direction:column;min-width:0}
+  .title{font-size:12.5px;font-weight:600;line-height:1.28;color:var(--t1);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .artist{font-size:9.5px;color:var(--t2);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .grow{flex:1}
+  .time{font-size:9px;color:var(--t2);font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace}
+  .bar{height:2px;background:rgba(255,255,255,.14);position:relative;margin-top:4px}
+  .bar i{position:absolute;left:0;top:0;bottom:0;width:39%;background:var(--amber)}
+  .ctrl{display:flex;align-items:center;justify-content:center;gap:14px;height:36px;margin-top:2px}
+  .ctrl .ic{width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2)}
+  .ctrl .ic svg{width:12px;height:12px;fill:currentColor}
+  .key{width:30px;height:30px;border-radius:50%;background:var(--amber);color:#1A1206;display:flex;align-items:center;justify-content:center;box-shadow:inset 0 1px 0 rgba(255,255,255,.30)}
+  .key svg{width:11px;height:11px;fill:currentColor;margin-left:1px}
+
+  /* 4×2 三格 */
+  .w4 .cell-cov{width:100px;height:100%;display:flex;align-items:center;justify-content:center;border-right:1px solid var(--line)}
+  .w4 .cell-cov .cov{width:78px;height:78px}
+  .w4 .info{flex:1;min-width:0;padding:12px 12px 12px 14px;display:flex;flex-direction:column}
+  .w4 .title{font-size:14px;line-height:1.3;-webkit-line-clamp:1}
+  .w4 .artist{font-size:10px;margin-top:2px}
+  .w4 .lyrics{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+  .w4 .ly{font-size:10px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35}
+  .w4 .ly.now{font-size:11px;font-weight:700;color:var(--amber);padding-left:8px;position:relative}
+  .w4 .ly.now::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:2px;background:var(--amber)}
+  .w4 .foot{margin-top:auto;display:flex;align-items:center;gap:8px}
+  .w4 .rail{width:48px;height:100%;border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+  .w4 .rail .ic{width:22px;height:22px;display:flex;align-items:center;justify-content:center;color:var(--t2)}
+  .w4 .rail .ic svg{width:12px;height:12px;fill:currentColor}
+  .w4 .rail .key{width:32px;height:32px}
+
+  .note{position:fixed;left:48px;bottom:32px;font-size:11px;color:#6B6861;line-height:1.8}
+</style>
+</head>
+<body>
+  <div class="col">
+    <div class="cap"><span>2 × 2</span><span>158</span></div>
+    <div class="widget w2">
+      <div style="display:flex;gap:10px">
+        <span class="cov" style="width:52px;height:52px"><span class="ring"></span></span>
+        <div class="meta">
+          <div class="title">夜航（深夜钢琴版）</div>
+          <div class="artist">林间</div>
+        </div>
+      </div>
+      <div class="grow"></div>
+      <div class="time" style="text-align:right">1:34</div>
+      <div class="bar"><i></i></div>
+      <div class="ctrl">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></span>
+        <span class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></span>
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="cap"><span>4 × 2</span><span>338</span></div>
+    <div class="widget w4">
+      <div class="cell-cov"><span class="cov"><span class="ring"></span></span></div>
+      <div class="info">
+        <div class="title">夜航</div>
+        <div class="artist">林间 · 专辑 夜航</div>
+        <div class="lyrics">
+          <div class="ly">海面没有回声</div>
+          <div class="ly now">我们就一直向前</div>
+          <div class="ly">直到天亮之前</div>
+        </div>
+        <div class="foot">
+          <span class="time">1:34</span>
+          <span class="bar" style="flex:1;margin-top:0"><i></i></span>
+          <span class="time">4:08</span>
+        </div>
+      </div>
+      <div class="rail">
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M7 5h2v14H7V5zm12 0v14l-9-7 9-7z"/></svg></span>
+        <span class="key"><svg viewBox="0 0 24 24"><path d="M7 5h4v14H7V5zm6 0h4v14h-4V5z"/></svg></span>
+        <span class="ic"><svg viewBox="0 0 24 24"><path d="M15 5h2v14h-2V5zM5 5l9 7-9 7V5z"/></svg></span>
+      </div>
+    </div>
+  </div>
+
+  <p class="note">
+    这两张按「iOS 17+ 可交互」画：按钮是 AppIntent。<br>
+    如果你的部署目标仍是 15/16，按钮只能画不能点，届时右侧轨会退化为纯状态位。
+  </p>
+</body>
+</html>
