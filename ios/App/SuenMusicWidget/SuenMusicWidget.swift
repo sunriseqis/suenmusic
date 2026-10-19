@@ -39,6 +39,12 @@ private func elapsedText(_ ms: Int) -> String {
     return String(format: "%d:%02d", sec / 60, sec % 60)
 }
 
+/// App 被系统挂起/杀掉后不会再写快照：超过 90 秒没更新就按「已暂停」显示，
+/// 避免进度条停在某个位置却看起来还在播。
+private func isStale(_ snap: WidgetNowPlaying) -> Bool {
+    snap.playing && Date().timeIntervalSince1970 - snap.updatedAt > 90
+}
+
 private func totalText(_ ms: Int) -> String {
     guard ms > 0 else { return "--:--" }
     let sec = ms / 1000
@@ -117,12 +123,13 @@ private struct SmallView: View {
                 Spacer(minLength: 0)
             }
             Spacer(minLength: 0)
-            Text(elapsedText(snap.positionMs))
+            Text(isStale(snap) ? "已暂停" : elapsedText(snap.positionMs))
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(cardT2)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.bottom, 4)
             Progress(value: snap.durationMs > 0 ? Double(snap.positionMs) / Double(snap.durationMs) : 0)
+                .opacity(isStale(snap) ? 0.35 : 1)
         }
         .padding(10)
     }
@@ -165,7 +172,7 @@ private struct MediumView: View {
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
-                    Text(elapsedText(snap.positionMs))
+                    Text(isStale(snap) ? "已暂停" : elapsedText(snap.positionMs))
                     Progress(value: snap.durationMs > 0 ? Double(snap.positionMs) / Double(snap.durationMs) : 0)
                     Text(totalText(snap.durationMs))
                 }
