@@ -37,8 +37,18 @@ import { applyBackup, buildBackup, downloadBackup } from '@/offline/backup.ts';
 import { loadWebdav, saveWebdav, webdavGet, webdavPut } from '@/offline/webdav.ts';
 import { directQQPlaylist } from '@/api/direct/playlist.ts';
 import { fetchAiModels, fetchPersona, saveAiModels, tunePersona } from '@/api/ai.ts';
-import { fetchBilibiliStatus } from '@/api/bilibili.ts';
-import { fetchNeteaseStatus } from '@/api/netease.ts';
+import {
+  fetchBilibiliStatus,
+  logoutBilibili,
+  pollBilibiliQr,
+  startBilibiliQr,
+} from '@/api/bilibili.ts';
+import {
+  fetchNeteaseStatus,
+  logoutNetease,
+  pollNeteaseQr,
+  startNeteaseQr,
+} from '@/api/netease.ts';
 import type { AiSettingsConfigView, PersonaDetail } from '@/api/types.ts';
 
 const ui = useUiStore();
@@ -47,7 +57,7 @@ const favorites = useFavoritesStore();
 const dislikes = useDislikesStore();
 const update = useUpdateStore();
 
-type SheetName = 'login' | 'dislikes' | 'import' | 'dedupe' | 'backup' | 'theme' | 'cache';
+type SheetName = 'login' | 'dislikes' | 'import' | 'dedupe' | 'backup' | 'theme' | 'cache' | 'auth';
 const sheet = ref<SheetName | null>(null);
 
 // ---------------------------------------------------------------- 主题
@@ -347,6 +357,84 @@ const neteaseName = ref('');
 const biliOn = ref(false);
 const neteaseOn = ref(false);
 
+// ---------------------------------------------------------------- 音源授权
+type SourceKind = 'bilibili' | 'netease';
+const qrSource = ref<SourceKind>('bilibili');
+const qrImage = ref<string | null>(null);
+const qrKey = ref('');
+const qrMsg = ref('');
+const qrBusy = ref(false);
+let qrTimer: ReturnType<typeof setInterval> | undefined;
+
+function stopQrPolling(): void {
+  if (qrTimer) {
+    clearInterval(qrTimer);
+    qrTimer = undefined;
+  }
+}
+
+function closeQr(): void {
+  stopQrPolling();
+  sheet.value = null;
+  qrImage.value = null;
+  qrKey.value = '';
+  qrMsg.value = '';
+}
+
+async function pollOnce(): Promise<void> {
+  if (!qrKey.value) return;
+  try {
+    const res = qrSource.value === 'bilibili'
+      ? await pollBilibiliQr(qrKey.value)
+      : await pollNeteaseQr(qrKey.value);
+    qrMsg.value = res.message;
+    if (res.state === 'confirmed') {
+      stopQrPolling();
+      closeQr();
+      ui.ok('已授权');
+      await loadSources();
+    } else if (res.state === 'expired' || res.state === 'failed') {
+      stopQrPolling();
+    }
+  } catch (e) {
+    qrMsg.value = e instanceof Error ? e.message : '轮询失败';
+    stopQrPolling();
+  }
+}
+
+async function openQr(source: SourceKind): Promise<void> {
+  if (qrBusy.value) return;
+  qrBusy.value = true;
+  qrSource.value = source;
+  qrImage.value = null;
+  qrKey.value = '';
+  qrMsg.value = '正在获取二维码…';
+  sheet.value = 'auth';
+  try {
+    const res = source === 'bilibili' ? await startBilibiliQr() : await startNeteaseQr();
+    qrImage.value = res.qrImage;
+    qrKey.value = res.qrcodeKey;
+    qrMsg.value = '等待扫码';
+    stopQrPolling();
+    qrTimer = setInterval(() => void pollOnce(), 2000);
+  } catch (e) {
+    qrMsg.value = e instanceof Error ? e.message : '获取二维码失败';
+  } finally {
+    qrBusy.value = false;
+  }
+}
+
+async function logoutSource(source: SourceKind): Promise<void> {
+  try {
+    if (source === 'bilibili') await logoutBilibili();
+    else await logoutNetease();
+    ui.ok('已退出授权');
+    await loadSources();
+  } catch (e) {
+    ui.err(e instanceof Error ? e.message : '退出失败');
+  }
+}
+
 async function loadSources(): Promise<void> {
   if (!serverConfigured.value) return;
   try {
@@ -383,7 +471,10 @@ onMounted(() => {
   void loadServerData();
 });
 
-onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange));
+onBeforeUnmount(() => {
+  desktopMq?.removeEventListener('change', onDesktopChange);
+  stopQrPolling();
+});
 </script>
 
 <template>
@@ -575,10 +666,14 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
           <div class="row">
             <span class="row-name">B 站</span>
             <span class="row-val">{{ biliOn ? biliName || '已授权' : '未授权' }}</span>
+            <NeuButton v-if="!biliOn" size="sm" @click="openQr('bilibili')">授权</NeuButton>
+            <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('bilibili')">退出</NeuButton>
           </div>
           <div class="row">
             <span class="row-name">网易云</span>
             <span class="row-val">{{ neteaseOn ? neteaseName || '已授权' : '未授权' }}</span>
+            <NeuButton v-if="!neteaseOn" size="sm" @click="openQr('netease')">授权</NeuButton>
+            <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('netease')">退出</NeuButton>
           </div>
         </div>
       </section>
@@ -683,6 +778,16 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
       <div class="actions">
         <NeuButton :loading="backupBusy" @click="uploadWebdav">上传</NeuButton>
         <NeuButton variant="primary" :loading="backupBusy" @click="downloadWebdav">下载</NeuButton>
+      </div>
+    </Sheet>
+
+    <Sheet :open="sheet === 'auth'" title="音源授权" @close="closeQr">
+      <div class="qr">
+        <img v-if="qrImage" :src="qrImage" alt="登录二维码" class="qr-img" />
+        <p class="qr-msg">{{ qrMsg }}</p>
+        <p class="qr-hint">
+          用 {{ qrSource === 'bilibili' ? '哔哩哔哩' : '网易云音乐' }} App 扫码
+        </p>
       </div>
     </Sheet>
 
@@ -938,6 +1043,31 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
   height: 6px;
   border-radius: 50%;
   background: var(--accent);
+}
+
+.qr {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+.qr-img {
+  width: 200px;
+  height: 200px;
+  border-radius: var(--r-sm);
+  background: #fff;
+  padding: 8px;
+}
+.qr-msg {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--t1);
+}
+.qr-hint {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--t2);
 }
 
 @media (min-width: 1024px) {
