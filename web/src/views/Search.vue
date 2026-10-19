@@ -583,9 +583,23 @@ function openPlaylist(tid: string | number | undefined) {
   .search {
     padding-top: var(--sp-6);
     padding-bottom: var(--sp-5);
+    gap: var(--sp-6);
+  }
+  .head {
+    gap: var(--sp-3);
   }
   .h1 {
     font-size: 26px;
+  }
+  /* 输入框不铺满整行：太长的搜索框在桌面上反而不像输入框 */
+  .bar {
+    max-width: 680px;
+  }
+  .tabs {
+    margin-top: 4px;
+  }
+  .block {
+    gap: var(--sp-3-5, 14px);
   }
 }
 </style>
