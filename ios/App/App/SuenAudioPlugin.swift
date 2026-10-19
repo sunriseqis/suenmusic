@@ -102,6 +102,27 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
          * 第一首就走缓存；万一还没就绪，`streamUrl` 会回退直连（照样能播，
          * 只是这首不落缓存）。
          */
+        // 卡片（Widget）播放命令的落地点。
+        // intent 在 App 进程执行，但插件实例可能还没被 Capacitor 建出来
+        // （冷启动去后台跑 intent 时）；PlaybackCommand 内部会排队兜底。
+        PlaybackCommand.shared.handler = { [weak self] action in
+            guard let self = self else { return }
+            switch action {
+            case .playPause:
+                // 与锁屏 toggle 同源：看意图而不是 rate，缓冲时 rate 为 0
+                self.playingIntent ? self.pause() : self.play()
+            case .play:
+                self.play()
+            case .pause:
+                self.pause()
+            case .next:
+                self.skipToNext()
+            case .previous:
+                self.skipToPrevious()
+            }
+        }
+        PlaybackCommand.shared.drainQueue()
+
         LocalStreamProxy.shared.startIfNeeded()
         AudioCacheStore.shared.setDebugLog(SuenAudioPlugin.cacheDebugLog)
         LocalStreamProxy.shared.setDebugLog(SuenAudioPlugin.cacheDebugLog)
@@ -1088,6 +1109,34 @@ final class AudioEngine: NSObject {
 
     // MARK: 私有：锁屏 / 控制中心
 
+    /// 下一首。队列到尾时按 repeatMode 决定是否回到开头。
+    /// 锁屏命令与卡片命令共用这一份，避免两套边界条件。
+    @discardableResult
+    func skipToNext() -> Bool {
+        guard !tracks.isEmpty else { return false }
+        let idx = currentIndex
+        if idx + 1 < tracks.count {
+            rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 2)
+            return true
+        }
+        if repeatMode == .all {
+            rebuildQueue(from: 0, positionMs: 0, autoplay: true, reason: 2)
+            return true
+        }
+        return false
+    }
+
+    /// 上一首。队首且非列表循环时失败（与 Android 一致）。
+    @discardableResult
+    func skipToPrevious() -> Bool {
+        guard !tracks.isEmpty else { return false }
+        let idx = currentIndex
+        guard idx > 0 || repeatMode == .all else { return false }
+        rebuildQueue(from: idx > 0 ? idx - 1 : tracks.count - 1,
+                     positionMs: 0, autoplay: true, reason: 2)
+        return true
+    }
+
     /// 注册锁屏 / 控制中心 / 灵动岛的远程控制命令。
     ///
     /// ⚠️ 「addTarget 就够了」是错的：`isEnabled` 才是系统决定这颗按钮
@@ -1122,25 +1171,12 @@ final class AudioEngine: NSObject {
             return .success
         }
         let nextTarget = center.nextTrackCommand.addTarget { [weak self] _ in
-            guard let self = self, !self.tracks.isEmpty else { return .commandFailed }
-            let idx = self.currentIndex
-            if idx + 1 < self.tracks.count {
-                self.rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 2)
-                return .success
-            }
-            if self.repeatMode == .all {
-                self.rebuildQueue(from: 0, positionMs: 0, autoplay: true, reason: 2)
-                return .success
-            }
-            return .commandFailed
+            guard let self = self else { return .commandFailed }
+            return self.skipToNext() ? .success : .commandFailed
         }
         let prevTarget = center.previousTrackCommand.addTarget { [weak self] _ in
-            guard let self = self, !self.tracks.isEmpty else { return .commandFailed }
-            let idx = self.currentIndex
-            guard idx > 0 || self.repeatMode == .all else { return .commandFailed }
-            self.rebuildQueue(from: idx > 0 ? idx - 1 : self.tracks.count - 1,
-                              positionMs: 0, autoplay: true, reason: 2)
-            return .success
+            guard let self = self else { return .commandFailed }
+            return self.skipToPrevious() ? .success : .commandFailed
         }
         let positionTarget = center.changePlaybackPositionCommand.addTarget { [weak self] event in
             guard let self = self,

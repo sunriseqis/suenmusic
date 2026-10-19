@@ -102,6 +102,69 @@ private func lyricWindow(_ snap: WidgetNowPlaying) -> [WidgetLyricLine] {
     return Array(snap.lyrics[idx..<end])
 }
 
+/// 传输三键：上一首 / 播放暂停 / 下一首。
+///
+/// iOS 17+ 由 AppIntent 真正驱动（见 PlaybackIntents.swift）；
+/// 15/16 不渲染这颗视图 —— 那个版本点了没有接收方，画出来是骗人。
+/// 空态下整组置灰：没有队列时这些命令本来就会失败。
+@available(iOS 17.0, *)
+private struct TransportKeys: View {
+    let snap: WidgetNowPlaying
+    /// 横向 = 2×2 底部；纵向 = 4×2 右轨
+    var vertical = false
+    /// 2×2 用 30pt 播放键，4×2 用 34pt
+    var compact = false
+
+    private var gap: CGFloat { vertical ? 12 : 10 }
+    private var keySize: CGFloat { compact ? 30 : 34 }
+    private var glyph: CGFloat { compact ? 10 : 12 }
+
+    private var sideColor: Color { snap.isEmpty ? cardT2.opacity(0.35) : cardT2 }
+
+    private var keys: some View {
+        Group {
+            Button(intent: SuenPreviousTrackIntent()) {
+                Image(systemName: "backward.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(sideColor)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            Button(intent: SuenPlayPauseIntent()) {
+                ZStack {
+                    Circle()
+                        .fill(snap.isEmpty ? cardT2.opacity(0.25) : cardAccent)
+                    Image(systemName: snap.playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: glyph, weight: .bold))
+                        .foregroundColor(snap.isEmpty ? cardT2 : Color(red: 0.10, green: 0.07, blue: 0.02))
+                        .offset(x: snap.playing ? 0 : 1, y: 0)
+                }
+                .frame(width: keySize, height: keySize)
+            }
+            .buttonStyle(.plain)
+            Button(intent: SuenNextTrackIntent()) {
+                Image(systemName: "forward.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(sideColor)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    var body: some View {
+        // 空态置灰：没有队列时这三颗命令本来就会失败，不如直接不给反应
+        Group {
+            if vertical {
+                VStack(spacing: gap) { keys }
+            } else {
+                HStack(spacing: gap) { keys }
+            }
+        }
+        .disabled(snap.isEmpty)
+    }
+}
+
 private struct SmallView: View {
     let snap: WidgetNowPlaying
     var body: some View {
@@ -130,6 +193,11 @@ private struct SmallView: View {
                 .padding(.bottom, 4)
             Progress(value: snap.durationMs > 0 ? Double(snap.positionMs) / Double(snap.durationMs) : 0)
                 .opacity(isStale(snap) ? 0.35 : 1)
+            if #available(iOS 17.0, *) {
+                TransportKeys(snap: snap, compact: true)
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
+            }
         }
         .padding(10)
     }
@@ -138,8 +206,16 @@ private struct SmallView: View {
 private struct MediumView: View {
     let snap: WidgetNowPlaying
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 0) {
+            // 封面格：垂直居中，右侧发丝线
             Cover(side: 84)
+                .frame(maxHeight: .infinity)
+                .padding(.horizontal, 16)
+                .overlay(alignment: .trailing) {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.10))
+                        .frame(width: 1)
+                }
             VStack(alignment: .leading, spacing: 0) {
                 Text(snap.title)
                     .font(.system(size: 14, weight: .semibold))
@@ -179,9 +255,20 @@ private struct MediumView: View {
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(cardT2)
             }
-            Spacer(minLength: 0)
+            .padding(.horizontal, 14)
+
+            // 运输轨格：三键纵向居中，左侧发丝线
+            if #available(iOS 17.0, *) {
+                TransportKeys(snap: snap, vertical: true)
+                    .frame(width: 56, maxHeight: .infinity)
+                    .overlay(alignment: .leading) {
+                        Rectangle()
+                            .fill(Color.white.opacity(0.10))
+                            .frame(width: 1)
+                    }
+            }
         }
-        .padding(12)
+        .padding(.vertical, 12)
     }
 }
 

@@ -12,6 +12,54 @@ struct WidgetLyricLine: Codable {
     let text: String
 }
 
+/// 卡片 / 反代命令要播放器做的事。
+enum PlaybackAction: String {
+    case playPause
+    case play
+    case pause
+    case next
+    case previous
+}
+
+/// Widget 命令的落地桥。
+///
+/// `AudioPlaybackIntent.perform()` 在 **App 进程**执行，但插件可能还没
+/// 被 Capacitor 实例化（冷启动去后台跑 intent 时）。所以：
+///   - 有 handler  → 立即执行
+///   - 没有        → 写进 App Group 排队，插件 `load()` 时补执行
+/// 这个类型同时编进 Widget target（intent 文件要引用它），但只有 App 那份
+/// 真正会跑 perform。
+final class PlaybackCommand {
+    static let shared = PlaybackCommand()
+    private init() {}
+
+    private static let queueKey = "widget.playbackCommand"
+
+    var handler: ((PlaybackAction) -> Void)?
+
+    private var defaults: UserDefaults? {
+        UserDefaults(suiteName: SharedNowPlaying.groupId)
+    }
+
+    func dispatch(_ action: PlaybackAction) {
+        if handler != nil {
+            handler?(action)
+            return
+        }
+        defaults?.set(action.rawValue, forKey: Self.queueKey)
+    }
+
+    /// 插件注册时调用：补执行冷启动期间积压的命令。
+    func drainQueue() {
+        guard
+            let raw = defaults?.string(forKey: Self.queueKey),
+            let action = PlaybackAction(rawValue: raw)
+        else { return }
+        defaults?.removeObject(forKey: Self.queueKey)
+        handler?(action)
+    }
+}
+
 struct WidgetNowPlaying: Codable {
     var title: String
     var artist: String
@@ -23,6 +71,9 @@ struct WidgetNowPlaying: Codable {
     var updatedAt: TimeInterval
     /// 当前封面文件对应的远端 URL，用来判断要不要重新下载
     var coverUrl: String
+
+    /// 从未写入过快照：卡片按空态渲染，控制键置灰。
+    var isEmpty: Bool { updatedAt == 0 }
 
     static let empty = WidgetNowPlaying(
         title: "暂无歌曲播放",

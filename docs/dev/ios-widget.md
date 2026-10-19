@@ -31,6 +31,7 @@ ios/App/App/
 4. **Target Membership**
    - `SuenMusicWidget.swift` → Widget target
    - `SharedNowPlaying.swift` → **App 与 Widget 两个 target 都要勾**
+   - `PlaybackIntents.swift` → **两个 target 都要勾**（App 侧才真正执行 intent）
    - `SuenMusicWidget-Info.plist` → Build Settings 的 `INFOPLIST_FILE`
      指向 `SuenMusicWidget/SuenMusicWidget-Info.plist`
 5. **Signing & Capabilities**
@@ -53,10 +54,28 @@ SharedNowPlaying
 Widget 的 Provider 读取快照 → 渲染
 ```
 
+## 播放控制（iOS 17+）
+
+按钮是 `AudioPlaybackIntent`：`perform()` 在 **App 进程**执行，所以能碰到
+App 里那个 AVAudioPlayer；`openAppWhenRun = false`，点了不把 App 拽到前台。
+
+```
+SuenMusicWidget.swift   Button(intent:) 渲染三键，空态 .disabled
+PlaybackIntents.swift   intent 定义，dispatch 到 PlaybackCommand
+SharedNowPlaying.swift  PlaybackCommand：有 handler 直接执行，
+                        没有（冷启动）则写 App Group 排队
+SuenAudioPlugin.load()  注册 handler + drainQueue()
+```
+
+冷启动顺序有兜底：系统为跑 intent 把 App 拉起来时，插件可能还没实例化，
+命令先入队，插件 `load()` 时补执行。
+
+**iOS 15/16 不渲染按钮**（`#available(iOS 17.0, *)`）：那个版本的
+Widget 点了没有接收方，按钮只会骗人。
+
 ## 已知限制
 
-- **卡片是只读的**：iOS 第三方 Widget 不能控制 App 里的 AVAudioPlayer，
-  点卡片只打开 App。传输键留在 App 内。
+- App 被强杀后点按钮：系统可能拉起 App，但不保证从原进度继续播放。
 - 进度是最近一次写入的快照（2 秒节流），WidgetKit 本身不做实时刷新。
 - 歌词时间轴只有在 App 播放时才会写；没播放过时显示「暂无歌词」。
 - 封面下载失败时保留上一张 / 显示占位音符。
