@@ -5,7 +5,7 @@
  * 迷你播放条**叠在导航之上**而不是并排 —— 手机竖屏的垂直空间很宝贵，
  * 并排会吃掉两行高度，而叠放时页面滚到底部会自然让位。
  */
-import { computed, onBeforeUnmount, ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import PlayerBar from '@/components/PlayerBar.vue';
 import FullPlayer from '@/components/FullPlayer.vue';
@@ -27,6 +27,20 @@ const items = computed(() => navItems(!!ui.baseUrl.trim()));
 
 /** 全屏播放页是否展开 */
 const fullOpen = ref(false);
+
+/**
+ * 路由一变就收起全屏播放页。
+ *
+ * 它是一层覆盖在路由之上的 fixed 浮层：从这里跳到歌手/专辑页时，
+ * 新页面确实换了，但播放页还盖在上面 —— 用户看到的"点了没反应"。
+ * 菜单里的跳转已经显式 close，这一层是兜底（浏览器返回、其他入口）。
+ */
+watch(
+  () => route.fullPath,
+  () => {
+    if (fullOpen.value) fullOpen.value = false;
+  }
+);
 
 /**
  * 返回手势：全屏播放页开着就先关它（这就是安卓上"从哪来回哪去"的一层）。

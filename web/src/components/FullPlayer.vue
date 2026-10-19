@@ -11,10 +11,9 @@
  * 5. 底栏控件为收藏唯一事实来源，消除中间重复按键。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { RouterLink, useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { addDislike } from '@/api/recommend.ts';
 import { registerBackHandler } from '@/native/back.ts';
-import ArtistLinks from '@/components/ArtistLinks.vue';
 import LyricsPanel from '@/components/LyricsPanel.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuIconButton from '@/components/neu/NeuIconButton.vue';
@@ -29,6 +28,50 @@ import { cleanAiText, coverUrl, formatDuration } from '@/utils/format.ts';
 const emit = defineEmits<{ (e: 'close'): void }>();
 
 const route = useRoute();
+const router = useRouter();
+
+/**
+ * 右上角「更多」：歌手详情 / 专辑详情 / 修正音源 都收进这里。
+ *
+ * 小屏上把这三个入口铺在正文里，既难点中也挤占了歌名与歌手的位置；
+ * 收到的菜单里顺便交代「当前音源」，用户才知道要不要修正。
+ */
+const menuOpen = ref(false);
+const sourceLabel = computed(() => {
+  if (!track.value) return '';
+  if (player.currentSourceTrackId === track.value.id && player.currentSource) {
+    return player.currentSource === 'netease' ? '网易云' : 'B 站';
+  }
+  return '未解析';
+});
+/** 多位歌手时只认第一位有路由键的：菜单里不做二级列表 */
+const primaryArtist = computed(() => track.value?.ar?.find(a => a.id) ?? null);
+const artistLabel = computed(() =>
+  (track.value?.ar ?? []).map(a => a.name).filter(Boolean).join(' / ')
+);
+
+function goArtist(): void {
+  const a = primaryArtist.value;
+  if (!a) return;
+  menuOpen.value = false;
+  emit('close');
+  void router.push({
+    name: 'collection',
+    params: { kind: 'artist', id: a.id },
+    query: { name: a.name },
+  });
+}
+function goAlbum(): void {
+  const al = track.value?.al;
+  if (!al?.id) return;
+  menuOpen.value = false;
+  emit('close');
+  void router.push({ name: 'collection', params: { kind: 'album', id: al.id } });
+}
+function openAnchor(): void {
+  menuOpen.value = false;
+  player.requestAnchor();
+}
 
 // 任何路由跳转都收起全屏播放页
 watch(
@@ -214,12 +257,48 @@ function onScrubCommit(percent: number) {
         v-if="track"
         icon="dots"
         :stroke="3"
-        label="锚定音源"
+        label="更多"
         size="md"
-        data-role="anchor-btn"
-        @click="player.requestAnchor()"
+        data-role="more-btn"
+        :aria-expanded="menuOpen ? 'true' : 'false'"
+        @click="menuOpen = !menuOpen"
       />
     </header>
+
+    <!-- 菜单：点外部收起 -->
+    <div v-if="menuOpen" class="menu-backdrop" @click="menuOpen = false" />
+    <div v-if="menuOpen && track" class="more-menu" role="menu">
+      <div class="more-row is-static">
+        <span class="more-k">当前音源</span>
+        <span class="more-v">{{ sourceLabel }}</span>
+      </div>
+      <button
+        v-if="primaryArtist"
+        type="button"
+        class="more-row"
+        role="menuitem"
+        data-role="go-artist"
+        @click="goArtist"
+      >
+        <span class="more-k">歌手</span>
+        <span class="more-v neu-ellipsis">{{ artistLabel }}</span>
+      </button>
+      <button
+        v-if="track.al?.id"
+        type="button"
+        class="more-row"
+        role="menuitem"
+        data-role="go-album"
+        @click="goAlbum"
+      >
+        <span class="more-k">专辑</span>
+        <span class="more-v neu-ellipsis">{{ track.al.name }}</span>
+      </button>
+      <button type="button" class="more-row" role="menuitem" data-role="fix-source" @click="openAnchor">
+        <span class="more-k">修正音源</span>
+        <span class="more-v more-go" aria-hidden="true">›</span>
+      </button>
+    </div>
 
     <!-- 中间主体：视图 A 封面展示面 vs 视图 B 沉浸全屏歌词面 -->
     <div class="body">
@@ -237,20 +316,8 @@ function onScrubCommit(percent: number) {
               <div class="info-text">
                 <h2 class="t-name neu-clamp-2">{{ track?.name || '未在播放' }}</h2>
                 <p class="t-artist neu-ellipsis">
-                  <ArtistLinks v-if="track" :artists="track.ar" />
-                  <template v-else>从搜索或首页选一首开始</template>
-                  <template v-if="albumName && track?.al?.id">
-                    ·
-                    <RouterLink
-                      class="album-link"
-                      :to="{ name: 'collection', params: { kind: 'album', id: track.al.id } }"
-                      :title="`打开专辑 ${albumName}`"
-                      @click.stop
-                    >
-                      {{ albumName }}
-                    </RouterLink>
-                  </template>
-                  <template v-else-if="albumName"> · {{ albumName }}</template>
+                  {{ track?.ar?.map(a => a.name).join(' / ') || '从搜索或首页选一首开始' }}
+                  <template v-if="albumName"> · {{ albumName }}</template>
                 </p>
               </div>
               <NeuIconButton
@@ -450,6 +517,65 @@ function onScrubCommit(percent: number) {
 }
 
 /* 浮层遮罩 */
+.menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: transparent;
+}
+.more-menu {
+  position: fixed;
+  top: calc(var(--safe-top) + 54px);
+  right: 12px;
+  z-index: 61;
+  width: 232px;
+  padding: 4px 0;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+.more-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 44px;
+  padding: 0 var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--t1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.more-row + .more-row {
+  border-top: 1px solid var(--line);
+}
+.more-row:active {
+  background: var(--panel-2);
+}
+.more-row.is-static {
+  cursor: default;
+}
+.more-k {
+  flex: none;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--t2);
+}
+.more-v {
+  min-width: 0;
+  color: var(--t1);
+}
+.more-go {
+  color: var(--t2);
+  font-size: 16px;
+  line-height: 1;
+}
+
 .pop-backdrop {
   position: fixed;
   inset: 0;
