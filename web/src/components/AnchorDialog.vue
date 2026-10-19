@@ -59,6 +59,24 @@ const anchoringBvid = ref<string | null>(null);
 const currentAnchor = ref<TrackAnchorInfo | null>(null);
 const removingAnchor = ref(false);
 
+/**
+ * 「当前音源」。
+ *
+ * 播放器上的音源指示灯已经去掉，用户在这里看不到这首到底走的哪条路，
+ * 也就无法判断"要不要锚定"。三种状态：
+ *   已锚定 → 走 B 站的那个视频；播放中 → 本次解析出的源；否则 → 未解析。
+ * 只用 currentSource 不够：它换曲时不会立刻清空，所以要按曲目 id 对齐。
+ */
+const currentSourceLabel = computed(() => {
+  const t = track.value;
+  if (!t) return '';
+  if (currentAnchor.value) return 'B 站 · 已锚定';
+  if (player.currentSourceTrackId === t.id && player.currentSource) {
+    return player.currentSource === 'netease' ? '网易云' : 'B 站';
+  }
+  return '未解析';
+});
+
 /** 试听用的 <audio>。单实例：换曲即换 URI，关弹窗即停 */
 let previewAudio: HTMLAudioElement | null = null;
 
@@ -268,6 +286,12 @@ onBeforeUnmount(stopPreview);
           <NeuButton variant="ghost" @click="close">关闭</NeuButton>
         </header>
 
+        <!-- 当前音源：去掉播放器指示灯后，这里是唯一能看出来的地方 -->
+        <div class="src-row" data-role="current-source">
+          <span class="src-k">当前音源</span>
+          <span class="src-v">{{ currentSourceLabel }}</span>
+        </div>
+
         <!-- 已有锚点：回显并可解除（锚错了随时推翻重来） -->
         <div v-if="currentAnchor" class="cur-anchor" data-role="cur-anchor">
           <span class="neu-t2 neu-ellipsis">
@@ -397,6 +421,25 @@ onBeforeUnmount(stopPreview);
   margin: 0;
   font-size: var(--fs-sm);
   text-align: center;
+}
+
+.src-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.src-k {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--t2);
+}
+.src-v {
+  font-size: var(--fs-sm);
+  color: var(--t1);
 }
 
 .cur-anchor {

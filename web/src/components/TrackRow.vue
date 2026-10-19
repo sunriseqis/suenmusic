@@ -10,7 +10,9 @@
  * （见文件末尾的 media query），没有手势就只能先把歌播起来才能收藏。
  */
 import { computed, onMounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
+import ArtistLinks from '@/components/ArtistLinks.vue';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { useUiStore } from '@/stores/ui.ts';
@@ -265,11 +267,22 @@ onMounted(() => {
 
       <div class="main">
         <span class="name neu-ellipsis" :class="isCurrent ? 'on' : ''">{{ track.name }}</span>
-        <span class="sub neu-ellipsis">{{ artist }}</span>
+        <span class="sub neu-ellipsis">
+          <ArtistLinks :artists="track.ar" />
+        </span>
       </div>
 
       <div v-if="showAlbum" class="album neu-ellipsis">
-        <span class="neu-t2">{{ track.al?.name || '' }}</span>
+        <RouterLink
+          v-if="track.al?.id"
+          class="album-link neu-t2"
+          :to="{ name: 'collection', params: { kind: 'album', id: track.al.id } }"
+          :title="`打开专辑 ${track.al.name}`"
+          @click.stop
+        >
+          {{ track.al.name }}
+        </RouterLink>
+        <span v-else class="neu-t2">{{ track.al?.name || '' }}</span>
       </div>
 
       <span class="dur neu-num">{{ formatDuration(track.dt) }}</span>
@@ -508,6 +521,16 @@ onMounted(() => {
 .album {
   font-size: var(--fs-xs);
   min-width: 0;
+}
+.album-link {
+  color: inherit;
+  text-decoration: none;
+}
+.album-link:hover,
+.album-link:focus-visible {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .dur {

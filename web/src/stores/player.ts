@@ -195,6 +195,14 @@ export const usePlayerStore = defineStore('player', () => {
 
   /** 当前音源来源（resolve 响应的 source）。播放条/详情页的音源角标用它 */
   const currentSource = ref<'bilibili' | 'netease' | null>(null);
+  /**
+   * 上一行那个 source 属于哪首曲目。
+   *
+   * currentSource 在换曲时不会立刻清空（要等新流解析成功才覆盖），
+   * 只凭它判断会把这句"当前音源"指到上一首上。锚定弹窗靠这个 id 对齐，
+   * 不是同一首就如实显示"未解析"。
+   */
+  const currentSourceTrackId = ref<string | null>(null);
 
   /** 最近一次失败原因，直接展示给用户（服务端已写好中文） */
   const errorMessage = ref<string | null>(null);
@@ -830,6 +838,7 @@ export const usePlayerStore = defineStore('player', () => {
       streamTrackId = track.id;
       // 音源角标数据：网易云的歌标红、B 站的歌标粉（用户拍板的约定）
       currentSource.value = result.source ?? 'bilibili';
+      currentSourceTrackId.value = track.id;
 
       // 时长优先级：流的精确时长（服务端 X-Audio-Duration-Ms）> 曲目元数据
       durationMs.value = probe.durationMs ?? (track.dt || 0);
@@ -985,6 +994,7 @@ export const usePlayerStore = defineStore('player', () => {
     streamTtlMs = 0;
     streamTrackId = track.id;
     currentSource.value = null;
+    currentSourceTrackId.value = null;
     durationMs.value = track.dt || 0;
     el.src = getBaseUrl().replace(/\/+$/, '') + `/api/stream/${encodeURIComponent(track.id)}`;
     el.load();
@@ -2018,6 +2028,7 @@ export const usePlayerStore = defineStore('player', () => {
     durationMs.value = 0;
     errorMessage.value = null;
     currentSource.value = null;
+    currentSourceTrackId.value = null;
     currentStreamUrl = null;
     currentStreamUrlRaw = null;
     streamTrackId = null;
@@ -2084,6 +2095,7 @@ export const usePlayerStore = defineStore('player', () => {
     muted,
     mode,
     currentSource,
+    currentSourceTrackId,
     errorMessage,
     headStatus,
     anchorCandidate,

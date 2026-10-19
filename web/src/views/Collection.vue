@@ -21,6 +21,7 @@ import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import CoverCard from '@/components/CoverCard.vue';
+import ArtistLinks from '@/components/ArtistLinks.vue';
 import { ApiError, getBaseUrl } from '@/api/client.ts';
 import { directArtistSongs } from '@/api/direct/catalog.ts';
 import { directAlbum, directToplist } from '@/api/direct/home.ts';
@@ -36,7 +37,7 @@ import {
 import { usePlayerStore } from '@/stores/player.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
 import { artistNames, coverUrl, formatCount } from '@/utils/format.ts';
-import type { Album, Track } from '@/api/types.ts';
+import type { Album, Track, TrackArtist } from '@/api/types.ts';
 
 const props = defineProps<{ kind: 'toplist' | 'playlist' | 'album' | 'artist'; id: string }>();
 
@@ -71,6 +72,13 @@ const artistName = computed(() => (typeof route.query.name === 'string' ? route.
  * 单独请求、单独兜错：专辑是补充内容，它失败不该把整页变成"加载失败"。
  * 路由参数变化时旧请求可能晚到，所以用 `loadSeq` 判废。
  */
+/**
+ * 专辑页头部的歌手（结构化）。只存 subtitle 字符串的话，
+ * 歌手名就只是一段不可点的文字 —— 详情页里点了没反应。
+ */
+const albumArtists = ref<TrackArtist[]>([]);
+const albumCompany = ref('');
+
 const albums = ref<Album[]>([]);
 const albumsLoading = ref(false);
 let loadSeq = 0;
@@ -386,6 +394,8 @@ async function load() {
   songsLoadingMore.value = false;
   albumsLoadingMore.value = false;
   singerName.value = '';
+  albumArtists.value = [];
+  albumCompany.value = '';
 
   try {
     switch (props.kind) {
@@ -413,6 +423,8 @@ async function load() {
           ? await directAlbum(props.id)
           : await fetchAlbum(props.id);
         title.value = res.album.name;
+        albumArtists.value = res.album.artists ?? [];
+        albumCompany.value = res.album.company || '';
         subtitle.value = [artistNames(res.album.artists), res.album.company]
           .filter(Boolean)
           .join(' · ');
@@ -553,7 +565,14 @@ function pickArtistAvatar(songs: Track[], artistId: string, fallbackName: string
 
         <template v-else>
           <h1 class="title neu-clamp-2">{{ title || '未找到' }}</h1>
-          <p v-if="subtitle" class="sub neu-ellipsis">{{ subtitle }}</p>
+          <p v-if="subtitle" class="sub neu-ellipsis">
+            <!-- 专辑页：歌手拆成可点的链接，公司保持纯文本 -->
+            <template v-if="albumArtists.length > 0">
+              <ArtistLinks :artists="albumArtists" />
+              <template v-if="albumCompany"> · {{ albumCompany }}</template>
+            </template>
+            <template v-else>{{ subtitle }}</template>
+          </p>
           <p v-if="showCount" class="sub neu-num">{{ tracks.length }} 首</p>
         </template>
 

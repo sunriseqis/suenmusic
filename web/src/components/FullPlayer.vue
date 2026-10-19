@@ -11,7 +11,7 @@
  * 5. 底栏控件为收藏唯一事实来源，消除中间重复按键。
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { useRoute } from 'vue-router';
+import { RouterLink, useRoute } from 'vue-router';
 import { addDislike } from '@/api/recommend.ts';
 import { registerBackHandler } from '@/native/back.ts';
 import ArtistLinks from '@/components/ArtistLinks.vue';
@@ -239,7 +239,18 @@ function onScrubCommit(percent: number) {
                 <p class="t-artist neu-ellipsis">
                   <ArtistLinks v-if="track" :artists="track.ar" />
                   <template v-else>从搜索或首页选一首开始</template>
-                  <template v-if="albumName"> · {{ albumName }}</template>
+                  <template v-if="albumName && track?.al?.id">
+                    ·
+                    <RouterLink
+                      class="album-link"
+                      :to="{ name: 'collection', params: { kind: 'album', id: track.al.id } }"
+                      :title="`打开专辑 ${albumName}`"
+                      @click.stop
+                    >
+                      {{ albumName }}
+                    </RouterLink>
+                  </template>
+                  <template v-else-if="albumName"> · {{ albumName }}</template>
                 </p>
               </div>
               <NeuIconButton
@@ -632,6 +643,15 @@ function onScrubCommit(percent: number) {
 }
 .t-artist :deep(a) {
   color: inherit;
+}
+.t-artist .album-link {
+  text-decoration: none;
+}
+.t-artist .album-link:hover,
+.t-artist .album-link:focus-visible {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .hint {
   margin: var(--sp-1) 0 0;
