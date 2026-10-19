@@ -236,7 +236,11 @@ function onScrubCommit(percent: number) {
 </script>
 
 <template>
-  <div class="full neu-bg" :class="{ 'dislike-open': dislikeMenuOpen }" data-view="full-player">
+  <div
+    class="full neu-bg"
+    :class="{ 'dislike-open': dislikeMenuOpen, 'has-reco': !!track?.recommendReason }"
+    data-view="full-player"
+  >
     <!-- 柔和背景微光晕 (Ambient Glow) -->
     <div v-if="cover" class="ambient-glow" :style="{ backgroundImage: `url(${cover})` }" />
 
@@ -712,6 +716,18 @@ function onScrubCommit(percent: number) {
   border-radius: inherit;
   box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.25);
   pointer-events: none;
+}
+
+/*
+ * 有推荐卡时收紧封面。
+ *
+ * 封面 300 + 歌名 + 推荐卡会把中间那行撑破，卡片直接压到进度条上
+ * （实测：滑块圆点出现在卡片左上角，时间穿过理由文字）。
+ * 卡片是这条状态的必要信息，封面让位。
+ */
+.full.has-reco .cover-wrap {
+  width: min(58vw, 232px);
+  margin-bottom: var(--sp-3);
 }
 
 .info {
