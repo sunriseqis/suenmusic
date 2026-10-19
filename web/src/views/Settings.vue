@@ -12,7 +12,7 @@
  * 一次性任务（登入、黑名单、导入、去重、备份、缓存、主题）走底部弹层。
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -238,6 +238,19 @@ function onDesktopChange(e: MediaQueryListEvent): void {
   isDesktop.value = e.matches;
 }
 
+/**
+ * 桌面两栏时，分区数为奇数会在右下留一个空格子。
+ * 数一下实际渲染的分区，奇数就让最后一张跨满整行。
+ */
+const oddSections = ref(false);
+function syncSectionParity(): void {
+  void nextTick(() => {
+    const n = document.querySelectorAll('.settings > .sec').length;
+    oddSections.value = n % 2 === 1;
+  });
+}
+watch([serverConfigured, () => session.isLoggedIn, isDesktop], syncSectionParity);
+
 const loginAddr = ref(ui.baseUrl);
 const loginUser = ref('');
 const loginPass = ref('');
@@ -364,6 +377,7 @@ async function loadServerData(): Promise<void> {
 
 onMounted(() => {
   desktopMq?.addEventListener('change', onDesktopChange);
+  syncSectionParity();
   void dislikes.ensureLoaded();
   void favorites.ensureLoaded();
   void loadServerData();
@@ -373,7 +387,7 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
 </script>
 
 <template>
-  <div class="settings neu-container">
+  <div class="settings neu-container" :class="{ 'odd-sections': oddSections }">
     <h1 class="page-title">设置</h1>
     <p v-if="session.isLoggedIn && ui.serverDown" class="offline">服务端已断开</p>
 
@@ -383,7 +397,8 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
 
     <!-- ==================== 本机 ==================== -->
     <template v-if="!serverConfigured || isDesktop || activeTab === 'local'">
-      <section class="sec">
+      <!-- 浏览器里蓝牙歌词与缓存都不存在，整块会是空的 -->
+      <section v-if="isAndroid || isNativeAudio" class="sec">
         <h2 class="label">播放</h2>
         <div class="panel">
           <div v-if="isAndroid" class="row">
@@ -937,6 +952,10 @@ onBeforeUnmount(() => desktopMq?.removeEventListener('change', onDesktopChange))
   }
   .sec {
     height: 100%;
+  }
+  /* 分区数为奇数时，最后一张跨满，避免右下留空格子 */
+  .odd-sections > .sec:last-of-type {
+    grid-column: 1 / -1;
   }
   .sec .panel {
     flex: 1 1 auto;
