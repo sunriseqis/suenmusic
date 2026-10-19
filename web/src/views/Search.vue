@@ -585,18 +585,24 @@ function openPlaylist(tid: string | number | undefined) {
     padding-bottom: var(--sp-5);
     gap: var(--sp-6);
   }
+  /* 单行头部：标题 / 搜索框 / 分片 tab 同一行 */
   .head {
-    gap: var(--sp-3);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--sp-5);
   }
   .h1 {
     font-size: 26px;
+    white-space: nowrap;
   }
-  /* 输入框不铺满整行：太长的搜索框在桌面上反而不像输入框 */
   .bar {
-    max-width: 680px;
+    max-width: none;
+    align-items: center;
   }
   .tabs {
-    margin-top: 4px;
+    margin-top: 0;
+    align-self: center;
   }
   .block {
     gap: var(--sp-3-5, 14px);
