@@ -119,6 +119,19 @@ async function previewDup(): Promise<void> {
     dupBusy.value = false;
   }
 }
+/**
+ * 点「去重」这一行就直接开查，弹层只负责显示结果。
+ *
+ * 之前弹层里还有一个「检查重复」按钮：进弹层要再点一次才出结果，
+ * 等于把同一个动作拆成两步。现在行本身就是触发点。
+ */
+async function openDedupe(): Promise<void> {
+  dupGroups.value = [];
+  dupMsg.value = '';
+  sheet.value = 'dedupe';
+  await previewDup();
+}
+
 async function runDedup(): Promise<void> {
   if (dupBusy.value || dupGroups.value.length === 0) return;
   dupBusy.value = true;
@@ -386,9 +399,9 @@ onMounted(() => {
             <span class="row-name">歌单导入</span>
             <span class="row-val">QQ 歌单</span>
           </button>
-          <button type="button" class="row row-btn" @click="sheet = 'dedupe'">
+          <button type="button" class="row row-btn" @click="openDedupe">
             <span class="row-name">去重</span>
-            <span class="row-val">检查</span>
+            <span class="row-val">本机收藏</span>
           </button>
           <button type="button" class="row row-btn" @click="sheet = 'backup'">
             <span class="row-name">数据备份</span>
@@ -603,8 +616,9 @@ onMounted(() => {
     </Sheet>
 
     <Sheet :open="sheet === 'dedupe'" title="去重" @close="sheet = null">
-      <div class="actions">
-        <NeuButton :loading="dupBusy" @click="previewDup">检查重复</NeuButton>
+      <p v-if="dupBusy" class="hint">检查中…</p>
+      <template v-else>
+        <p v-if="dupMsg" class="hint">{{ dupMsg }}</p>
         <NeuButton
           v-if="dupGroups.length > 0"
           variant="primary"
@@ -613,8 +627,7 @@ onMounted(() => {
         >
           清理 {{ dupGroups.reduce((n, g) => n + g.removeIds.length, 0) }} 首
         </NeuButton>
-      </div>
-      <p v-if="dupMsg" class="hint">{{ dupMsg }}</p>
+      </template>
     </Sheet>
 
     <Sheet :open="sheet === 'backup'" title="数据备份" @close="sheet = null">
