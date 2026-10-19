@@ -20,6 +20,7 @@ import NeuSwitch from '@/components/neu/NeuSwitch.vue';
 import NeuTabs from '@/components/neu/NeuTabs.vue';
 import OfflineCachePanel from '@/components/OfflineCachePanel.vue';
 import ServerListEditor from '@/components/ServerListEditor.vue';
+import AdminUsers from '@/components/AdminUsers.vue';
 import Sheet from '@/components/Sheet.vue';
 import { isAndroid } from '@/native/update.ts';
 import {
@@ -682,6 +683,11 @@ onBeforeUnmount(() => {
             <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('netease')">退出</NeuButton>
           </div>
         </div>
+      </section>
+
+      <section v-if="session.user?.role === 'admin'" class="sec">
+        <h2 class="label">账号管理</h2>
+        <AdminUsers />
       </section>
 
       <section class="sec">

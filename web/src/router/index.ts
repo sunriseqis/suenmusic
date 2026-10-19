@@ -1,9 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { hasBackend } from '@/api/client.ts';
+import { hasBackend, isWebPlatform } from '@/api/client.ts';
 import type { RouteRecordRaw } from 'vue-router';
 import { useSessionStore } from '@/stores/session.ts';
 
 const routes: RouteRecordRaw[] = [
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/Login.vue'),
+    meta: { public: true },
+  },
   {
     path: '/',
     name: 'home',
@@ -107,9 +113,16 @@ router.beforeEach(async to => {
     return { name: 'home' };
   }
 
-  // 不再有登录守卫：登录只从设置页的弹层发起，任何页面都可直接访问
+  // Web 是后端的一部分，必须有登录守卫；原生壳保留"没配服务端也能用"
+  if (isWebPlatform) {
+    if (to.name === 'login') {
+      return session.isLoggedIn ? { name: 'home' } : true;
+    }
+    if (!session.isLoggedIn) {
+      return { name: 'login', query: { redirect: to.fullPath } };
+    }
+  }
 
-  // 其余页面一律放行 —— 本地模式是正常形态，不是降级形态
   return true;
 });
 

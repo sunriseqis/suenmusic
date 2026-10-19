@@ -102,6 +102,9 @@ export function getBaseUrl(): string {
  * 由它自己的静态资源服务发出，`/api` 直接打同源即可，不需要填地址。
  * 原生壳没有同源概念，必须显式配置基地址；没配才是「直连模式」。
  */
+/** 浏览器（同源、cookie 会话） */
+export const isWebPlatform = !Capacitor.isNativePlatform();
+
 export function hasBackend(): boolean {
   return Capacitor.isNativePlatform() ? baseUrl.trim().length > 0 : true;
 }
@@ -411,8 +414,14 @@ async function rawFetch(path: string, opts: RequestOptions): Promise<Response> {
   const { signal, cleanup } = joinSignals(opts.signal, timeoutMs);
 
   const headers: Record<string, string> = { Accept: 'application/json' };
+  const web = !Capacitor.isNativePlatform();
+  const method = opts.method ?? 'GET';
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (accessToken && !opts._noAuth) headers.Authorization = `Bearer ${accessToken}`;
+  // cookie 会话的写请求必须带自定义头，否则服务端按 CSRF 拒绝
+  if (web && method !== 'GET' && method !== 'HEAD') {
+    headers['X-Requested-With'] = 'suenmusic';
+  }
 
   try {
     return await fetch(fullUrl, {
@@ -420,9 +429,8 @@ async function rawFetch(path: string, opts: RequestOptions): Promise<Response> {
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal,
-      // 令牌走 Authorization 头，不用 Cookie。显式 omit 可以避免将来
-      // 引入 Cookie 时把 CSRF 面意外打开
-      credentials: 'omit',
+      // 原生走 Bearer，不带 cookie；浏览器同源会话必须带上 cookie
+      credentials: web ? 'same-origin' : 'omit',
       cache: 'no-store',
     });
   } catch (err) {

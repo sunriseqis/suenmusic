@@ -62,3 +62,16 @@ export function fetchSessions(): Promise<{ sessions: SessionInfo[] }> {
 export function revokeSession(sessionId: string): Promise<{ ok: boolean; revoked: boolean }> {
   return http.post('/api/auth/revoke', { sessionId });
 }
+
+/** Web 同源会话：cookie 由服务端下发，响应只带 user */
+export function sessionLogin(username: string, password: string): Promise<{ user: PublicUser }> {
+  return http.post<{ user: PublicUser }>('/api/auth/session', { username, password });
+}
+
+export function sessionMe(): Promise<{ user: PublicUser }> {
+  return http.get<{ user: PublicUser }>('/api/auth/session');
+}
+
+export function sessionLogout(): Promise<{ ok: boolean }> {
+  return http.delete<{ ok: boolean }>('/api/auth/session');
+}

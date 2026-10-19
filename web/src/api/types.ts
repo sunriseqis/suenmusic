@@ -38,6 +38,8 @@ export interface PublicUser {
   username: string;
   displayName: string;
   createdAt: number;
+  /** 'admin' | 'member'（第一个账号是管理员） */
+  role: 'admin' | 'member';
 }
 
 export interface AuthSession {
@@ -55,6 +57,8 @@ export interface AuthConfig {
   allowRegistration: boolean;
   hasUsers: boolean;
   passwordMinLength: number;
+  /** 库里一个用户都没有：首次打开要创建管理员 */
+  setupRequired: boolean;
 }
 
 export interface SessionInfo {

@@ -16,9 +16,10 @@ import {
   clearSession,
   getCachedUser,
   restoreCachedUser,
-  getBaseUrl,
   getRefreshToken,
+  hasBackend,
   hasUsableRefreshToken,
+  isWebPlatform,
   onBaseUrlChanged,
   onSessionChanged,
   refreshSession,
@@ -92,6 +93,18 @@ export const useSessionStore = defineStore('session', () => {
     // 公开配置先取，登录页要用；失败也不阻塞（可能服务端还没起来）
     void loadAuthConfig();
 
+    // 浏览器：同源 cookie 会话，没有令牌可续期
+    if (isWebPlatform) {
+      try {
+        const res = await authApi.sessionMe();
+        user.value = res.user;
+      } catch {
+        user.value = null;
+      }
+      bootstrapped.value = true;
+      return;
+    }
+
     /**
      * 离线冷启动必须能进 App（真机报障："没网时杀进程重开，登不进"）。
      *
@@ -125,7 +138,7 @@ export const useSessionStore = defineStore('session', () => {
      * 开发代理上 —— 前者返回 index.html 让 JSON.parse 抛错，后者产生一条
      * 无意义的 ECONNREFUSED 日志。两种情况都只会让人以为"服务端出问题了"。
      */
-    if (!getBaseUrl()) {
+    if (!hasBackend()) {
       authConfigFailed.value = false;
       return null;
     }
@@ -148,6 +161,11 @@ export const useSessionStore = defineStore('session', () => {
   async function login(username: string, password: string): Promise<void> {
     busy.value = true;
     try {
+      if (isWebPlatform) {
+        const res = await authApi.sessionLogin(username.trim(), password);
+        user.value = res.user;
+        return;
+      }
       const session = await authApi.login(username.trim(), password);
       setSession(session);
       user.value = session.user;
@@ -163,9 +181,16 @@ export const useSessionStore = defineStore('session', () => {
   ): Promise<void> {
     busy.value = true;
     try {
-      const session = await authApi.register(username.trim(), password, displayName?.trim());
-      setSession(session);
-      user.value = session.user;
+      await authApi.register(username.trim(), password, displayName?.trim());
+      if (isWebPlatform) {
+        // 注册响应里带的是令牌；Web 需要的是 cookie，重新走一次会话登录
+        const res = await authApi.sessionLogin(username.trim(), password);
+        user.value = res.user;
+      } else {
+        const session = await authApi.login(username.trim(), password);
+        setSession(session);
+        user.value = session.user;
+      }
       // 建完第一个号，注册开关状态可能就变了
       void loadAuthConfig();
     } finally {
@@ -181,9 +206,9 @@ export const useSessionStore = defineStore('session', () => {
    */
   async function logout(): Promise<void> {
     resetUnreachableNotice();
-    const token = getRefreshToken();
     try {
-      await authApi.logout(token);
+      if (isWebPlatform) await authApi.sessionLogout();
+      else await authApi.logout(getRefreshToken());
     } catch {
       /* 忽略：本地清理才是关键 */
     } finally {
@@ -207,7 +232,15 @@ export const useSessionStore = defineStore('session', () => {
    * 下一个请求就会 401 并被踢回登录页。
    */
   async function changePassword(oldPassword: string, newPassword: string): Promise<void> {
-    const session = await authApi.changePassword(oldPassword, newPassword);
+    await authApi.changePassword(oldPassword, newPassword);
+    if (isWebPlatform) {
+      // 改密会吊销所有刷新令牌；cookie 也失效了，用新口令重建会话
+      const name = user.value?.username ?? '';
+      const res = await authApi.sessionLogin(name, newPassword);
+      user.value = res.user;
+      return;
+    }
+    const session = await authApi.login(user.value?.username ?? '', newPassword);
     setSession(session);
     user.value = session.user;
   }
