@@ -1104,8 +1104,5 @@ onBeforeUnmount(() => {
     padding-top: var(--sp-6);
     padding-bottom: var(--sp-5);
   }
-  .toplist-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 </style>
