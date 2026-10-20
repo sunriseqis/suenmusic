@@ -1,7 +1,10 @@
 package com.suenmusic.app;
 
 import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -45,10 +48,47 @@ public class SuenAudioService extends MediaSessionService {
   private static final String TAG = "SuenAudioService";
   private static SuenAudioService activeService;
   private static final long LYRIC_TICK_MS = 200;
+  private static final long WIDGET_TICK_MS = 5000;
   private static final int MAX_CONSECUTIVE_ERRORS = 5;
 
   private MediaSession session;
   private ExoPlayer player;
+  /** 桌面卡片按钮的落点：包装后的 Player（IDLE 时自动 prepare 后播放）。 */
+  private Player controls;
+  /** 桌面卡片（小组件）播放命令接收器：卡片按钮 → 本服务。 */
+  private final BroadcastReceiver widgetCommands = new BroadcastReceiver() {
+    @Override
+    public void onReceive(Context ctx, Intent intent) {
+      if (player == null || controls == null) return;
+      String action = intent.getAction();
+      if (action == null) return;
+      switch (action) {
+        case SuenWidgetState.ACTION_PLAY_PAUSE:
+          if (player.isPlaying()) player.pause(); else controls.play();
+          break;
+        case SuenWidgetState.ACTION_NEXT:
+          controls.seekToNextMediaItem();
+          break;
+        case SuenWidgetState.ACTION_PREV:
+          controls.seekToPreviousMediaItem();
+          break;
+        default:
+          break;
+      }
+    }
+  };
+  /** 播放中每 5s 推一次进度快照（卡片进度是静态快照，见设计定稿）。 */
+  private final Runnable widgetProgressTick = new Runnable() {
+    @Override
+    public void run() {
+      if (player == null || !player.isPlaying()) return;
+      SuenWidgetState.publishProgress(
+          SuenAudioService.this, player.getCurrentPosition(), player.getDuration());
+      widgetHandler.postDelayed(this, WIDGET_TICK_MS);
+    }
+  };
+  private final android.os.Handler widgetHandler =
+      new android.os.Handler(android.os.Looper.getMainLooper());
   private final Handler lyricHandler = new Handler(Looper.getMainLooper());
   private final Handler autoSkipHandler = new Handler(Looper.getMainLooper());
   private int consecutiveErrorCount = 0;
@@ -121,6 +161,19 @@ public class SuenAudioService extends MediaSessionService {
   public void onCreate() {
     super.onCreate();
     activeService = this;
+
+    // 桌面卡片按钮的落点（不导出，只收本包广播）
+    IntentFilter widgetFilter = new IntentFilter();
+    widgetFilter.addAction(SuenWidgetState.ACTION_PLAY_PAUSE);
+    widgetFilter.addAction(SuenWidgetState.ACTION_NEXT);
+    widgetFilter.addAction(SuenWidgetState.ACTION_PREV);
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+      registerReceiver(widgetCommands, widgetFilter, Context.RECEIVER_NOT_EXPORTED);
+    } else {
+      registerReceiver(widgetCommands, widgetFilter);
+    }
+    // 服务刚起、队列还空着：先把卡片刷成空态（此前可能残留播放态）
+    SuenWidgetState.publishEmpty(this);
     player = new ExoPlayer.Builder(this)
         // 离线缓存（L1）：优先读本地缓存，未命中走上游并边播边存
         .setMediaSourceFactory(
@@ -144,6 +197,7 @@ public class SuenAudioService extends MediaSessionService {
       public void onMediaItemTransition(MediaItem item, int reason) {
         lastLyricKey = null;
         updateLyricMetadata();
+        publishWidgetSnapshot();
       }
 
       @Override
@@ -162,6 +216,9 @@ public class SuenAudioService extends MediaSessionService {
         lyricHandler.removeCallbacks(lyricTicker);
         updateLyricMetadata();
         if (isPlaying) lyricHandler.post(lyricTicker);
+        publishWidgetSnapshot();
+        widgetHandler.removeCallbacks(widgetProgressTick);
+        if (isPlaying) widgetHandler.postDelayed(widgetProgressTick, WIDGET_TICK_MS);
       }
 
       @Override
@@ -270,6 +327,8 @@ public class SuenAudioService extends MediaSessionService {
       }
     };
 
+    controls = wrappedPlayer;
+
     session = new MediaSession.Builder(this, wrappedPlayer)
         .setSessionActivity(pendingIntent)
         .setCallback(callback)
@@ -308,6 +367,60 @@ public class SuenAudioService extends MediaSessionService {
     }
   };
 
+  /**
+   * 把当前播放状态推给桌面卡片（小组件）。
+   *
+   * 进度是静态快照（设计定稿）：只在切歌/播放态/歌词行变化时整份推，
+   * 播放中的 5 秒 tick 走 publishProgress 轻量路径。
+   * 歌词取当前行 ±1 三行，当前行下标固定为 1。
+   */
+  private void publishWidgetSnapshot() {
+    if (player == null || player.getMediaItemCount() == 0) {
+      SuenWidgetState.publishEmpty(this);
+      return;
+    }
+    int index = player.getCurrentMediaItemIndex();
+    MediaItem current = index >= 0 ? player.getMediaItemAt(index) : null;
+    if (current == null) {
+      SuenWidgetState.publishEmpty(this);
+      return;
+    }
+    MediaMetadata mm = current.mediaMetadata;
+    String trackId = current.mediaId == null ? "" : current.mediaId;
+    String title = mm == null || mm.title == null ? "" : mm.title.toString();
+    String artist = mm == null || mm.artist == null ? "" : mm.artist.toString();
+    String album = mm == null || mm.albumTitle == null ? "" : mm.albumTitle.toString();
+    String cover = mm == null || mm.artworkUri == null ? "" : mm.artworkUri.toString();
+
+    // 歌词三行（上一行/当前/下一行），当前行固定下标 1
+    java.util.List<String> lines = new java.util.ArrayList<>();
+    int active = -1;
+    LyricTimeline timeline = lyricTimelines.get(trackId);
+    if (timeline != null && !timeline.texts.isEmpty()) {
+      int lineIndex = timeline.indexAt(player.getCurrentPosition());
+      if (lineIndex >= 0) {
+        active = 1;
+        lines.add(lineIndex > 0 ? timeline.texts.get(lineIndex - 1) : "");
+        lines.add(timeline.texts.get(lineIndex));
+        lines.add(
+            lineIndex + 1 < timeline.texts.size() ? timeline.texts.get(lineIndex + 1) : "");
+      }
+    }
+
+    SuenWidgetState.publish(
+        this,
+        trackId,
+        title,
+        artist,
+        album,
+        cover,
+        player.isPlaying(),
+        player.getCurrentPosition(),
+        player.getDuration() > 0 ? player.getDuration() : 0L,
+        lines,
+        active);
+  }
+
   private void acceptLyricTimeline(
       String trackId, long revision, List<Long> starts, List<String> texts) {
     if (trackId == null || trackId.isEmpty() || starts == null || texts == null) return;
@@ -334,6 +447,7 @@ public class SuenAudioService extends MediaSessionService {
     }
     lastLyricKey = null;
     updateLyricMetadata();
+    publishWidgetSnapshot();
   }
 
   private void updateLyricMetadata() {
@@ -424,6 +538,14 @@ public class SuenAudioService extends MediaSessionService {
   public void onDestroy() {
     cancelPendingAutoSkip();
     lyricHandler.removeCallbacksAndMessages(null);
+    widgetHandler.removeCallbacks(widgetProgressTick);
+    try {
+      unregisterReceiver(widgetCommands);
+    } catch (Exception ignored) {
+      // 未注册时注销会抛，忽略
+    }
+    // 服务退出 → 卡片回空态（三键不再响应）
+    SuenWidgetState.publishEmpty(this);
     lyricTimelines.clear();
     lyricRevisions.clear();
     originalArtists.clear();

@@ -5,6 +5,7 @@
  * 这里只暴露"界面真的会用到"的能力，CLI 里的测试脚本不进 HTTP。
  */
 import type { FastifyInstance } from 'fastify';
+import { DatabaseSync } from 'node:sqlite';
 import { requireWebAdmin } from '../http/require-auth.ts';
 import { setSetting } from '../db/repo/settings.ts';
 import {
@@ -17,12 +18,24 @@ import {
   deleteUser,
 } from '../db/repo/users.ts';
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
-import { getDatabase } from '../db/index.ts';
+import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
+import { createLogger } from '../logger.ts';
+
+const log = createLogger('admin');
+import { closeDatabase, getDatabase, migrate, openDatabase } from '../db/index.ts';
 import { config } from '../config.ts';
-import { readFileSync, statSync, unlinkSync } from 'node:fs';
+import {
+  copyFileSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { badRequest, notFound } from '../http/errors.ts';
+import { AppError, badRequest, notFound } from '../http/errors.ts';
 
 function asRecord(body: unknown): Record<string, unknown> {
   return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
@@ -167,4 +180,165 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       }
     }
   });
+
+  /**
+   * 恢复数据库：上传 .db 文件整体替换当前库。
+   *
+   * 安全链（任何一步失败都回滚到原库）：
+   *   1. 文件头必须是 `SQLite format 3\0`，否则不是 SQLite 库
+   *   2. 临时连接上跑 PRAGMA integrity_check + 必需表检查（users / schema_migrations）
+   *   3. VACUUM INTO 给当前库留一份 `.pre-restore-<ts>.db` 兜底（**不删**，
+   *      回滚或手动抢救都用它，路径随响应返回）
+   *   4. 关闭连接 → 替换 .db（连同 -wal/-shm）→ 重开 → 补跑迁移
+   *      （上传的库可能是旧 schema，迁移把它带到当前版本）
+   *   5. 失败则从兜底拷贝回原库、重开、补迁移，返回 500
+   *
+   * 注意：JWT 是无状态的，恢复后旧令牌仍可用，但只对恢复库里存在的账号有效；
+   * 会话失效时前端会走 401 重新登录。
+   */
+  app.post(
+    '/api/admin/db/restore',
+    { bodyLimit: 200 * 1024 * 1024 },
+    async (req, reply) => {
+      requireWebAdmin(req);
+      const body = asRecord(req.body);
+      const dataBase64 = body.dataBase64;
+      if (typeof dataBase64 !== 'string' || dataBase64.length === 0) {
+        throw badRequest('缺少数据库文件内容');
+      }
+
+      const buf = Buffer.from(dataBase64, 'base64');
+      if (buf.length < 512) {
+        throw badRequest('文件太小，不是有效的数据库');
+      }
+      if (buf.toString('latin1', 0, 16) !== 'SQLite format 3\0') {
+        throw badRequest('不是 SQLite 数据库文件（文件头不符）');
+      }
+
+      const dbPath = config.dbPath;
+      const uploadPath = `${dbPath}.upload.tmp`;
+      writeFileSync(uploadPath, buf);
+
+      // 2) 完整性与表结构校验（临时连接，不动正在服务的库）
+      const requiredTables = ['users', 'schema_migrations'];
+      let probe: DatabaseSync | null = null;
+      try {
+        probe = new DatabaseSync(uploadPath);
+        const check = probe
+          .prepare('PRAGMA integrity_check')
+          .get() as { integrity_check: string } | undefined;
+        if (!check || check.integrity_check !== 'ok') {
+          throw badRequest(
+            `数据库完整性检查未通过：${check?.integrity_check ?? '无结果'}`
+          );
+        }
+        const tables = (
+          probe
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+            .all() as Array<{ name: string }>
+        ).map(r => r.name);
+        for (const t of requiredTables) {
+          if (!tables.includes(t)) {
+            throw badRequest(`数据库缺少必需表：${t}`);
+          }
+        }
+      } catch (err) {
+        try {
+          rmSync(uploadPath, { force: true });
+        } catch {
+          /* 清理失败不影响错误返回 */
+        }
+        if (err instanceof AppError) throw err;
+        throw badRequest(
+          `上传文件无法作为数据库打开：${(err as Error)?.message ?? err}`
+        );
+      } finally {
+        try {
+          probe?.close();
+        } catch {
+          /* ignore */
+        }
+      }
+
+      // 3) 当前库兜底备份（保留，不删）
+      const backupPath = `${dbPath}.pre-restore-${Date.now()}.db`;
+      try {
+        getDatabase().exec(`VACUUM INTO '${backupPath.replace(/'/g, "''")}'`);
+      } catch (err) {
+        try {
+          rmSync(uploadPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+        throw new AppError(
+          500,
+          'backup_failed',
+          `备份当前数据库失败，已中止恢复：${(err as Error)?.message ?? err}`
+        );
+      }
+
+      // 4) 热替换：关连接 → 换文件 → 重开 → 补迁移
+      try {
+        closeDatabase();
+        // WAL 附属文件：close 时已 checkpoint，防御性删除避免旧 WAL 覆盖新库
+        rmSync(`${dbPath}-wal`, { force: true });
+        rmSync(`${dbPath}-shm`, { force: true });
+        renameSync(uploadPath, dbPath);
+        const reopened = openDatabase();
+        migrate(reopened);
+      } catch (err) {
+        // 5) 回滚：兜底拷回、重开、补迁移
+        let rolledBack = false;
+        try {
+          closeDatabase();
+          rmSync(`${dbPath}-wal`, { force: true });
+          rmSync(`${dbPath}-shm`, { force: true });
+          copyFileSync(backupPath, dbPath);
+          const reopened = openDatabase();
+          migrate(reopened);
+          rolledBack = true;
+        } catch (rollbackErr) {
+          log?.error?.(
+            `恢复失败且回滚失败，请手动用 ${backupPath} 覆盖 ${dbPath}：${
+              (rollbackErr as Error)?.message ?? rollbackErr
+            }`
+          );
+        }
+        throw new AppError(
+          500,
+          rolledBack ? 'restore_failed' : 'restore_failed_rollback_failed',
+          rolledBack
+            ? `恢复失败，已自动回滚到原数据库：${(err as Error)?.message ?? err}`
+            : `恢复失败且回滚失败，请手动用 ${backupPath} 覆盖 ${dbPath} 后重启服务`
+        );
+      }
+
+      // 内存缓存失效（本地曲库缓存等服务级缓存）
+      invalidateLocalCatalogCache();
+
+      // 恢复后统计（给前端一个确认反馈）
+      const db = getDatabase();
+      const countOf = (table: string): number => {
+        try {
+          const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as {
+            n: number;
+          };
+          return Number(row.n);
+        } catch {
+          return -1;
+        }
+      };
+      const versionRow = db
+        .prepare('SELECT MAX(version) AS v FROM schema_migrations')
+        .get() as { v: number | null } | undefined;
+
+      return {
+        ok: true,
+        backupPath,
+        users: countOf('users'),
+        tracks: countOf('tracks'),
+        schemaVersion: versionRow?.v ?? null,
+      };
+    }
+  );
 }

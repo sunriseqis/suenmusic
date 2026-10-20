@@ -4,8 +4,10 @@
  * GET  /api/ai/models          获取模型列表（API Key 已脱敏）与分工指派【Web 管理员】
  * POST /api/ai/models          保存模型配置（自动连通性测试）【Web 管理员】
  * POST /api/ai/models/test     单独测试指定模型连通性【Web 管理员】
- * GET  /api/ai/assignment      分工指派下拉数据（瘦身，无 Key 信息）【任何登录用户】
- * PATCH /api/ai/assignment     改分工指派（决策/复核）【任何登录用户】
+ *
+ * 2026-10-20：分工指派收回「Web 面板管理员」专属（用户拍板：web 端管理员可改，
+ * 其他用户不可改不可见）。此前拆给任何登录用户的 /api/ai/assignment 独立接口
+ * 已删除，分配随 POST /api/ai/models 一起保存（缺省分配字段 = 保留当前指派）。
  * GET  /api/ai/persona         获取当前用户音乐画像与客观分布
  * POST /api/ai/persona/tune    用户提供引导词驱动 AI 调优画像
  * POST /api/ai/persona/refresh 基于最新曲库行为全量重构画像
@@ -15,11 +17,9 @@ import type { FastifyInstance } from 'fastify';
 import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
-  getAiAssignmentView,
   getAiSettingsConfig,
   getAiSettingsConfigView,
   testAiConnection,
-  updateAiAssignment,
   updateAiSettingsConfig,
 } from '../services/ai-client.ts';
 import {
@@ -110,27 +110,6 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
     try {
       const result = await testAiConnection({ baseUrl, apiKey, model });
       return result;
-    } catch (err) {
-      throw badRequest((err as Error).message);
-    }
-  });
-
-  // ---- 分工指派（客户端只做分配：任何登录用户、任何渠道）----
-
-  app.get('/api/ai/assignment', async req => {
-    requireUser(req);
-    return getAiAssignmentView();
-  });
-
-  app.patch('/api/ai/assignment', async req => {
-    requireUser(req);
-    const body = (req.body ?? {}) as { decideProfileId?: string; reviewProfileId?: string };
-    try {
-      updateAiAssignment(
-        String(body.decideProfileId ?? '').trim(),
-        String(body.reviewProfileId ?? '').trim()
-      );
-      return { ok: true, assignment: getAiAssignmentView() };
     } catch (err) {
       throw badRequest((err as Error).message);
     }

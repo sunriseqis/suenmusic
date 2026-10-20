@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2×2 卡片（小组件选择器里的「小卡」） -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_description"
+    android:initialLayout="@layout/widget_suen_2x2"
+    android:minHeight="160dp"
+    android:minResizeHeight="110dp"
+    android:minResizeWidth="160dp"
+    android:minWidth="160dp"
+    android:previewLayout="@layout/widget_suen_2x2"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellHeight="2"
+    android:targetCellWidth="2"
+    android:updatePeriodMillis="0"
+    android:widgetCategory="home_screen" />

@@ -153,6 +153,11 @@ export interface SuenAudioPlugin {
    * 离线时用它避免裂图（WebView 不保证从自己的磁盘缓存取图）。
    */
   cacheImages(o: { urls: string[] }): Promise<Record<string, string>>;
+  /**
+   * web 侧收藏状态变化 → 桌面卡片（小组件）的收藏图标。
+   * trackId 与卡片当前曲目对不上就丢弃；收藏切换本身在 web/服务端完成。
+   */
+  setWidgetFavorite(o: { trackId: string; favorite: boolean }): Promise<void>;
   /** 清空离线缓存（用户显式触发） */
   clearCache(): Promise<void>;
   /**

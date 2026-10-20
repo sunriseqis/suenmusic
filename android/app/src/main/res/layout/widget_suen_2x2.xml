@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2×2 卡片（160×160）。设计定稿 docs/plan/2026-10-19-桌面卡片设计定稿.md：
+    封面 52 方块 + 标题两行 / 歌手；时间码在进度线右上；2px 进度线兼作分区线；
+    运输三键居中。收藏只在 2×4（规则表：2×2 加收藏会挤掉标题宽度）。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:orientation="vertical"
+    android:padding="10dp"
+    android:theme="@style/Theme.AppCompat">
+
+    <!-- 封面 + 标题/歌手 -->
+    <RelativeLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <FrameLayout
+            android:id="@+id/coverBox"
+            android:layout_width="52dp"
+            android:layout_height="52dp"
+            android:layout_alignParentStart="true"
+            android:layout_alignParentTop="true">
+
+            <ImageView
+                android:id="@+id/cover"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:background="@drawable/widget_cover_ph"
+                android:scaleType="centerCrop" />
+
+            <ImageView
+                android:id="@+id/coverPh"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:contentDescription="@string/widget_no_track"
+                android:src="@drawable/ic_w_note" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_alignParentTop="true"
+            android:layout_centerVertical="true"
+            android:layout_marginStart="8dp"
+            android:layout_toEndOf="@id/coverBox"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:text="@string/widget_no_track"
+                android:textColor="#E9E7E2"
+                android:textSize="12.5sp" />
+
+            <TextView
+                android:id="@+id/artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="#8D8A83"
+                android:textSize="10sp"
+                android:visibility="gone" />
+        </LinearLayout>
+    </RelativeLayout>
+
+    <!-- 时间码（进度线右上）+ 进度线 -->
+    <TextView
+        android:id="@+id/timeCurrent"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginTop="2dp"
+        android:fontFamily="monospace"
+        android:text="--:--"
+        android:textColor="#8D8A83"
+        android:textSize="10sp" />
+
+    <ProgressBar
+        android:id="@+id/progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:layout_marginTop="2dp"
+        android:max="1000"
+        android:progressDrawable="@drawable/widget_progress" />
+
+    <!-- 发丝线 -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="6dp"
+        android:background="@drawable/widget_divider" />
+
+    <!-- 运输三键 -->
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/btnPrev"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:contentDescription="@string/widget_prev"
+            android:src="@drawable/ic_w_prev" />
+
+        <ImageView
+            android:id="@+id/btnPlay"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_marginStart="10dp"
+            android:contentDescription="@string/widget_play_pause"
+            android:src="@drawable/ic_w_play" />
+
+        <ImageView
+            android:id="@+id/btnNext"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:layout_marginStart="10dp"
+            android:contentDescription="@string/widget_next"
+            android:src="@drawable/ic_w_next" />
+    </LinearLayout>
+</LinearLayout>

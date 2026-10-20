@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2×4 卡片（340×160）。设计定稿 docs/plan/2026-10-19-桌面卡片设计定稿.md：
+    三格发丝线分隔：封面 84 / 信息（歌名 14 + 歌手 10 + 三行歌词 + 时间进度）/ 右轨三键纵向；
+    收藏在信息格右上角；时间码在进度行左端，时长右端。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widgetRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_bg"
+    android:baselineAligned="false"
+    android:orientation="horizontal"
+    android:padding="10dp"
+    android:theme="@style/Theme.AppCompat">
+
+    <!-- 封面格 -->
+    <FrameLayout
+        android:id="@+id/coverBox"
+        android:layout_width="84dp"
+        android:layout_height="84dp"
+        android:layout_gravity="center_vertical">
+
+        <ImageView
+            android:id="@+id/cover"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/widget_cover_ph"
+            android:scaleType="centerCrop" />
+
+        <ImageView
+            android:id="@+id/coverPh"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:layout_gravity="center"
+            android:contentDescription="@string/widget_no_track"
+            android:src="@drawable/ic_w_note" />
+    </FrameLayout>
+
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:background="@drawable/widget_divider_v" />
+
+    <!-- 信息格 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="center_vertical"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:baselineAligned="false"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/widget_no_track"
+                android:textColor="#E9E7E2"
+                android:textSize="14sp" />
+
+            <ImageView
+                android:id="@+id/btnFav"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center_vertical"
+                android:layout_marginStart="6dp"
+                android:contentDescription="@string/widget_favorite"
+                android:src="@drawable/ic_w_heart" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#8D8A83"
+            android:textSize="10sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/lyric1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#55575C"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/lyric2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#55575C"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/lyric3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textColor="#55575C"
+            android:textSize="11sp"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/timeCurrent"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="--:--"
+                android:textColor="#8D8A83"
+                android:textSize="10sp" />
+
+            <ProgressBar
+                android:id="@+id/progress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="0dp"
+                android:layout_height="2dp"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:max="1000"
+                android:progressDrawable="@drawable/widget_progress" />
+
+            <TextView
+                android:id="@+id/timeDuration"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:text="--:--"
+                android:textColor="#8D8A83"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="center_vertical"
+        android:layout_marginStart="10dp"
+        android:background="@drawable/widget_divider_v" />
+
+    <!-- 右轨：三键纵向居中 -->
+    <LinearLayout
+        android:layout_width="56dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="center_vertical"
+        android:gravity="center"
+        android:orientation="vertical">
+
+        <ImageView
+            android:id="@+id/btnPrev"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:contentDescription="@string/widget_prev"
+            android:src="@drawable/ic_w_prev" />
+
+        <ImageView
+            android:id="@+id/btnPlay"
+            android:layout_width="34dp"
+            android:layout_height="34dp"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="12dp"
+            android:contentDescription="@string/widget_play_pause"
+            android:src="@drawable/ic_w_play" />
+
+        <ImageView
+            android:id="@+id/btnNext"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:contentDescription="@string/widget_next"
+            android:src="@drawable/ic_w_next" />
+    </LinearLayout>
+</LinearLayout>

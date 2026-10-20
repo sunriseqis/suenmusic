@@ -190,50 +190,6 @@ export async function saveAiSettingsConfig(
   setSetting(AI_SETTING_KEYS.modelsConfig, JSON.stringify(newConfig));
 }
 
-/**
- * 只改分工指派（决策/复核），不动模型清单与 Key。
- *
- * 给「AI 分配」用——按 2026-10-18 边界文档，客户端只做分配、不碰增删改；
- * 分配是全实例生效的全局设置，任何登录用户均可调（文档未对分配设角色，
- * 如需收紧成仅管理员，在这里加 role 判断即可）。
- * 模型在增删改时已过连通性校验，切指派不再打网络。
- */
-export function updateAiAssignment(
-  decideProfileId: string,
-  reviewProfileId: string
-): AiSettingsConfigView {
-  const cfg = getAiSettingsConfig();
-  const ids = new Set(cfg.profiles.map(p => p.id));
-  if (decideProfileId && !ids.has(decideProfileId)) {
-    throw new Error('决策模型不存在');
-  }
-  if (reviewProfileId && !ids.has(reviewProfileId)) {
-    throw new Error('复核模型不存在');
-  }
-  const fallback = cfg.profiles[0]?.id ?? '';
-  const next: AiSettingsConfig = {
-    profiles: cfg.profiles,
-    decideProfileId: decideProfileId || fallback,
-    reviewProfileId: reviewProfileId || decideProfileId || fallback,
-  };
-  setSetting(AI_SETTING_KEYS.modelsConfig, JSON.stringify(next));
-  return getAiSettingsConfigView();
-}
-
-/** 分配下拉的瘦身视图：只有 id/name，不下发 Key 脱敏值等管理信息 */
-export function getAiAssignmentView(): {
-  profiles: Array<{ id: string; name: string }>;
-  decideProfileId: string;
-  reviewProfileId: string;
-} {
-  const cfg = getAiSettingsConfig();
-  return {
-    profiles: cfg.profiles.map(p => ({ id: p.id, name: p.name })),
-    decideProfileId: cfg.decideProfileId,
-    reviewProfileId: cfg.reviewProfileId,
-  };
-}
-
 export function maskApiKey(key: string): string {
   if (!key) return '';
   if (key.length <= 8) return '********';

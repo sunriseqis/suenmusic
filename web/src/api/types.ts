@@ -52,13 +52,6 @@ export interface AuthSession {
 }
 
 /** `GET /api/auth/config` —— 公开，登录页据此决定是否显示注册入口 */
-/** AI 分配下拉的瘦身视图（无 Key 信息，任何登录用户可读） */
-export interface AiAssignmentView {
-  profiles: Array<{ id: string; name: string }>;
-  decideProfileId: string;
-  reviewProfileId: string;
-}
-
 export interface AuthConfig {
   registrationOpen: boolean;
   allowRegistration: boolean;

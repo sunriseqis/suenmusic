@@ -22,6 +22,7 @@ import {
   removeFavorite,
 } from '@/api/library.ts';
 import type { Track } from '@/api/types.ts';
+import { isNativeAudio, SuenAudio } from '@/native/audio.ts';
 
 /** 单页条数。服务端对该参数有上限校验，100 是安全值 */
 const PAGE_SIZE = 100;
@@ -39,6 +40,20 @@ function reportHarmonyFavorite(assetId: string, favorite: boolean): void {
   if (typeof window === 'undefined' || !window.SuenHarmony?.updateFavorite) return;
   try {
     window.SuenHarmony.updateFavorite(JSON.stringify({ assetId, favorite }));
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 安卓桌面卡片（小组件）的收藏图标同步。
+ * 与鸿蒙的 updateFavorite 同一时机：本地集合最终态为准。
+ * 卡片不做乐观切换（切换要过服务端），所以这里失败静默即可。
+ */
+async function reportWidgetFavorite(assetId: string, favorite: boolean): Promise<void> {
+  if (!isNativeAudio) return;
+  try {
+    await SuenAudio.setWidgetFavorite({ trackId: assetId, favorite });
   } catch {
     /* ignore */
   }
@@ -174,6 +189,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
       pending.delete(id);
       // 成功与回滚都要报：以本地集合的最终状态为准，原生侧只认 assetId 匹配的
       reportHarmonyFavorite(id, ids.value.has(id));
+      void reportWidgetFavorite(id, ids.value.has(id));
     }
   }
 

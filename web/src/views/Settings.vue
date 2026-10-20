@@ -23,7 +23,6 @@ import ServerListEditor from '@/components/ServerListEditor.vue';
 import AdminUsers from '@/components/AdminUsers.vue';
 import AdminMaintenance from '@/components/AdminMaintenance.vue';
 import AdminAiModels from '@/components/AdminAiModels.vue';
-import AiAssignment from '@/components/AiAssignment.vue';
 import Sheet from '@/components/Sheet.vue';
 import { isAndroid, isWebPanel } from '@/native/update.ts';
 import {
@@ -588,15 +587,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 分配：任何登录用户、任何渠道（客户端只做分配） -->
-      <section class="sec">
-        <h2 class="label">AI 分配</h2>
-        <div class="panel">
-          <AiAssignment />
-        </div>
-      </section>
-
-      <!-- 模型增删改：仅 Web 面板的管理员（接口层有渠道闸） -->
+      <!-- 模型增删改 + 决策/复核分配：仅 Web 面板的管理员（接口层有渠道闸） -->
       <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">AI 模型</h2>
         <AdminAiModels />

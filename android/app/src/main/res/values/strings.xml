@@ -4,4 +4,10 @@
     <string name="title_activity_main">SuenMusic</string>
     <string name="package_name">com.suenmusic.app</string>
     <string name="custom_url_scheme">com.suenmusic.app</string>
+    <string name="widget_description">正在播放：封面、歌词与播放控制</string>
+    <string name="widget_no_track">暂无歌曲播放</string>
+    <string name="widget_play_pause">播放/暂停</string>
+    <string name="widget_prev">上一首</string>
+    <string name="widget_next">下一首</string>
+    <string name="widget_favorite">收藏</string>
 </resources>

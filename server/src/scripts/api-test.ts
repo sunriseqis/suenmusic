@@ -61,6 +61,8 @@ interface Res {
   status: number;
   json: any;
   headers: Headers;
+  /** 原始字节（二进制接口用，如数据库备份下载） */
+  raw: Buffer;
 }
 
 async function req(
@@ -90,15 +92,16 @@ async function req(
           : undefined,
   });
 
+  const raw = Buffer.from(await res.arrayBuffer());
+  const text = raw.toString('utf8');
   let json: any = null;
-  const text = await res.text();
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
     json = text;
   }
 
-  return { status: res.status, json, headers: res.headers };
+  return { status: res.status, json, headers: res.headers, raw };
 }
 
 /** Web 面板通道：走 /api/auth/session 拿 HttpOnly cookie（管理接口只认这条） */
@@ -707,27 +710,115 @@ async function main(): Promise<number> {
   const modelsByCookie = await req('GET', '/api/ai/models', { cookie: adminCookie });
   eq('cookie 通道能读模型清单', modelsByCookie.status, 200);
 
+  // 2026-10-20：分工指派收回 Web 面板管理员专属（用户拍板：其他用户不可改
+  // 不可见），独立 assignment 接口已删除 —— 现在应是 404，不是 200/403。
   const assign = await req('GET', '/api/ai/assignment', { token: accessToken });
-  eq('分配下拉任何登录用户可读（Bearer 也行）', assign.status, 200);
-  check(
-    '分配视图只有 id/name',
-    Array.isArray(assign.json?.profiles) &&
-      assign.json.profiles.every(
-        (p: { id?: string; name?: string }) =>
-          Object.keys(p).sort().join(',') === 'id,name'
-      )
-  );
-  check('分配视图不下发 Key 脱敏值', !JSON.stringify(assign.json).includes('apiKeyMasked'));
-
+  eq('独立分配接口已删除（不可见）', assign.status, 404);
   const badAssign = await req('PATCH', '/api/ai/assignment', {
     token: accessToken,
     body: { decideProfileId: 'no-such-model' },
   });
-  checkErrorShape('不存在的决策模型被拒', badAssign, 400, 'bad_request');
+  eq('独立分配接口 PATCH 同样已删除', badAssign.status, 404);
+
+  // 分配改走模型配置保存（管理员 cookie 通道），且缺省分配字段保留当前指派
+  const modelsView = await req('GET', '/api/ai/models', { cookie: adminCookie });
+  check(
+    '模型清单带分工指派字段',
+    typeof modelsView.json?.decideProfileId === 'string'
+      && Array.isArray(modelsView.json?.profiles)
+  );
+  const keepAssign = await req('POST', '/api/ai/models', {
+    cookie: adminCookie,
+    body: {
+      profiles: (modelsView.json?.profiles ?? []).map(
+        (p: { id: string; name: string; baseUrl: string; model: string }) => ({
+          id: p.id,
+          name: p.name,
+          baseUrl: p.baseUrl,
+          model: p.model,
+        })
+      ),
+    },
+  });
+  eq('缺省分配字段时保存成功', keepAssign.status, 200);
+  check(
+    '保存后指派保留不变',
+    keepAssign.json?.config?.decideProfileId === modelsView.json?.decideProfileId
+  );
 
   // cookie 下发接口随直连模式废止（2026-10-20 删）：应该是 404，不是 403/401
   const cred = await req('GET', '/api/sources/credentials', { token: accessToken });
   eq('凭证下发接口已删除', cred.status, 404);
+
+  // ---------------------------------------------------------------------
+  section('[8d] 数据库恢复（覆盖式）');
+  // ---------------------------------------------------------------------
+  //
+  // 链路：下载当前库备份 → 制造差异（再建一个用户）→ 用备份恢复 →
+  // 差异消失（只剩原账号）。另外覆盖非法文件的拒绝路径。
+  // 先记录备份时的基线（账号数 / 注册开关），恢复后要和基线一致
+  const baseUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
+  const baseCount: number = baseUsers.json?.users?.length ?? -1;
+  const baseCfg = await req('GET', '/api/auth/config');
+  const baseRegOpen = baseCfg.json?.registrationOpen;
+
+  const backupRes = await req('GET', '/api/admin/backup', { cookie: adminCookie });
+  eq('cookie 通道可下载备份', backupRes.status, 200);
+  const backupBytes = backupRes.raw;
+  check('备份内容是 SQLite 库', backupBytes.length > 512
+      && backupBytes.toString('latin1', 0, 15) === 'SQLite format 3');
+
+  // 制造差异：打开注册 → 再建一个用户
+  await req('PATCH', '/api/admin/settings', {
+    cookie: adminCookie,
+    body: { allowRegistration: true },
+  });
+  await req('POST', '/api/auth/register', {
+    body: { username: 'will-vanish', password: PASSWORD },
+  });
+  const beforeUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
+  check(
+    '恢复前比备份时多一个账号',
+    Array.isArray(beforeUsers.json?.users)
+      && beforeUsers.json.users.length === baseCount + 1
+  );
+
+  // 非法文件：文件头不符
+  const notDb = await req('POST', '/api/admin/db/restore', {
+    cookie: adminCookie,
+    body: { dataBase64: Buffer.from('这不是数据库'.repeat(64)).toString('base64') },
+  });
+  checkErrorShape('非 SQLite 文件被拒', notDb, 400, 'bad_request');
+
+  // 合法恢复：拿之前的备份覆盖
+  const restoreRes = await req('POST', '/api/admin/db/restore', {
+    cookie: adminCookie,
+    body: { dataBase64: backupBytes.toString('base64') },
+  });
+  eq('恢复成功', restoreRes.status, 200);
+  check('恢复响应带回统计', typeof restoreRes.json?.users === 'number');
+  check(
+    '恢复响应带回兜底备份路径',
+    typeof restoreRes.json?.backupPath === 'string'
+      && restoreRes.json.backupPath.includes('.pre-restore-')
+  );
+  const afterUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
+  check(
+    '恢复后差异账号消失、回到备份基线',
+    Array.isArray(afterUsers.json?.users)
+      && afterUsers.json.users.length === baseCount
+      && !afterUsers.json.users.some((u: { username: string }) => u.username === 'will-vanish')
+  );
+  // 恢复的库就是备份那一刻的快照：注册开关也回到基线
+  const cfgAfter = await req('GET', '/api/auth/config');
+  check('恢复后注册开关回到备份时状态', cfgAfter.json?.registrationOpen === baseRegOpen);
+
+  // Bearer 打恢复接口同样被渠道闸挡下
+  const restoreByBearer = await req('POST', '/api/admin/db/restore', {
+    token: accessToken,
+    body: { dataBase64: backupBytes.toString('base64') },
+  });
+  checkErrorShape('恢复接口只认 Web cookie 会话', restoreByBearer, 403, 'forbidden');
 
   // ---- 汇总 ----
   process.stdout.write('\n' + '-'.repeat(60) + '\n');

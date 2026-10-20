@@ -43,6 +43,28 @@
         <action android:name="androidx.media3.session.MediaSessionService" />
       </intent-filter>
     </service>
+        <!-- 桌面卡片（小组件）：2×2 小卡 / 2×4 宽卡。渲染逻辑共用 SuenWidgetProvider，
+             按钮动作以广播发给 SuenAudioService 的接收器（服务活着才响应）。 -->
+        <receiver
+            android:name=".SuenWidget2x2Provider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/suenmusic_widget_2x2" />
+        </receiver>
+        <receiver
+            android:name=".SuenWidget2x4Provider"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/suenmusic_widget_2x4" />
+        </receiver>
   </application>
 
     <!-- Permissions -->

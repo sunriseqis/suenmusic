@@ -733,6 +733,20 @@ public class SuenAudioPlugin extends Plugin {
     call.resolve();
   }
 
+  /**
+   * web 侧收藏状态变化 → 桌面卡片（小组件）的收藏图标。
+   *
+   * 收藏切换本身要过服务端，卡片不做无状态乐观切换：这个桥只把
+   * 「当前曲目的收藏态」同步过去（trackId 对不上就丢弃）。
+   */
+  @PluginMethod
+  public void setWidgetFavorite(PluginCall call) {
+    String trackId = call.getString("trackId");
+    boolean favorite = Boolean.TRUE.equals(call.getBoolean("favorite", false));
+    SuenWidgetState.setFavorite(getContext(), trackId, favorite);
+    call.resolve();
+  }
+
   /** 清空离线缓存（同时清空音频缓存与本地封面） */
   @PluginMethod
   public void clearCache(PluginCall call) {
