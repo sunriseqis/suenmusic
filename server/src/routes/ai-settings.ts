@@ -1,21 +1,25 @@
 /**
  * AI 模型配置与用户画像管理路由。
  *
- * GET  /api/ai/models          获取模型列表（API Key 已脱敏）与分工指派
- * POST /api/ai/models          保存模型配置（自动连通性测试）
- * POST /api/ai/models/test     单独测试指定模型连通性
+ * GET  /api/ai/models          获取模型列表（API Key 已脱敏）与分工指派【Web 管理员】
+ * POST /api/ai/models          保存模型配置（自动连通性测试）【Web 管理员】
+ * POST /api/ai/models/test     单独测试指定模型连通性【Web 管理员】
+ * GET  /api/ai/assignment      分工指派下拉数据（瘦身，无 Key 信息）【任何登录用户】
+ * PATCH /api/ai/assignment     改分工指派（决策/复核）【任何登录用户】
  * GET  /api/ai/persona         获取当前用户音乐画像与客观分布
  * POST /api/ai/persona/tune    用户提供引导词驱动 AI 调优画像
  * POST /api/ai/persona/refresh 基于最新曲库行为全量重构画像
  */
 
 import type { FastifyInstance } from 'fastify';
-import { requireAdmin, requireUser } from '../http/require-auth.ts';
+import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
+  getAiAssignmentView,
   getAiSettingsConfig,
   getAiSettingsConfigView,
   testAiConnection,
+  updateAiAssignment,
   updateAiSettingsConfig,
 } from '../services/ai-client.ts';
 import {
@@ -28,12 +32,12 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
   // ---- 模型配置 ----
 
   app.get('/api/ai/models', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     return getAiSettingsConfigView();
   });
 
   app.post('/api/ai/models', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     const body = req.body as {
       profiles?: Array<{
         id?: string;
@@ -50,6 +54,9 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
       throw badRequest('请求格式不正确，缺少 profiles 数组');
     }
 
+    // 分配字段缺省 = 保留当前指派（「AI 模型」CRUD 不再提交分配，
+    // 分配走 PATCH /api/ai/assignment）；显式清空才回落第一个模型。
+    const current = getAiSettingsConfig();
     try {
       const view = await updateAiSettingsConfig(
         {
@@ -60,8 +67,10 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
             apiKey: String(p.apiKey ?? '').trim(),
             model: String(p.model ?? '').trim(),
           })),
-          decideProfileId: String(body.decideProfileId ?? '').trim(),
-          reviewProfileId: String(body.reviewProfileId ?? '').trim(),
+          decideProfileId:
+            String(body.decideProfileId ?? '').trim() || current.decideProfileId,
+          reviewProfileId:
+            String(body.reviewProfileId ?? '').trim() || current.reviewProfileId,
         },
         true
       );
@@ -72,7 +81,7 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
   });
 
   app.post('/api/ai/models/test', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     const body = (req.body ?? {}) as {
       id?: string;
       baseUrl?: string;
@@ -101,6 +110,27 @@ export function registerAiSettingsRoutes(app: FastifyInstance): void {
     try {
       const result = await testAiConnection({ baseUrl, apiKey, model });
       return result;
+    } catch (err) {
+      throw badRequest((err as Error).message);
+    }
+  });
+
+  // ---- 分工指派（客户端只做分配：任何登录用户、任何渠道）----
+
+  app.get('/api/ai/assignment', async req => {
+    requireUser(req);
+    return getAiAssignmentView();
+  });
+
+  app.patch('/api/ai/assignment', async req => {
+    requireUser(req);
+    const body = (req.body ?? {}) as { decideProfileId?: string; reviewProfileId?: string };
+    try {
+      updateAiAssignment(
+        String(body.decideProfileId ?? '').trim(),
+        String(body.reviewProfileId ?? '').trim()
+      );
+      return { ok: true, assignment: getAiAssignmentView() };
     } catch (err) {
       throw badRequest((err as Error).message);
     }

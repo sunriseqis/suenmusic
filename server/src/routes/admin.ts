@@ -5,7 +5,7 @@
  * 这里只暴露"界面真的会用到"的能力，CLI 里的测试脚本不进 HTTP。
  */
 import type { FastifyInstance } from 'fastify';
-import { requireAdmin } from '../http/require-auth.ts';
+import { requireWebAdmin } from '../http/require-auth.ts';
 import { setSetting } from '../db/repo/settings.ts';
 import {
   createUser,
@@ -30,12 +30,12 @@ function asRecord(body: unknown): Record<string, unknown> {
 
 export function registerAdminRoutes(app: FastifyInstance): void {
   app.get('/api/admin/users', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     return { users: listUsers() };
   });
 
   app.post('/api/admin/users', async (req, reply) => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     const body = asRecord(req.body);
     if (typeof body.username !== 'string' || typeof body.password !== 'string') {
       throw badRequest('用户名与口令必填');
@@ -50,7 +50,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   });
 
   app.patch('/api/admin/users/:id', async req => {
-    const admin = requireAdmin(req);
+    const admin = requireWebAdmin(req);
     const id = Number((req.params as { id?: string }).id);
     if (!Number.isInteger(id) || id <= 0) throw badRequest('用户 id 不合法');
     const target = findUserById(id);
@@ -81,12 +81,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   });
 
   app.get('/api/admin/settings', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     return { allowRegistration: registrationAllowed(), passwordMinLength: passwordMinLength() };
   });
 
   app.patch('/api/admin/settings', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     const body = asRecord(req.body);
 
     if (typeof body.allowRegistration === 'boolean') {
@@ -108,7 +108,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   /** 删除成员。不能删自己，也不能删掉最后一个管理员 */
   app.delete('/api/admin/users/:id', async req => {
-    const admin = requireAdmin(req);
+    const admin = requireWebAdmin(req);
     const id = Number((req.params as { id?: string }).id);
     if (!Number.isInteger(id) || id <= 0) throw badRequest('用户 id 不合法');
     const target = findUserById(id);
@@ -127,7 +127,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
    * 数据库大小直接从文件取，进程信息来自 process。
    */
   app.get('/api/admin/health', async req => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     let dbBytes = 0;
     try {
       dbBytes = statSync(config.dbPath).size;
@@ -150,7 +150,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
    * 读成 Buffer 再删临时文件；家庭实例的库不大，这样最简单。
    */
   app.get('/api/admin/backup', async (req, reply) => {
-    requireAdmin(req);
+    requireWebAdmin(req);
     const file = join(tmpdir(), `suenmusic-backup-${Date.now()}.db`);
     try {
       getDatabase().exec(`VACUUM INTO '${file.replace(/'/g, "''")}'`);

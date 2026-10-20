@@ -78,10 +78,15 @@ interface Res {
 async function req(
   method: string,
   path: string,
-  options: { body?: unknown; token?: string; headers?: Record<string, string>; binary?: boolean } = {}
+  options: { body?: unknown; token?: string; cookie?: string; headers?: Record<string, string>; binary?: boolean } = {}
 ): Promise<Res> {
   const headers: Record<string, string> = { ...(options.headers ?? {}) };
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  // Web 面板通道：HttpOnly cookie + CSRF 头（管理接口只认这条通道）
+  if (options.cookie) {
+    headers.Cookie = options.cookie;
+    if (method !== 'GET' && method !== 'HEAD') headers['X-Requested-With'] = 'suenmusic';
+  }
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
 
   const res = await fetch(`${base}${path}`, {
@@ -151,8 +156,18 @@ async function main(): Promise<number> {
   });
   checkError('首个账号后注册自动收闭', closedReg, 403, 'forbidden');
 
+  // 管理操作只认 Web 面板 cookie 会话（Bearer 一律 403）
+  const sess = await req('POST', '/api/auth/session', {
+    body: { username: 'bizuser', password: PASSWORD },
+  });
+  const m = /suen_session=[^;]*/.exec(sess.headers.get('set-cookie') ?? '');
+  if (!m) throw new Error('会话登录未下发 cookie');
+  const adminCookie = m[0];
+  const bearerAdmin = await req('GET', '/api/admin/users', { token });
+  checkError('管理员 Bearer 被渠道闸挡下', bearerAdmin, 403, 'forbidden');
+
   const openReg = await req('PATCH', '/api/admin/settings', {
-    token,
+    cookie: adminCookie,
     body: { allowRegistration: true },
   });
   check('管理员可重新打开注册', openReg.status === 200);
@@ -910,7 +925,7 @@ async function main(): Promise<number> {
   // 再往下必须有人拿手机扫，脚本做不到。所以这里不做假绿：
   // 只断言**可验证的那一段**，扫码之后的链路由 api-test 的接口契约覆盖。
   {
-    const qr = await req('POST', '/api/bilibili/qrcode', { token });
+    const qr = await req('POST', '/api/bilibili/qrcode', { cookie: adminCookie });
     eq('取二维码返回 200', qr.status, 200);
     check('返回 qrcode_key', typeof qr.json?.qrcodeKey === 'string' && qr.json.qrcodeKey.length > 0);
     check(
@@ -938,7 +953,7 @@ async function main(): Promise<number> {
 
     // 轮询一次：没人扫码时必须是 pending，而不是报错或"已登录"
     if (typeof qr.json?.qrcodeKey === 'string') {
-      const poll = await req('GET', `/api/bilibili/qrcode/${qr.json.qrcodeKey}`, { token });
+      const poll = await req('GET', `/api/bilibili/qrcode/${qr.json.qrcodeKey}`, { cookie: adminCookie });
       eq('轮询返回 200', poll.status, 200);
       eq('没人扫码时状态是 pending', poll.json?.state, 'pending');
       check('轮询结果不带账号信息', poll.json?.account === undefined);

@@ -4,6 +4,7 @@
 
 import { request } from './client.ts';
 import type {
+  AiAssignmentView,
   AiSettingsConfigView,
   PersonaDetail,
 } from './types.ts';
@@ -20,8 +21,9 @@ export async function saveAiModels(payload: {
     apiKey?: string;
     model: string;
   }>;
-  decideProfileId: string;
-  reviewProfileId: string;
+  /** 缺省 = 保留服务端当前指派；分配走 PATCH /api/ai/assignment */
+  decideProfileId?: string;
+  reviewProfileId?: string;
 }): Promise<{ ok: boolean; config: AiSettingsConfigView }> {
   return request<{ ok: boolean; config: AiSettingsConfigView }>('/api/ai/models', {
     method: 'POST',
@@ -75,5 +77,21 @@ export async function refreshPersona(): Promise<{ ok: boolean; persona: PersonaD
     method: 'POST',
     timeoutMs: LONG_AI_TIMEOUT_MS,
     noFailover: true,
+  });
+}
+
+// ---- 分工指派（客户端只做分配：任何登录用户、任何渠道）----
+
+export async function fetchAiAssignment(): Promise<AiAssignmentView> {
+  return request<AiAssignmentView>('/api/ai/assignment');
+}
+
+export async function saveAiAssignment(
+  decideProfileId: string,
+  reviewProfileId: string
+): Promise<{ ok: boolean; assignment: AiAssignmentView }> {
+  return request<{ ok: boolean; assignment: AiAssignmentView }>('/api/ai/assignment', {
+    method: 'PATCH',
+    body: { decideProfileId, reviewProfileId },
   });
 }

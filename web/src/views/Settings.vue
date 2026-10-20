@@ -23,8 +23,9 @@ import ServerListEditor from '@/components/ServerListEditor.vue';
 import AdminUsers from '@/components/AdminUsers.vue';
 import AdminMaintenance from '@/components/AdminMaintenance.vue';
 import AdminAiModels from '@/components/AdminAiModels.vue';
+import AiAssignment from '@/components/AiAssignment.vue';
 import Sheet from '@/components/Sheet.vue';
-import { isAndroid } from '@/native/update.ts';
+import { isAndroid, isWebPanel } from '@/native/update.ts';
 import {
   isBluetoothLyricsEnabled,
   isNativeAudio,
@@ -587,7 +588,16 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section v-if="session.user?.role === 'admin'" class="sec">
+      <!-- 分配：任何登录用户、任何渠道（客户端只做分配） -->
+      <section class="sec">
+        <h2 class="label">AI 分配</h2>
+        <div class="panel">
+          <AiAssignment />
+        </div>
+      </section>
+
+      <!-- 模型增删改：仅 Web 面板的管理员（接口层有渠道闸） -->
+      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">AI 模型</h2>
         <AdminAiModels />
       </section>
@@ -600,35 +610,40 @@ onBeforeUnmount(() => {
         <ServerListEditor />
       </section>
 
-      <section v-if="session.user?.role === 'admin'" class="sec">
+      <!-- 音源授权：状态全员只读；扫码/退出仅 Web 面板管理员 -->
+      <section class="sec">
         <h2 class="label">音源授权</h2>
         <div class="panel">
           <div class="row">
             <span class="row-name">B 站</span>
             <span class="row-val">{{ biliOn ? biliName || '已授权' : '未授权' }}</span>
-            <NeuButton v-if="!biliOn" size="sm" @click="openQr('bilibili')">授权</NeuButton>
-            <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('bilibili')">退出</NeuButton>
+            <template v-if="isWebPanel && session.user?.role === 'admin'">
+              <NeuButton v-if="!biliOn" size="sm" @click="openQr('bilibili')">授权</NeuButton>
+              <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('bilibili')">退出</NeuButton>
+            </template>
           </div>
           <div class="row">
             <span class="row-name">网易云</span>
             <span class="row-val">{{ neteaseOn ? neteaseName || '已授权' : '未授权' }}</span>
-            <NeuButton v-if="!neteaseOn" size="sm" @click="openQr('netease')">授权</NeuButton>
-            <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('netease')">退出</NeuButton>
+            <template v-if="isWebPanel && session.user?.role === 'admin'">
+              <NeuButton v-if="!neteaseOn" size="sm" @click="openQr('netease')">授权</NeuButton>
+              <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('netease')">退出</NeuButton>
+            </template>
           </div>
         </div>
       </section>
 
-      <section v-if="session.user?.role === 'admin'" class="sec">
+      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">账号管理</h2>
         <AdminUsers />
       </section>
 
-      <section v-if="session.user?.role === 'admin'" class="sec">
+      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">数据维护</h2>
         <AdminMaintenance />
       </section>
 
-      <section class="sec">
+      <section v-if="isWebPanel" class="sec">
         <h2 class="label">运行情况</h2>
         <div class="panel">
           <div class="row">

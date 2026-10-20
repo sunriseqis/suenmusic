@@ -1,6 +1,11 @@
 <script setup lang="ts">
 /**
- * 管理员：AI 模型增删改 + 决策/复核分配。
+ * 管理员：AI 模型增删改（Web 面板专属）。
+ *
+ * 决策/复核分配不在这里——按边界文档客户端只做分配，挪到了
+ * AiAssignment.vue（任何登录用户、任何渠道都可见）。
+ * 保存时不再提交分配字段：服务端会保留当前指派，删模型导致的
+ * 失效指派由服务端归一化到第一个模型。
  *
  * API Key 只显示掩码；编辑时留空表示沿用原值（服务端按 id 合并）。
  */
@@ -24,8 +29,6 @@ interface DraftProfile {
 
 const ui = useUiStore();
 const rows = ref<DraftProfile[]>([]);
-const decide = ref('');
-const review = ref('');
 const busy = ref(false);
 const testing = ref<number | null>(null);
 
@@ -41,8 +44,6 @@ async function load(): Promise<void> {
       apiKeyMasked: p.apiKeyMasked,
       hasApiKey: p.hasApiKey,
     }));
-    decide.value = cfg.decideProfileId;
-    review.value = cfg.reviewProfileId;
   } catch (e) {
     ui.err(e instanceof ApiError ? e.message : '读取模型失败');
   }
@@ -95,8 +96,6 @@ async function save(): Promise<void> {
         // 空串 = 沿用原 key；新模型必须填
         ...(p.apiKey ? { apiKey: p.apiKey } : {}),
       })),
-      decideProfileId: decide.value,
-      reviewProfileId: review.value,
     });
     rows.value = res.config.profiles.map(p => ({
       id: p.id,
@@ -107,8 +106,6 @@ async function save(): Promise<void> {
       apiKeyMasked: p.apiKeyMasked,
       hasApiKey: p.hasApiKey,
     }));
-    decide.value = res.config.decideProfileId;
-    review.value = res.config.reviewProfileId;
     ui.ok('已保存');
   } catch (e) {
     ui.err(e instanceof ApiError ? e.message : '保存失败');
@@ -142,21 +139,6 @@ onMounted(load);
     </div>
 
     <button type="button" class="add" @click="addRow">+ 添加模型</button>
-
-    <div class="assign">
-      <label>
-        <span>决策</span>
-        <select v-model="decide">
-          <option v-for="p in rows" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-        </select>
-      </label>
-      <label>
-        <span>复核</span>
-        <select v-model="review">
-          <option v-for="p in rows" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-        </select>
-      </label>
-    </div>
 
     <NeuButton variant="primary" :loading="busy" @click="save">保存配置</NeuButton>
   </div>
@@ -207,27 +189,5 @@ onMounted(load);
   color: var(--t2);
   font-size: var(--fs-xs);
   cursor: pointer;
-}
-.assign {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--sp-3);
-}
-.assign label {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-xs);
-  color: var(--t2);
-}
-.assign select {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 32px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--panel-2);
-  color: var(--t1);
-  padding: 0 8px;
 }
 </style>

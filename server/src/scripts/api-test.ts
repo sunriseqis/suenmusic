@@ -66,10 +66,15 @@ interface Res {
 async function req(
   method: string,
   path: string,
-  options: { body?: unknown; token?: string; rawBody?: string; headers?: Record<string, string> } = {}
+  options: { body?: unknown; token?: string; cookie?: string; rawBody?: string; headers?: Record<string, string> } = {}
 ): Promise<Res> {
   const headers: Record<string, string> = { ...(options.headers ?? {}) };
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
+  // Web 面板通道：HttpOnly cookie + CSRF 头（管理接口只认这条通道）
+  if (options.cookie) {
+    headers.Cookie = options.cookie;
+    if (method !== 'GET' && method !== 'HEAD') headers['X-Requested-With'] = 'suenmusic';
+  }
   if (options.body !== undefined || options.rawBody !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
@@ -94,6 +99,15 @@ async function req(
   }
 
   return { status: res.status, json, headers: res.headers };
+}
+
+/** Web 面板通道：走 /api/auth/session 拿 HttpOnly cookie（管理接口只认这条） */
+async function webCookie(username: string, password: string): Promise<string> {
+  const res = await req('POST', '/api/auth/session', { body: { username, password } });
+  const raw = res.headers.get('set-cookie') ?? '';
+  const m = /suen_session=[^;]*/.exec(raw);
+  if (!m) throw new Error(`会话登录未下发 cookie：${raw.slice(0, 80)}`);
+  return m[0];
 }
 
 /** 断言错误体形状统一为 { error: { code, message } } */
@@ -186,8 +200,16 @@ async function main(): Promise<number> {
     403,
     'forbidden'
   );
+  // 管理操作只认 Web 面板的 cookie 会话：先证明 Bearer 被打，
+  // 再证明同一个人走 cookie 能过——两头都钉死，渠道闸才算验收。
+  const adminCookie = await webCookie('tester', PASSWORD);
+  const bearerAdmin = await req('GET', '/api/admin/users', { token: accessToken });
+  checkErrorShape('管理员 Bearer 也被渠道闸挡下', bearerAdmin, 403, 'forbidden');
+  const cookieAdmin = await req('GET', '/api/admin/users', { cookie: adminCookie });
+  eq('同一管理员走 cookie 通道放行', cookieAdmin.status, 200);
+
   const openReg = await req('PATCH', '/api/admin/settings', {
-    token: accessToken,
+    cookie: adminCookie,
     body: { allowRegistration: true },
   });
   eq('管理员重新打开注册', openReg.status, 200);
@@ -657,7 +679,7 @@ async function main(): Promise<number> {
   eq('没东西可退出', biliStatus.json?.canLogout, false);
 
   // 退出：本来就没有库内凭证，应当是一次无副作用的成功
-  const biliLogout = await req('DELETE', '/api/bilibili/account', { token: accessToken });
+  const biliLogout = await req('DELETE', '/api/bilibili/account', { cookie: adminCookie });
   eq('退出登录返回 200', biliLogout.status, 200);
   eq('没有环境变量可回落', biliLogout.json?.revertedToEnv, false);
 
@@ -665,8 +687,47 @@ async function main(): Promise<number> {
   eq('退出后仍未配置', biliAfterLogout.json?.configured, false);
 
   // 空 key 要在到达上游之前就被挡住 —— 否则会拿空参数去打 B 站
-  const biliEmptyKey = await req('GET', '/api/bilibili/qrcode/%20', { token: accessToken });
+  const biliEmptyKey = await req('GET', '/api/bilibili/qrcode/%20', { cookie: adminCookie });
   checkErrorShape('空白 qrcode_key 被拒', biliEmptyKey, 400, 'bad_request');
+
+  // ---------------------------------------------------------------------
+  section('[8c] AI 模型与分配的渠道分界');
+  // ---------------------------------------------------------------------
+  //
+  // 约定（2026-10-18 边界文档 + 10-20 渠道闸）：
+  //   模型增删改/测试 —— 只能从 Web 面板（cookie 会话）发起，Bearer 一律 403
+  //   分配（决策/复核）—— 任何登录用户、任何渠道都能改
+  const modelsByBearer = await req('GET', '/api/ai/models', { token: accessToken });
+  checkErrorShape('GET /api/ai/models 管理员 Bearer 被渠道闸挡下', modelsByBearer, 403, 'forbidden');
+  const testByBearer = await req('POST', '/api/ai/models/test', {
+    token: accessToken,
+    body: {},
+  });
+  checkErrorShape('POST /api/ai/models/test 管理员 Bearer 被渠道闸挡下', testByBearer, 403, 'forbidden');
+  const modelsByCookie = await req('GET', '/api/ai/models', { cookie: adminCookie });
+  eq('cookie 通道能读模型清单', modelsByCookie.status, 200);
+
+  const assign = await req('GET', '/api/ai/assignment', { token: accessToken });
+  eq('分配下拉任何登录用户可读（Bearer 也行）', assign.status, 200);
+  check(
+    '分配视图只有 id/name',
+    Array.isArray(assign.json?.profiles) &&
+      assign.json.profiles.every(
+        (p: { id?: string; name?: string }) =>
+          Object.keys(p).sort().join(',') === 'id,name'
+      )
+  );
+  check('分配视图不下发 Key 脱敏值', !JSON.stringify(assign.json).includes('apiKeyMasked'));
+
+  const badAssign = await req('PATCH', '/api/ai/assignment', {
+    token: accessToken,
+    body: { decideProfileId: 'no-such-model' },
+  });
+  checkErrorShape('不存在的决策模型被拒', badAssign, 400, 'bad_request');
+
+  // cookie 下发接口随直连模式废止（2026-10-20 删）：应该是 404，不是 403/401
+  const cred = await req('GET', '/api/sources/credentials', { token: accessToken });
+  eq('凭证下发接口已删除', cred.status, 404);
 
   // ---- 汇总 ----
   process.stdout.write('\n' + '-'.repeat(60) + '\n');

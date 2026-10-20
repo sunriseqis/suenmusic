@@ -55,3 +55,22 @@ export function requireAdmin(req: FastifyRequest): PublicUser {
   if (user.role !== 'admin') throw forbidden('需要管理员权限');
   return user;
 }
+
+/**
+ * 管理操作的门：**只接受 Web 面板的同源 cookie 会话**。
+ *
+ * 产品约定（2026-10-18 设置页边界文档 + 10-20 用户确认）：服务器配置类操作
+ * （账号管理、AI 模型增删改、音源扫码授权、数据备份）只能从 Web 面板发起；
+ * 原生客户端（Capacitor Bearer / 鸿蒙 bridge）即使管理员身份也一律拒绝。
+ * cookie 会话天然只有同源浏览器有，不需要猜渠道。
+ */
+export function requireWebAdmin(req: FastifyRequest): PublicUser {
+  const bearer = extractBearer(req.headers.authorization);
+  if (bearer) throw forbidden('管理操作仅限 Web 面板执行');
+  const user = userFromCookie(req);
+  if (!user) throw unauthorized('未登录');
+  // 与 requireUser 的 cookie 分支一致：写请求要过 CSRF 闸
+  assertCsrf(req);
+  if (user.role !== 'admin') throw forbidden('需要管理员权限');
+  return user;
+}

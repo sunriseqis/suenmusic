@@ -27,7 +27,6 @@ import {
   setSession,
 } from '@/api/client.ts';
 import * as authApi from '@/api/auth.ts';
-import { syncSourceCredentials } from '@/api/sources.ts';
 import type { AuthConfig, PublicUser } from '@/api/types.ts';
 
 export const useSessionStore = defineStore('session', () => {
@@ -99,7 +98,6 @@ export const useSessionStore = defineStore('session', () => {
       try {
         const res = await authApi.sessionMe();
         user.value = res.user;
-        void syncSourceCredentials();
       } catch {
         user.value = null;
       }
@@ -166,13 +164,11 @@ export const useSessionStore = defineStore('session', () => {
       if (isWebPlatform) {
         const res = await authApi.sessionLogin(username.trim(), password);
         user.value = res.user;
-        void syncSourceCredentials(true);
         return;
       }
       const session = await authApi.login(username.trim(), password);
       setSession(session);
       user.value = session.user;
-      void syncSourceCredentials(true);
     } finally {
       busy.value = false;
     }
