@@ -31,6 +31,14 @@ scripts/gen-brand-icons.py                全端图标 + 启动图 + 本文档�
 原生工程里的 `ios/App/App/public/` 与 `android/app/src/main/assets/public/`
 是 web/public 的副本（`cap sync` 会刷新），favicon 已同步。
 
+## 字标
+
+「SuenMusic」字标不用自绘 SVG，**直接用 Gunstop 字体排**
+（`web/public/fonts/Gunstop.ttf`，Drizy Studio Demo，21KB，仅 114 字形）——
+它本身是切角工业风，与 MarkBold 同语言。应用内入口是
+`components/brand/WordMark.vue`（文本排版 + drop-shadow 拟物）。
+自绘折角字标生成器（`web/scripts/gen-wordmark-angular.py`）保留未删。
+
 ## 应用内
 
 侧边栏与登录页的品牌锁定走 `components/brand/BrandLockup.vue` →
