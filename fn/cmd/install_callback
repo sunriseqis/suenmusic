@@ -2,16 +2,14 @@
 
 ### This script is called after the user installs the application.
 
-# Ensure application files are accessible by package user
+# Ensure application files and data directory exist with full permissions
 if [ -n "${TRIM_APPDEST}" ] && [ -d "${TRIM_APPDEST}" ]; then
-    chmod -R u=rwX,go=rX "${TRIM_APPDEST}" 2>/dev/null || true
-    [ -f "${TRIM_APPDEST}/bin/node" ] && chmod 755 "${TRIM_APPDEST}/bin/node" 2>/dev/null || true
+    chmod -R 755 "${TRIM_APPDEST}" 2>/dev/null || true
 fi
 
-# Ensure package data directory exists with write permissions
 if [ -n "${TRIM_PKGVAR}" ]; then
     mkdir -p "${TRIM_PKGVAR}/data" 2>/dev/null || true
-    chmod -R 775 "${TRIM_PKGVAR}" 2>/dev/null || true
+    chmod -R 777 "${TRIM_PKGVAR}" 2>/dev/null || true
 fi
 
 exit 0
