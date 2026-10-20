@@ -19,10 +19,11 @@ docs/
 同一个问题（比如「ArkTS 本地能不能编译」）在两边都可能有记录且容易互相矛盾。
 合并后 `docs/memory/MEMORY.md` 是**唯一**的记忆索引。
 
-## 迁入计划
+## 迁入与归档状态
 
-以下两份将在对应代码迁入时合并进来（本轮只迁了 web + hw）：
+单仓工程整合已于 2026-10-19 全面完成：
 
-- `suenmusic-server/docs/memory/` → `docs/memory/`（服务端与 Web 侧）
-- `suenmusic-mobile/docs/memory/` → `docs/memory/`（三端壳）
-- `suenmusic-mobile/docs/` 其余内容 → `docs/dev/`
+- 服务端源码：统一合并入 `server/`，生产依赖与数据库迁移均自持；
+- Web 端：统一收敛在 `web/`，由服务端统一伺服；
+- 移动端与原生套件：`ios/`、`android/`、`hw/` 与 `fn/`（飞牛原生套件）均已迁入主仓并对齐单一真相源架构；
+- 外部旧仓 `suenmusic-server` 与 `suenmusic-mobile` 已对齐最新并设为只读。
