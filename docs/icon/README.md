@@ -1,18 +1,46 @@
 # 品牌图标母版
 
-橙色底白色波浪的品牌标记源文件。**改图标从这里改**，改完再同步到各端：
+品牌标记：**实心折角 S（MarkBold）**，段 0 染琥珀。2026-10-20 定稿，
+取代此前的「橙底白色音浪」。
 
-| 文件 | 用途 |
+## 改字形只改一个地方
+
+```
+web/src/components/brand/MarkBold.vue     字形路径 P1~P4（唯一来源）
+        ↓  改完重跑
+scripts/gen-brand-icons.py                全端图标 + 启动图 + 本文档目录的母版
+```
+
+配色固定（图标不跟随主题）：
+
+```
+底板 #17181B   蚀刻边 #2A2C30   字 #E9E7E2   段0 琥珀 #E8A33D
+```
+
+## 脚本产物
+
+| 位置 | 内容 |
 |---|---|
-| `ic_launcher_foreground.svg` | Android 自适应图标前景（波浪） |
-| `ic_launcher_background.svg` | Android 自适应图标背景（橙底） |
-| `ic_launcher_monochrome.svg` | Android 13+ 单色图标（取色后纯白） |
-| `wordmark-dark.svg` / `wordmark-light.svg` | 带字标的横版标识 |
-| `ic_launcher_{48,72,96,144,192,512}.png` | 渲染产物，供文档 / 安卓 / fnOS 用 |
+| `web/public/` | favicon.svg / favicon-16/32/192/512.png / apple-touch-icon.png / favicon.ico |
+| `ios/App/App/Assets.xcassets/AppIcon.appiconset/` | AppIcon-1024.png |
+| `android/app/src/main/res/` | adaptive（背景色 + vector 前景 + monochrome）+ 各密度 mipmap PNG |
+| `ios/…/Splash.imageset/`、`android/…/drawable*/splash.png` | 启动图：深色底 + 居中标记 |
+| `fn/` | ICON.PNG(64) / ICON_256.PNG(256) / app/ui/images/icon_*.png |
+| `docs/icon/`（本目录） | 母版 SVG + 渲染 PNG，供文档与外部使用 |
 
-母版大图在 `ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png`
-（iOS 商店要求 1024 无Alpha，因此它是唯一的大尺寸 PNG 母版；fnOS 的
-`fn/ICON.PNG` / `fn/ICON_256.PNG` 由它 LANCZOS 重采样生成）。
+原生工程里的 `ios/App/App/public/` 与 `android/app/src/main/assets/public/`
+是 web/public 的副本（`cap sync` 会刷新），favicon 已同步。
 
-> 这套文件原先只存在于旧仓 `suenmusic-server/docs/icon/`（从 `android-icon/`
-> 移入），本仓此前只有渲染产物。2026-10-20 复制进来，保证品牌资产自包含。
+## 应用内
+
+侧边栏与登录页的品牌锁定走 `components/brand/BrandLockup.vue` →
+`MarkBold`（bare 模式，不画底板，段 0 琥珀）+ `WordMark`。
+主题变量 `--mark-plate / --mark-frame / --mark-glyph / --mark-accent`
+定义在 `web/src/styles/tokens.css` 的两套主题里。
+
+## 历史
+
+- 2026-09-12 旧标「橙底音浪」定稿（LogoMark.vue / wordmark-*.svg）
+- 2026-10-17 哑光硬件重构，用户提供两版 S：MarkS（细线+蚀刻外框）、
+  MarkBold（实心折角）；16:46 确认段 0 染琥珀
+- 2026-10-20 确认采用 MarkBold，全端图标与启动图重生成

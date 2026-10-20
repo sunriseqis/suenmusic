@@ -102,6 +102,12 @@
 
   --scrim: rgba(20, 20, 20, 0.42);
   --track: #dcd6c9;
+
+  /* 品牌标记（MarkBold）：浅色下琥珀要压深才在纸底上可读 */
+  --mark-plate: #fffdf8;
+  --mark-frame: #d8d2c6;
+  --mark-glyph: #141414;
+  --mark-accent: #a85b0a;
 }
 
 /* -------- 深色：哑光石墨 -------- */
@@ -123,6 +129,12 @@
 
   --scrim: rgba(0, 0, 0, 0.66);
   --track: #2a2c30;
+
+  /* 品牌标记（MarkBold） */
+  --mark-plate: #17181b;
+  --mark-frame: #2a2c30;
+  --mark-glyph: #e9e7e2;
+  --mark-accent: #e8a33d;
 }
 
 /*

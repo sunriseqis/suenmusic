@@ -10,7 +10,7 @@
  * 面板内部保持"凸起面板 + 凸起文字"的同向关系（都是左上来光），
  * 视觉上才有厚度，而不是文字被压进面板里。
  */
-import LogoMark from './LogoMark.vue';
+import MarkBold from './MarkBold.vue';
 import WordMark from './WordMark.vue';
 import NeuSurface from '@/components/neu/NeuSurface.vue';
 
@@ -47,7 +47,8 @@ const dim = DIMS[props.size];
     class="lockup"
     :style="{ height: `${dim.height}px`, padding: `0 ${dim.padX}px`, gap: `${dim.gap}px` }"
   >
-    <LogoMark variant="glyph" :size="dim.mark" />
+    <!-- 实心折角 S：不要自带底板（lockup 已有一块整体铭牌），段 0 染琥珀 -->
+    <MarkBold :size="dim.mark" bare :accent-index="0" />
     <WordMark :height="dim.word" />
   </NeuSurface>
 
@@ -56,7 +57,7 @@ const dim = DIMS[props.size];
     class="lockup lockup-flat"
     :style="{ height: `${dim.height}px`, padding: `0 ${dim.padX}px`, gap: `${dim.gap}px` }"
   >
-    <LogoMark variant="glyph" :size="dim.mark" />
+    <MarkBold :size="dim.mark" bare :accent-index="0" />
     <WordMark :height="dim.word" />
   </div>
 </template>
