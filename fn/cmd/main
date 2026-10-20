@@ -67,7 +67,7 @@ start_process() {
 
     cd "${APP_DIR}/server" || exit 1
 
-    nohup "${NODE_BIN}" --disable-warning=ExperimentalWarning src/index.ts >> "${LOG_FILE}" 2>&1 &
+    nohup "${NODE_BIN}" --experimental-strip-types --disable-warning=ExperimentalWarning src/index.ts >> "${LOG_FILE}" 2>&1 &
     local new_pid=$!
 
     printf "%s" "$new_pid" > "${PID_FILE}"
