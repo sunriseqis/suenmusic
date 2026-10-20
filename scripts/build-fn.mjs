@@ -160,6 +160,16 @@ async function prepareNativeAppPayload() {
     run('npm', ['ci', '--omit=dev'], { cwd: appServer });
   }
 
+  // 删掉 .bin：里面全是 npm 生成的 CLI 软链，服务端运行时不依赖。
+  // ⚠️ 必须删：Node 的 fs.cp 会把 npm 的相对软链改写成构建机绝对路径，
+  // fnpack 打包时又只保留目标 basename → app.tgz 里变成自引用死链；
+  // fnOS 安装时遍历赋权 stat 到死链直接失败，界面报「设置目录权限失败」。
+  const pkgBinDir = join(appServer, 'node_modules', '.bin');
+  if (existsSync(pkgBinDir)) {
+    await rm(pkgBinDir, { recursive: true, force: true });
+    log('已移除 node_modules/.bin（CLI 软链进 fpk 会变死链）');
+  }
+
   // 3. 严格规范套件所有目录与文件权限（杜绝 700/600 导致非 root 用户或 fnOS 应用中心报权限出错）
   log('规范套件文件与目录权限 (目录 755 / 文件 644 / 脚本 755)...');
   run('find', [FN_DIR, '-type', 'd', '-exec', 'chmod', '755', '{}', '+']);
@@ -203,8 +213,18 @@ async function ensureFnpack() {
   return localBin;
 }
 
+async function assertNoSymlinks() {
+  // fpk 内的软链会被 fnpack 改写成死链，fnOS 安装必报「设置目录权限失败」。
+  // 打包前硬校验：有软链就直接失败，不带着隐患出包。
+  const links = output('find', [FN_DIR, '-type', 'l']).trim();
+  if (links) {
+    fail(`fn/ 下不允许存在软链（打进 fpk 会变死链，安装必失败）：\n${links}`);
+  }
+}
+
 async function assembleFpk(fnpackBin, semver) {
   log('6/6 执行 fnpack build 打包原生套件...');
+  await assertNoSymlinks();
   await mkdir(OUTPUT_DIR, { recursive: true });
 
   const staleAppTgz = join(FN_DIR, 'app.tgz');
