@@ -1,17 +1,18 @@
 <script setup lang="ts">
 /**
- * 字标（2026-09-12 定稿）：统一笔宽的圆头笔画「SuenMusic」。
+ * 字标（2026-10-20 重画）：折角钣金「SuenMusic」，与 MarkBold 同一语言。
  *
- * 为什么不用字体：整套品牌里 LOGO 是粗圆头线条，用普通字体的文字配不上它；
- * 而自绘**细**单线字标试过一版、字形不达标。最终走中间路线 ——
- * 保留与图标音浪完全一致的线条语言（统一笔宽 + round cap），字形用几何构造
- * （圆弧/折线），笔画够粗，细节瑕疵在这种风格里不显眼。
+ * 与旧版（2026-09-12 圆头描边）的区别：
+ *   · 实心笔画 —— 每条骨架线由 stroker 生成多边形，不再是 stroke
+ *   · 端头 45° 切角、转角尖接，全部直线段，没有圆弧
+ * 这样它和侧边栏那枚实心折角 S 是同一套钣金语言。
  *
  * 拟物处理：不描边不渐变，靠 CSS 的双向 drop-shadow 做「凸起」——
  * 亮侧用 --sl（左上来光）、暗侧用 --sd，与全站拟物语言同一套 token，
  * 因此浅/深色主题自动成立，不需要第二份素材。
  *
- * 源文件与参数在 web/scripts/gen-wordmark.py（改字形后重跑生成）。
+ * 源文件与参数在 web/scripts/gen-wordmark-angular.py（改字形后重跑
+ * write-wordmark-assets.py 生成本文件与 docs/icon 资产）。
  */
 withDefaults(defineProps<{ height?: number }>(), { height: 22 });
 </script>
@@ -20,25 +21,23 @@ withDefaults(defineProps<{ height?: number }>(), { height: 22 });
   <svg
     class="wordmark"
     :height="height"
-    :width="Math.round(height * 4.258)"
-    viewBox="-8.0 -8.0 255.5 60.0"
+    :width="Math.round(height * 4.283)"
+    viewBox="-8.0 -8.0 257.0 60.0"
     role="img"
     aria-label="SuenMusic"
   >
-    <g fill="none" stroke="currentColor" stroke-width="8.0"
-       stroke-linecap="round" stroke-linejoin="round">
-      <path transform="translate(0.00 0)" d="M 20 10.5 C 20 6.5 16.5 4 11.5 4 C 6.5 4 3 7 3 11 C 3 15 6.5 17 11.5 18.5 C 16.5 20 20 22.5 20 26.5 C 20 30.5 16.5 36 11.5 36 C 6.5 36 3 33 3 29" />
-      <path transform="translate(30.00 0)" d="M 4 18 V 27.5 A 6.5 6.5 0 0 0 17 27.5 V 18" />
-      <path transform="translate(58.00 0)" d="M 2 26 H 20 A 9 9 0 1 0 16.8 32.9" />
-      <path transform="translate(87.00 0)" d="M 4 36 V 18 M 4 25 A 6.5 6.5 0 0 1 17 25 V 36" />
-      <path transform="translate(115.00 0)" d="M 4.5 36 V 9.5 L 15 26 L 25.5 9.5 V 36" />
-      <path transform="translate(152.00 0)" d="M 4 18 V 27.5 A 6.5 6.5 0 0 0 17 27.5 V 18" />
-      <path transform="translate(180.00 0)" d="M 17 21.5 C 17 18.5 14 16.8 9.8 16.8 C 5.8 16.8 3 18.9 3 21.8 C 3 24.6 5.9 25.9 9.8 26.9 C 13.7 27.9 17 29.3 17 31.9 C 17 34.8 14.2 36.8 9.8 36.8 C 5.9 36.8 3 35.1 3 32.2" />
-      <path transform="translate(207.00 0)" d="M 2.25 18 V 36" />
-      <path transform="translate(218.50 0)" d="M 18 21.5 A 7.5 7.5 0 1 0 18 30.5" />
-    </g>
     <g fill="currentColor">
-      <circle cx="209.25" cy="6.80" r="4.0" />
+      <path transform="translate(0.00 0)" d="M -2.00 12.00 L 6.00 4.00 L 22.00 4.00 L 22.00 21.66 L 11.66 32.00 L 18.00 32.00 L 22.00 32.00 L 14.00 40.00 L -7.66 40.00 L 14.00 18.34 L 14.00 12.00 L 2.00 12.00 Z"/>
+      <path transform="translate(29.00 0)" d="M 0.00 14.00 L 8.00 22.00 L 8.00 32.00 L 13.00 32.00 L 13.00 18.00 L 13.00 14.00 L 21.00 22.00 L 21.00 40.00 L 0.00 40.00 L 0.00 18.00 Z"/>
+      <path transform="translate(57.00 0)" d="M 15.00 29.00 L 7.00 37.00 L 0.00 37.00 L 0.00 17.00 L 22.00 17.00 L 22.00 33.00 L 22.00 37.00 L 14.00 29.00 L 14.00 25.00 L 8.00 25.00 L 8.00 29.00 L 11.00 29.00 Z"/>
+      <path transform="translate(57.00 0)" d="M -4.00 31.00 L 4.00 23.00 L 22.00 23.00 L 26.00 23.00 L 18.00 31.00 L 0.00 31.00 Z"/>
+      <path transform="translate(88.00 0)" d="M 8.00 40.00 L 0.00 32.00 L 0.00 14.00 L 21.00 14.00 L 21.00 36.00 L 21.00 40.00 L 13.00 32.00 L 13.00 22.00 L 8.00 22.00 L 8.00 36.00 Z"/>
+      <path transform="translate(116.00 0)" d="M 8.50 40.00 L 0.50 32.00 L 0.50 8.00 L 7.84 5.81 L 15.00 16.71 L 22.16 5.81 L 29.50 8.00 L 29.50 36.00 L 29.50 40.00 L 21.50 32.00 L 21.50 8.00 L 28.84 10.19 L 15.00 31.29 L 1.16 10.19 L 8.50 8.00 L 8.50 36.00 Z"/>
+      <path transform="translate(153.00 0)" d="M 0.00 14.00 L 8.00 22.00 L 8.00 32.00 L 13.00 32.00 L 13.00 18.00 L 13.00 14.00 L 21.00 22.00 L 21.00 40.00 L 0.00 40.00 L 0.00 18.00 Z"/>
+      <path transform="translate(181.00 0)" d="M -1.00 23.00 L 7.00 15.00 L 21.00 15.00 L 21.00 26.87 L 16.05 31.00 L 17.00 31.00 L 21.00 31.00 L 13.00 39.00 L -6.05 39.00 L 13.00 23.13 L 13.00 23.00 L 3.00 23.00 Z"/>
+      <path transform="translate(208.00 0)" d="M -1.50 14.00 L 6.50 22.00 L 6.50 36.00 L 6.50 40.00 L -1.50 32.00 L -1.50 18.00 Z"/>
+      <path transform="translate(220.00 0)" d="M 21.00 15.00 L 13.00 23.00 L 7.00 23.00 L 7.00 31.00 L 17.00 31.00 L 21.00 31.00 L 13.00 39.00 L -1.00 39.00 L -1.00 15.00 L 17.00 15.00 Z"/>
+      <path transform="translate(210.50 10.00)" d="M -2.75 -2.75 L 2.75 -2.75 L 2.75 2.75 L -2.75 2.75 Z"/>
     </g>
   </svg>
 </template>
