@@ -12,16 +12,6 @@
                         "suenmusic"
                     ]
                 }
-            },
-            {
-                "name": "suenmusic/data",
-                "permission":
-                {
-                    "rw":
-                    [
-                        "suenmusic"
-                    ]
-                }
             }
         ]
     }

@@ -21,6 +21,9 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// 强制统一使用标准 022 umask，确保打包生成的套件文件与目录具备跨用户可读/可执行权限（避免 077 导致 fnOS 报权限出错）
+process.umask(0o022);
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const FN_DIR = join(ROOT, 'fn');
 const APP_DIR = join(FN_DIR, 'app');
@@ -157,9 +160,20 @@ async function prepareNativeAppPayload() {
     run('npm', ['ci', '--omit=dev'], { cwd: appServer });
   }
 
+  // 3. 严格规范套件所有目录与文件权限（杜绝 700/600 导致非 root 用户或 fnOS 应用中心报权限出错）
+  log('规范套件文件与目录权限 (目录 755 / 文件 644 / 脚本 755)...');
+  run('find', [FN_DIR, '-type', 'd', '-exec', 'chmod', '755', '{}', '+']);
+  run('find', [FN_DIR, '-type', 'f', '-exec', 'chmod', '644', '{}', '+']);
+
   // 确保 cmd 脚本可执行
   const cmdDir = join(FN_DIR, 'cmd');
   run('chmod', ['+x', ...['main', 'install_init', 'install_callback', 'uninstall_init', 'uninstall_callback', 'upgrade_init', 'upgrade_callback', 'config_init', 'config_callback'].map(f => join(cmdDir, f))]);
+
+  // 确保 Node.js 运行时二进制可执行
+  const appBinNode = join(APP_DIR, 'bin/node');
+  if (existsSync(appBinNode)) {
+    await chmod(appBinNode, 0o755);
+  }
 }
 
 async function ensureFnpack() {
@@ -193,6 +207,11 @@ async function assembleFpk(fnpackBin, semver) {
   log('6/6 执行 fnpack build 打包原生套件...');
   await mkdir(OUTPUT_DIR, { recursive: true });
 
+  const staleAppTgz = join(FN_DIR, 'app.tgz');
+  if (existsSync(staleAppTgz)) {
+    await unlink(staleAppTgz);
+  }
+
   const rawTarget = join(FN_DIR, 'suenmusic.fpk');
   if (existsSync(rawTarget)) {
     await unlink(rawTarget);
@@ -208,6 +227,7 @@ async function assembleFpk(fnpackBin, semver) {
   const finalName = `suenmusic-v${semver}.fpk`;
   const finalPath = join(OUTPUT_DIR, finalName);
   await rename(rawTarget, finalPath);
+  await chmod(finalPath, 0o644);
 
   const fileStat = await stat(finalPath);
   const sizeMb = (fileStat.size / (1024 * 1024)).toFixed(2);
