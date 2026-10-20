@@ -31,8 +31,8 @@ const props = withDefaults(
 /** 两档尺寸：md 给侧边栏，lg 给登录页（登录页要撑起整张卡片的分量） */
 const DIMS = {
   // md 给侧边栏：高度与导航项一致（46），字形略大以撑住同宽面板
-  md: { height: 46, padX: 14, gap: 10, mark: 24, word: 22 },
-  lg: { height: 58, padX: 18, gap: 13, mark: 27, word: 24 },
+  md: { height: 46, padX: 14, gap: 10, mark: 24, word: 18 },
+  lg: { height: 58, padX: 18, gap: 13, mark: 27, word: 21 },
 } as const;
 
 const dim = DIMS[props.size];
@@ -49,7 +49,7 @@ const dim = DIMS[props.size];
   >
     <!-- 实心折角 S：不要自带底板（lockup 已有一块整体铭牌），段 0 染琥珀 -->
     <MarkBold :size="dim.mark" bare :accent-index="0" />
-    <WordMark :height="dim.word" />
+    <WordMark :size="dim.word" />
   </NeuSurface>
 
   <div
@@ -58,7 +58,7 @@ const dim = DIMS[props.size];
     :style="{ height: `${dim.height}px`, padding: `0 ${dim.padX}px`, gap: `${dim.gap}px` }"
   >
     <MarkBold :size="dim.mark" bare :accent-index="0" />
-    <WordMark :height="dim.word" />
+    <WordMark :size="dim.word" />
   </div>
 </template>
 
