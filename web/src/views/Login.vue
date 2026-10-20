@@ -2,20 +2,23 @@
 /**
  * 登录 / 首次创建管理员。
  *
- * Web 与后端同源，没有服务端地址可填；首次打开且库里没有用户时，
- * 这里直接变成「创建管理员」，创建完自动登录。
+ * Web 与后端同源，不展示服务端地址；原生端（iOS / Android / 鸿蒙）提供服务端地址配置。
+ * 首次打开且库里没有用户时，这里直接变成「创建管理员」，创建完自动登录。
  */
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
-import { ApiError } from '@/api/client.ts';
+import { ApiError, isWebPlatform } from '@/api/client.ts';
 import { useSessionStore } from '@/stores/session.ts';
+import { useUiStore } from '@/stores/ui.ts';
 
 const session = useSessionStore();
+const ui = useUiStore();
 const route = useRoute();
 const router = useRouter();
 
+const serverAddr = ref(ui.baseUrl);
 const username = ref('');
 const password = ref('');
 const displayName = ref('');
@@ -28,6 +31,15 @@ const showRegister = computed(() => setupMode.value || registerMode.value);
 
 const title = computed(() => (setupMode.value ? '创建管理员' : showRegister.value ? '注册' : '登录'));
 
+async function onServerAddrChange(): Promise<void> {
+  if (isWebPlatform) return;
+  const addr = serverAddr.value.trim().replace(/\/+$/, '');
+  if (addr && addr !== ui.baseUrl) {
+    ui.setBaseUrl(addr);
+    await session.loadAuthConfig();
+  }
+}
+
 function done(): void {
   const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/';
   void router.replace(redirect);
@@ -35,6 +47,18 @@ function done(): void {
 
 async function submit(): Promise<void> {
   errorText.value = '';
+  if (!isWebPlatform) {
+    const addr = serverAddr.value.trim().replace(/\/+$/, '');
+    if (!addr) {
+      errorText.value = '请填写服务端地址';
+      return;
+    }
+    if (addr !== ui.baseUrl) {
+      ui.setBaseUrl(addr);
+      await session.loadAuthConfig();
+    }
+  }
+
   const u = username.value.trim();
   if (!u) {
     errorText.value = '请填写用户名';
@@ -62,6 +86,16 @@ async function submit(): Promise<void> {
     <div class="card">
       <h1 class="title">{{ title }}</h1>
       <p v-if="setupMode" class="sub neu-t2">库里还没有账号，第一个账号会成为管理员。</p>
+
+      <div v-if="!isWebPlatform" class="field">
+        <span class="k">服务端地址</span>
+        <NeuInput
+          v-model="serverAddr"
+          placeholder="http://192.168.1.100:5274"
+          autocomplete="url"
+          @blur="onServerAddrChange"
+        />
+      </div>
 
       <div class="field">
         <span class="k">用户名</span>

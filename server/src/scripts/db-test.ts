@@ -146,7 +146,7 @@ function main(): number {
   section('[2/8] 账号');
   const alice = users.createUser({ username: 'alice', password: 'secret-pass-1' });
   check('创建用户返回 id', alice.id > 0);
-  eq('对外信息不含口令字段', Object.keys(alice).sort(), ['createdAt', 'displayName', 'id', 'username']);
+  eq('对外信息不含口令字段', Object.keys(alice).sort(), ['createdAt', 'displayName', 'id', 'role', 'username']);
   throws(
     '重复用户名被拒绝',
     () => users.createUser({ username: 'alice', password: 'secret-pass-x' }),

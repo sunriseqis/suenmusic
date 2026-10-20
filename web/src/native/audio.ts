@@ -98,11 +98,6 @@ export interface NativeQueue {
    * 装载它 —— 否则每次切模式都要重新缓冲，用户听到"卡一下"。
    */
   tailOnly?: boolean;
-  /**
-   * 整队走客户端直连：不需要 baseUrl / token。
-   * 直连地址在播放那一刻逐首登记（`setDirectUrl`），入队时通常还没有。
-   */
-  direct?: boolean;
 }
 
 export interface NativeProgress {
@@ -121,14 +116,6 @@ export interface NativeTrackChange {
 
 export interface SuenAudioPlugin {
   setQueue(o: NativeQueue): Promise<void>;
-  /**
-   * 登记某首曲目的**直连地址**（客户端自己解析出的上游 URL）。
-   *
-   * 原生播放器的地址是它按 trackId 取的，`<audio>.src` 只是用来识别曲目 —
-   * 不登记的话原生仍会去拼 `<baseUrl>/api/stream/<id>`，没配服务器时就是空串。
-   * 传空串表示清除（回到服务端代理路径）。
-   */
-  setDirectUrl(o: { id: string; url: string }): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
   seek(o: { positionMs: number }): Promise<void>;

@@ -1,7 +1,5 @@
 /**
  * 音源凭据：服务端下发，客户端持久化。
- *
- * cookie 是全局一份；客户端只在直连模式下带上它。
  */
 import { http } from './client.ts';
 
@@ -36,15 +34,6 @@ export function clearCachedCredentials(): void {
   } catch {
     /* 隐私模式 */
   }
-}
-
-/** 直连请求用：按目标域名取对应的 cookie，没有就返回空串 */
-export function sourceCookieForUrl(url: string): string {
-  const c = readCachedCredentials();
-  if (!c) return '';
-  if (/(^|\.)bilibili\.com\//.test(url)) return c.bilibili;
-  if (/(^|\.)163\.com\//.test(url) || url.includes('music.163.com')) return c.netease;
-  return '';
 }
 
 /**

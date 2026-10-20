@@ -19,8 +19,8 @@
 #
 set -euo pipefail
 
-# xcframework 版本必须与 **suenmusic-server 仓库**（同级） web/package.json 里的
-# @capacitor/* 版本一致。升级 Capacitor 时两个仓库要一起改。
+# xcframework 版本必须与**本仓** web/package.json 里的 @capacitor/* 版本一致。
+# 升级 Capacitor 时两边要一起改（单仓布局，2026-10-16 起不再拆仓库）。
 CAP_VERSION="8.5.2"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

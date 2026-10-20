@@ -26,16 +26,6 @@ public final class SuenAudio {
   private static volatile String baseUrl;
   private static volatile String sessionToken;
 
-  /**
-   * 直连模式：曲目 id → 外部音源地址（B站 CDN 等）。
-   *
-   * 为什么需要它：不配服务端时没有 `/api/stream/<id>` 这个代理，
-   * 客户端要自己解析出上游地址直接播。有这个映射，`streamUrlFor` 就优先返回它，
-   * 既有的"服务端代理"路径完全不受影响（映射为空时行为与从前一致）。
-   */
-  private static final java.util.concurrent.ConcurrentHashMap<String, String> directUrls =
-      new java.util.concurrent.ConcurrentHashMap<>();
-
   private SuenAudio() {}
 
   public static void setStreamSession(String base, String token) {
@@ -43,23 +33,13 @@ public final class SuenAudio {
     sessionToken = token;
   }
 
-  /** 登记一条直连地址（曲目 id → 可播放 URL） */
-  public static void setDirectUrl(String trackId, String url) {
-    if (trackId == null || trackId.isEmpty()) return;
-    if (url == null || url.isEmpty()) {
-      directUrls.remove(trackId);
-    } else {
-      directUrls.put(trackId, url);
-    }
-  }
+  /** 兼容旧接口桩函数（服务端单一真相源下不再使用客户端直连） */
+  public static void setDirectUrl(String trackId, String url) {}
 
-  public static void clearDirectUrls() {
-    directUrls.clear();
-  }
+  public static void clearDirectUrls() {}
 
   public static boolean hasDirectUrl(String trackId) {
-    String u = trackId == null ? null : directUrls.get(trackId);
-    return u != null && !u.isEmpty();
+    return false;
   }
 
   public static String getBaseUrl() {
@@ -72,19 +52,15 @@ public final class SuenAudio {
 
   /** 组装带会话令牌的代理流地址：`<base>/api/stream/<id>?t=<token>`（防御双斜杠） */
   public static String streamUrlFor(String trackId) {
-    // 直连优先：登记过就直接用上游地址，不经过服务端
-    String direct = trackId == null ? null : directUrls.get(trackId);
-    if (direct != null && !direct.isEmpty()) return direct;
-
     String raw = getBaseUrl();
-    if (raw == null || raw.isEmpty()) return "";
+    if (raw == null || raw.trim().isEmpty()) return "";
     while (raw.endsWith("/")) {
       raw = raw.substring(0, raw.length() - 1);
     }
     String token = getSessionToken();
     String encId = Uri.encode(trackId);
-    if (token != null && !token.isEmpty()) {
-      return raw + "/api/stream/" + encId + "?t=" + Uri.encode(token);
+    if (token != null && !token.trim().isEmpty()) {
+      return raw + "/api/stream/" + encId + "?t=" + Uri.encode(token.trim());
     }
     return raw + "/api/stream/" + encId;
   }

@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { hasBackend, isWebPlatform } from '@/api/client.ts';
 import type { RouteRecordRaw } from 'vue-router';
 import { useSessionStore } from '@/stores/session.ts';
 
@@ -47,18 +46,6 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Settings.vue'),
   },
   {
-    /**
-     * 无后端直连诊断页。
-     *
-     * 必须 meta.public —— 它的整个用途就是"没有服务端、也没登录"时能不能用。
-     * 走登录守卫的话它永远打不开，等于自证不了。
-     */
-    path: '/probe',
-    name: 'probe',
-    component: () => import('@/views/DirectProbe.vue'),
-    meta: { public: true },
-  },
-  {
     // 兜底：不认识的地址回首页，而不是白屏
     path: '/:pathMatch(.*)*',
     redirect: '/',
@@ -77,18 +64,12 @@ export const router = createRouter({
 });
 
 /**
- * 路由守卫。
+ * 全端统一路由守卫。
  *
- * **直连架构下这里不再拦人。**
- *
- * 旧逻辑是"未登录 → 一律踢到 /login"，前提是"服务端是唯一的数据源"。
- * 现在收藏/历史/不喜欢都在本机，搜索和播放走客户端直连上游，
- * 登录只是一个**可选增强**（多端同步、AI、高音质凭据）。
- * 继续拦的话，装完 app 第一眼就是登录页 —— 既违背"开箱即用"，
- * 也会让应用商店审核看到"必须先有服务器才能用"。
- *
- * 仍然保留 `bootstrap()` 的等待：刷新页面时它还是 false，而静默续期是异步的。
- * 不等的话，已登录用户一刷新会先闪一下"未登录"的界面。
+ * 服务端单一真相源架构：所有平台（Web、iOS、Android、鸿蒙）数据与流均依赖服务端。
+ * 1. 启动必须等 bootstrap() 完成（离线弱网下由 refreshSession/restoreCachedUser 恢复登录态）；
+ * 2. 公开页面（如 /login）直接放行；若已登录还进 /login 则回首页；
+ * 3. 未登录一律拦截去 /login，带上 redirect 方便登录后回跳。
  */
 router.beforeEach(async to => {
   const session = useSessionStore();
@@ -97,19 +78,17 @@ router.beforeEach(async to => {
     await session.bootstrap();
   }
 
-  // 直连模式没有「专属」：地址栏直达也送回首页，避免一个必然失败的页面
-  if (to.name === 'daily' && !hasBackend()) {
-    return { name: 'home' };
+  // 公开页放行
+  if (to.meta.public) {
+    if (to.name === 'login' && session.isLoggedIn) {
+      return { name: 'home' };
+    }
+    return true;
   }
 
-  // Web 是后端的一部分，必须有登录守卫；原生壳保留"没配服务端也能用"
-  if (isWebPlatform) {
-    if (to.name === 'login') {
-      return session.isLoggedIn ? { name: 'home' } : true;
-    }
-    if (!session.isLoggedIn) {
-      return { name: 'login', query: { redirect: to.fullPath } };
-    }
+  // 未登录全端拦截（Web / Android / iOS / 鸿蒙统一）
+  if (!session.isLoggedIn) {
+    return { name: 'login', query: { redirect: to.fullPath } };
   }
 
   return true;

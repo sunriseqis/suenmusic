@@ -27,7 +27,7 @@ import { installBackBridge } from './native/back.ts';
 import { onAuthLost } from './api/client.ts';
 import { onNetworkEnvironmentChanged, selectBestServer } from './api/servers.ts';
 import { useSessionStore } from './stores/session.ts';
-import { usePlayerStore } from './stores/player.ts';
+import { usePlayerStore, registerGlobalAudioControl } from './stores/player.ts';
 import { useFavoritesStore } from './stores/favorites.ts';
 import { useUiStore } from './stores/ui.ts';
 import { useLyricsStore } from './stores/lyrics.ts';
@@ -37,6 +37,8 @@ const pinia = createPinia();
 
 app.use(pinia);
 app.use(router);
+
+registerGlobalAudioControl();
 
 const ui = useUiStore();
 const session = useSessionStore();

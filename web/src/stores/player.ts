@@ -30,10 +30,7 @@ import {
 import { SuenAudio } from '@/native/audio.ts';
 import { getBaseUrl } from '@/api/client.ts';
 import { useUiStore } from '@/stores/ui.ts';
-import { getProgress, recordPlay, saveProgress } from '@/offline/localdb.ts';
-import { serverReady } from '@/offline/syncMode.ts';
-import { resolveDirect, clearDirectCache } from '@/api/direct/resolve.ts';
-import { probeAudio } from '@/api/direct/upstream.ts';
+import { useFavoritesStore } from '@/stores/favorites.ts';
 import type { Track } from '@/api/types.ts';
 import { coverUrl, artistNames } from '@/utils/format.ts';
 
@@ -43,6 +40,7 @@ declare global {
       updateMediaMetadata(metaJson: string): void;
       updatePlaybackState(stateJson: string): void;
       updateLyric?(lyricJson: string): void;
+      updateFavorite?(favJson: string): void;
       getAppVersion?(): string;
       openInBrowser?(url: string): boolean;
       isNativePlatform?(): boolean;
@@ -52,6 +50,8 @@ declare global {
       play: () => void;
       pause: () => void;
       stop?: () => void;
+      toggle?: () => void;
+      toggleFavorite?: () => Promise<boolean>;
       next: () => void;
       prev: () => void;
       seek: (targetMs: number) => void;
@@ -275,8 +275,6 @@ export const usePlayerStore = defineStore('player', () => {
 
   let reportTimer: number | null = null;
   let lastReportedMs = 0;
-  /** 最近一次已写入历史记录的曲目 id。避免每 15 秒重写同一条 */
-  let historyTrackId = '';
 
   /**
    * 把"待恢复的位置"落到 audio 上。
@@ -513,7 +511,7 @@ export const usePlayerStore = defineStore('player', () => {
         const t = Date.now();
         if (t - lastLocalPosSave >= 3_000) {
           lastLocalPosSave = t;
-          void saveProgress(cur.id, positionMs.value);
+          saveSession();
         }
       }
 
@@ -533,8 +531,6 @@ export const usePlayerStore = defineStore('player', () => {
     const flushLocal = (): void => {
       if (document.visibilityState !== 'hidden') return;
       saveSession();
-      const cur = currentTrack.value;
-      if (cur) void saveProgress(cur.id, positionMs.value);
       void reportProgress(true);
     };
     document.addEventListener('visibilitychange', flushLocal);
@@ -623,17 +619,10 @@ export const usePlayerStore = defineStore('player', () => {
    * 于是可以在真正播放之前就重新解析，用户不会听到一段静默。
    */
   async function probeStream(
-    url: string,
-    direct = false
+    url: string
   ): Promise<{ ok: boolean; status: number; durationMs: number | null }> {
-    // 直连地址在其它源上，普通 fetch 会被 CORS 拦（判成"链接坏了"）。
-    // 原生环境用 CapacitorHttp 探，能带 Referer。
-    if (direct) {
-      const r = await probeAudio(url);
-      return { ok: r.ok, status: r.status, durationMs: null };
-    }
-
     const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
     try {
       const res = await fetch(url, {
         headers: { Range: 'bytes=0-0' },
@@ -660,6 +649,7 @@ export const usePlayerStore = defineStore('player', () => {
     } catch {
       return { ok: false, status: 0, durationMs: null };
     } finally {
+      clearTimeout(timer);
       controller.abort();
     }
   }
@@ -673,34 +663,6 @@ export const usePlayerStore = defineStore('player', () => {
    *   只有恢复上次会话才该为 true，见文件头第 4 条
    */
   let loadSequence = 0;
-
-  /**
-   * 解析播放地址：**服务端优先，直连兜底**。
-   *
-   * 有服务端时它的缓存是全局的（一份解析服务所有设备），命中率高、请求上游少，
-   * 所以正常情况走它。但服务端不可达时不能就此判死 —— 客户端自己也能解析
-   * （真机已验证），这正是"后端不在关键路径上"的落点。
-   *
-   * 唯一的例外是 `rateLimited`：服务端说上游正在限流，此时绕过它自己去打上游
-   * 只会让限流更久，所以直接按失败返回。
-   */
-  async function resolveForPlayback(
-    track: Track,
-    force: boolean,
-    retry: boolean
-  ): Promise<{ result: Awaited<ReturnType<typeof playbackApi.resolveStreamUrl>>['result']; url: string | null; direct: boolean }> {
-    if (serverReady()) {
-      try {
-        const r = await playbackApi.resolveStreamUrl(track.id, force, retry);
-        if (r.url) return { ...r, direct: false };
-        if (r.result.rateLimited) return { ...r, direct: false };
-      } catch {
-        /* 服务端不可达 → 落到直连 */
-      }
-    }
-    const d = await resolveDirect(track);
-    return { ...d, direct: true };
-  }
 
   async function load(
     track: Track,
@@ -749,7 +711,11 @@ export const usePlayerStore = defineStore('player', () => {
     try {
       // 这一首上次装载失败过 → 让服务端无视那条"缓存的失败"，否则重试等于白试
       const isRetry = lastFailedTrackId === track.id;
-      const { result, url, direct } = await resolveForPlayback(track, opts.force === true, isRetry);
+      const { result, url } = await playbackApi.resolveStreamUrl(
+        track.id,
+        opts.force === true,
+        isRetry
+      );
       if (seq !== loadSequence) return false;
 
       // 服务端回源补全的完整元数据：队列里的曲目可能来自字段不全的搜索召回行
@@ -811,16 +777,7 @@ export const usePlayerStore = defineStore('player', () => {
         return advanced;
       }
 
-      /**
-       * 原生播放器的地址是它自己按 trackId 取的（`streamUrlFor`），`el.src` 只是
-       * 用来识别曲目。所以直连解析出来的地址必须**登记到原生侧**，否则原生仍然
-       * 会去拼 `<baseUrl>/api/stream/<id>` —— 没配服务器时就是空地址。
-       */
-      if (isNativeAudio) {
-        await SuenAudio.setDirectUrl({ id: track.id, url: direct ? url : '' }).catch(() => {});
-      }
-
-      const probe = await probeStream(url, direct);
+      const probe = await probeStream(url);
       if (seq !== loadSequence) return false;
       if (!probe.ok) {
         lastFailedTrackId = track.id;
@@ -855,28 +812,6 @@ export const usePlayerStore = defineStore('player', () => {
 
       el.src = url;
       el.load();
-
-      /**
-       * 直连模式下，原生队列条目的 URI 是在 `setQueue` 那一刻组装的
-       * （`onAddMediaItems` 里调 `streamUrlFor`），而直连地址要等解析完才有 ——
-       * 入队时那一条是空串，ExoPlayer 一 prepare 就报 "Source error"。
-       * 所以必须让原生**重建这一条**。
-       *
-       * ⚠️ 顺序很关键：必须放在 `el.load()` **之后**。
-       * `el.load()` 会触发桥的 `seekToIndex({force:true})` → `seekTo(index, 0)`；
-       * 先 reload 再 load 的话，刚恢复的位置会被这一下 seek 归零
-       * （真机表现：续播位置又变成 0）。
-       */
-      if (isNativeAudio && direct) {
-        const qIndex = queue.value.findIndex(t => t.id === track.id);
-        if (qIndex >= 0) {
-          await SuenAudio.reloadCurrent({
-            index: qIndex,
-            positionMs: opts.keepPositionMs ?? positionMs.value,
-            autoplay: false,
-          }).catch(() => {});
-        }
-      }
 
       lastFailedTrackId = null;
       return true;
@@ -942,7 +877,6 @@ export const usePlayerStore = defineStore('player', () => {
       positionMs.value = 0;
     }
     lastReportedMs = 0;
-    historyTrackId = '';
   }
 
   /**
@@ -1006,29 +940,16 @@ export const usePlayerStore = defineStore('player', () => {
    * 太靠前或太靠后的位置都不续播。
    */
   async function fetchResumePosition(trackId: string, totalMs: number): Promise<number | null> {
-    let playedMs: number | null = null;
-
-    // 本地优先：续播位置是本机数据，断网也必须能接上
-    const local = await getProgress(trackId);
-    if (local && Number.isFinite(local.playedMs)) playedMs = local.playedMs;
-
-    // 本地没有、且确实配了服务端时才问 —— 没配服务器时那个请求只会打到静态服务器上
-    if (playedMs === null && serverReady()) {
-      try {
-        const p = await playbackApi.fetchProgress(trackId);
-        if (p && Number.isFinite(p.playedMs)) playedMs = p.playedMs;
-      } catch (e) {
-        // 404 = 没有记录，不是错误
-        if (!(e instanceof ApiError && e.status === 404)) {
-          /* 其他失败也当没有记录，续播不是关键路径 */
-        }
-      }
+    try {
+      const p = await playbackApi.fetchProgress(trackId);
+      if (!p || !Number.isFinite(p.playedMs)) return null;
+      if (p.playedMs < RESUME_MIN_MS) return null;
+      if (totalMs > 0 && p.playedMs > totalMs - RESUME_TAIL_GUARD_MS) return null;
+      return p.playedMs;
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) return null;
+      return null;
     }
-
-    if (playedMs === null) return null;
-    if (playedMs < RESUME_MIN_MS) return null;
-    if (totalMs > 0 && playedMs > totalMs - RESUME_TAIL_GUARD_MS) return null;
-    return playedMs;
   }
 
   // -------------------------------------------------------------------------
@@ -1110,24 +1031,6 @@ export const usePlayerStore = defineStore('player', () => {
     if (!force && Math.abs(ms - lastReportedMs) < 3_000) return;
     lastReportedMs = ms;
 
-    // 本地先写：这是主存储。断网、没配服务器都照常记
-    void saveProgress(track.id, ms);
-
-    // 历史的写入频率要低一档：每首歌只在第一次上报 + 播完时落一条，
-    // 否则每 15 秒重写一次整条记录，没有意义还费 IO
-    if (historyTrackId !== track.id || completed) {
-      historyTrackId = track.id;
-      void recordPlay({
-        trackId: track.id,
-        track,
-        playedAt: Date.now(),
-        playedMs: ms,
-        completed,
-      });
-    }
-
-    // 服务端那份是备份（配了服务器且已登录才有）
-    if (!serverReady()) return;
     try {
       await playbackApi.reportPlay({
         trackId: track.id,
@@ -1886,8 +1789,6 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     retriedForCurrent = false;
-    // 直连模式的解析缓存也要清：否则锚定完拿到的还是旧音源的地址
-    clearDirectCache(track.id);
     // 强制回源解析，且禁止跳下一首（noSkip: true）以确保用户能感知当前曲目的真实结果
     const ok = await load(track, { force: true, noSkip: true });
     if (!ok) return;
@@ -2130,3 +2031,46 @@ export const usePlayerStore = defineStore('player', () => {
     currentStreamPath: () => currentStreamUrlRaw,
   };
 });
+
+/**
+ * 把 `window.__suenAudioControl` 注册成**始终存在**的全局控制面。
+ *
+ * 供鸿蒙原生（AVSession 锁屏控制、桌面卡片按钮）反向控制网页播放器。
+ * 必须在 main.ts 启动时调用一次：音频元素要等第一次播放才创建（ensureAudio），
+ * 若注册挂在那之后，"恢复会话但还没播过"的冷启动窗口里原生按播放是空操作。
+ * 这里全部走 store 公开 API，store 内部自己处理 ensureAudio / startCurrent。
+ */
+export function registerGlobalAudioControl(): void {
+  if (typeof window === 'undefined' || window.__suenAudioControl) return;
+
+  window.__suenAudioControl = {
+    play: () => {
+      const p = usePlayerStore();
+      if (!p.playing) void p.toggle();
+    },
+    pause: () => {
+      const p = usePlayerStore();
+      if (p.playing) void p.toggle();
+    },
+    stop: () => {
+      const p = usePlayerStore();
+      if (p.playing) void p.toggle();
+    },
+    /**
+     * 桌面卡片播放键用它：进程被杀后卡片快照可能残留播放态，
+     * play/pause 二选一会判错方向，toggle 两种情况都正确。
+     */
+    toggle: () => {
+      void usePlayerStore().toggle();
+    },
+    next: () => void usePlayerStore().next(),
+    prev: () => void usePlayerStore().prev(),
+    seek: (targetMs: number) => void usePlayerStore().seek(targetMs),
+    toggleFavorite: async (): Promise<boolean> => {
+      const p = usePlayerStore();
+      const track = p.currentTrack;
+      if (!track) return false;
+      return useFavoritesStore().toggle(track);
+    },
+  };
+}

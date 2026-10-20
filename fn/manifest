@@ -1,0 +1,13 @@
+appname               = suenmusic
+version               = 1.5.0
+display_name          = SuenMusic
+desc                  = 个人/家庭私有音乐服务，支持多源搜索、流媒体代理、全端离线缓存与单一真相源同步
+arch                  = x86_64
+source                = thirdparty
+maintainer            = SuenMusic
+distributor           = SuenMusic
+desktop_uidir         = ui
+desktop_applaunchname = suenmusic.Application
+service_port          = 3210
+checkport             = true
+ctl_stop              = true

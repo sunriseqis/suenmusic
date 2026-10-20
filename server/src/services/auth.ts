@@ -185,7 +185,7 @@ export function register(input: Credentials): AuthSession {
   }
   const minLen = passwordMinLength();
   if (password.length < minLen) {
-    throw badRequest(`口令至少 ${minLen} 位`);
+    throw badRequest(`口令至少 ${minLen} 位`, 'weak_password');
   }
 
   try {

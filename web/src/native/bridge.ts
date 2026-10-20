@@ -17,7 +17,6 @@
  * key 会随签名轮换全部失效 —— 所以桥给原生层传的是曲目 id（稳定），
  * 原生层以 id 作为缓存键（见 SuenAudioService 的注释）。
  */
-import { serverReady } from '@/offline/syncMode.ts';
 import { SuenAudio, isNativeAudio, type NativeTrack, type NativeTrackChange } from './audio';
 export { isNativeAudio };
 import { http } from '@/api/client.ts';
@@ -206,31 +205,23 @@ export class NativeAudioBridge extends EventTarget {
     const items: NativeTrack[] = (tailOnly ? tracks.slice(startIndex) : tracks).map(toNative);
 
     /**
-     * 流会话令牌：优先向服务端要新的；**拿不到（离线）就退回上次存的那份**。
+     * 流会话令牌：优先向服务端要新的；拿不到（离线/弱网）就退回上次存的那份。
      *
-     * 为什么离线也要能发队列：断网时播放走原生缓存（命中就不联网），但服务侧
-     * 组流 URL 要求 baseUrl/token 非空 —— 令牌在断网时根本不会被校验，只需形状
-     * 正确。不兜底的话，离线连队列都发不出去（"离线也能听缓存"就瘸了）。
+     * 为什么离线也要能发队列：断网时播放走原生缓存（命中就不联网），但原生播放器
+     * 组流 URL 要求 baseUrl 非空以定位缓存和代理。服务端单一真相源下，流会话始终
+     * 面向服务端流路由 `<baseUrl>/api/stream/<id>?t=<token>`。
      */
-    /**
-     * 没有服务端时**不需要流会话令牌**：整队走客户端自己解析的直连地址，
-     * 令牌是给 `<baseUrl>/api/stream/<id>` 这条路用的。旧实现在这里直接
-     * `throw`，于是"没配服务器 → 连队列都发不出去 → 点播放没反应"。
-     */
-    const directMode = !serverReady();
-
     let token: string | null = null;
-    if (!directMode) {
-      try {
-        token =
-          (await http.get<{ token: string; expiresInMs: number }>('/api/stream/session-token'))
-            .token ?? null;
-      } catch {
-        token = null;
-      }
+    try {
+      token =
+        (await http.get<{ token: string; expiresInMs: number }>('/api/stream/session-token'))
+          .token ?? null;
+    } catch {
+      token = null;
     }
+
     if (token !== null) {
-      // 存一份供下次离线使用（会话令牌有效期 24h，够撑出门一天）
+      // 存一份供下次离线使用（会话令牌有效期 24h）
       try {
         localStorage.setItem(
           STREAM_SESSION_KEY,
@@ -242,28 +233,31 @@ export class NativeAudioBridge extends EventTarget {
     } else {
       const last = readStreamSession();
       if (last) {
-        this.rebindBaseUrl(last.baseUrl);
+        if (!this.baseUrl) this.rebindBaseUrl(last.baseUrl);
         token = last.token;
       }
     }
-    if (!directMode && token === null) {
-      // 从没成功拿到过令牌（比如首次使用就离线）：队列发出去也没意义
-      throw new Error('离线且没有可用的流会话');
+
+    if (!this.baseUrl) {
+      const savedBase = localStorage.getItem('suenmusic.baseUrl');
+      if (savedBase) this.rebindBaseUrl(savedBase);
     }
 
-    // ⚠️ 令牌这关过了才记 items：失败时 items 不能先动 ——
+    // 离线/弱网兜底令牌，保持 URL 语法合法
+    const effectiveToken = token ?? 'offline';
+
+    // ⚠️ 令牌/基地址这关过了才记 items：失败时 items 不能先动 ——
     // 否则桥以为队列已生效、原生其实没收到，`load()` 会拿越界索引去 seek
     this.items = tracks.map(t => ({ id: t.id, durationMs: t.dt || 0 }));
 
     await SuenAudio.setQueue({
-      baseUrl: directMode ? '' : this.baseUrl,
-      token: token ?? '',
+      baseUrl: this.baseUrl,
+      token: effectiveToken,
       items,
       startIndex,
       startPositionMs,
       autoplay,
       tailOnly,
-      direct: directMode,
     });
   }
 

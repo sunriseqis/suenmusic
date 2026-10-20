@@ -53,6 +53,12 @@ hw/hvigorw.bat
 hw/entry/src/main/resources/rawfile/*
 !hw/entry/src/main/resources/rawfile/.gitkeep
 
+# ---- 飞牛 fnOS 套件构建装配产物 ----
+fn/app/bin/
+fn/app/server/
+fn/app/web/
+fn/*.fpk
+
 # ---- 各端目录内的规则（沿用 Android Studio / Xcode 模板） ----
 # android/.gitignore  ios/.gitignore  hw/.gitignore
 

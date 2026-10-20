@@ -781,6 +781,11 @@ final class LocalStreamProxy {
 
     static let shared = LocalStreamProxy()
 
+    /// 直连取流时的 UA：部分 CDN（B 站）对空 UA 直接拒
+    private static let streamUserAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+        + "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+
     private let store = AudioCacheStore.shared
     private let configLock = NSLock()
     private let connectionLock = NSLock()
@@ -905,7 +910,7 @@ final class LocalStreamProxy {
 
     // MARK: 对外地址
 
-    /// 本地代理地址。nil = 端口未就绪 / 上游未配置 → 调用方应回退直连。
+    /// 本地代理地址。nil = 端口未就绪 / 无服务端上游 → 调用方回退直连服务端。
     func localURL(trackId: String) -> String? {
         configLock.lock()
         let ready = port
@@ -916,12 +921,16 @@ final class LocalStreamProxy {
         return "http://127.0.0.1:\(ready)/stream/\(encoded)"
     }
 
+    /// 兼容接口：服务端单一真相源下无客户端直链需求
+    func setDirectUrl(trackId: String, url: String) {}
+
     /// 上游流地址（带会话令牌）。`startOffset > 0` 时带 Range 续拉。
     func upstreamRequest(trackId: String, startOffset: Int64) -> URLRequest? {
         configLock.lock()
         let base = upstreamBase
         let token = upstreamToken
         configLock.unlock()
+
         guard !base.isEmpty else { return nil }
         let encoded = trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId
         var components = URLComponents(string: "\(base)/api/stream/\(encoded)")

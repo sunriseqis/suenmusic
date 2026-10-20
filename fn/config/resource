@@ -1,0 +1,28 @@
+{
+    "data-share":
+    {
+        "shares":
+        [
+            {
+                "name": "suenmusic",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "suenmusic"
+                    ]
+                }
+            },
+            {
+                "name": "suenmusic/data",
+                "permission":
+                {
+                    "rw":
+                    [
+                        "suenmusic"
+                    ]
+                }
+            }
+        ]
+    }
+}

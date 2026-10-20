@@ -1,0 +1,13 @@
+{
+    ".url": {
+        "suenmusic.Application": {
+            "title": "SuenMusic",
+            "icon": "images/icon_{0}.png",
+            "type": "url",
+            "protocol": "",
+            "port": "3210",
+            "url": "/",
+            "allUsers": false
+        }
+    }
+}

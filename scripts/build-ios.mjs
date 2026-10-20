@@ -7,7 +7,7 @@
  *      （直连 GitHub Releases 常超时 → `Missing package product 'CapApp-SPM'`）；
  *   2. IPA 必须叫 `SuenMusic-v<版本>-release.ipa`，服务端才会认它。
  *
- * 用法（在 **suenmusic-mobile** 仓库根执行；web 在**同级**的 suenmusic-server 仓库里）：
+ * 用法（在 **suenmusic 单仓根**执行，web 就在仓内 web/ 目录）：
  *   npm run ios:sync              # 只做 web 构建 + cap sync + vendor 还原（进 Xcode 前跑）
  *   npm run ios:ipa               # 完整链路，产出 app/SuenMusic-v<版本>-release.ipa
  *   npm run ios:ipa:unsigned      # 同上，但**不签名**，产出 app/unsigned/ 下的同名 IPA
@@ -48,13 +48,12 @@ const VENDOR = join(ROOT, 'ios/Vendor/capacitor-swift-pm');
 const IOS_PROJECT = join(ROOT, 'ios/App/App.xcodeproj');
 const PBXPROJ = join(IOS_PROJECT, 'project.pbxproj');
 /**
- * ⚠️ 2026-09-26 仓库已拆分：web 在**同级**的 suenmusic-server 仓库里。
- * 所以这里必须往上跳一层 —— 前提是两个仓库检出在同一级目录
- * （本地 ~/Documents/github/{suenmusic-server,suenmusic-mobile}，
- *  CI 里 $GITHUB_WORKSPACE/{suenmusic-server,suenmusic-mobile}）。
- * 与 web/capacitor.config.ts 里那两条 `../../suenmusic-mobile/...` 是同一份约定的两面。
+ * 2026-10-16 起为**单仓**布局：web 就在本仓的 web/ 目录下
+ * （原先拆成 suenmusic-server / suenmusic-mobile 两个同级仓库，path 是跨仓相对路径，
+ *  那个布局已废弃 —— 见 web/capacitor.config.ts 顶部注释）。
+ * 与 web/capacitor.config.ts 里 `ios.path: '../ios'` 是同一份约定的两面。
  */
-const WEB_DIR = join(ROOT, '../suenmusic-server/web');
+const WEB_DIR = join(ROOT, 'web');
 /** 统一产物目录（安卓 APK 与 iOS IPA 都归口到这里） */
 const OUTPUT_DIR = join(ROOT, 'app');
 
@@ -99,7 +98,7 @@ if (process.platform !== 'darwin') {
 if (!existsSync(join(WEB_DIR, 'node_modules'))) {
   fail(
     `web/node_modules 不存在（${WEB_DIR}）\n` +
-      `  web 在同级的 suenmusic-server 仓库里，先跑：cd ../suenmusic-server/web && npm ci`
+      `  web 就在本仓 web/ 目录，先跑：cd web && npm ci`
   );
 }
 

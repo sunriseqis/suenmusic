@@ -165,18 +165,22 @@ async function main(): Promise<number> {
 
   eq('命中层级为 upstream', cold.hitLevel, 'upstream');
   eq('解析成功', cold.ok, true);
-  check('拿到 bvid', !!cold.bvid, `bvid=${cold.bvid}`);
+  if (cold.source === 'bilibili') {
+    check('拿到 bvid', !!cold.bvid, `bvid=${cold.bvid}`);
+    eq('真实打了一次搜索', coldUpstream.search, 1);
+    eq('真实取了一次 cid', coldUpstream.view, 1);
+    eq('真实取了一次 playurl', coldUpstream.playurl, 1);
+  } else {
+    check('多源解析命中有效源', !!cold.source, `source=${cold.source}`);
+  }
   check('拿到音频地址', !!cold.sourceUrl);
   check('置信度不低于阈值', cold.score >= 60, `score=${cold.score}`);
   eq('上游调用计数 = 1', resolverStats().upstreamCalls, 1);
 
   note(
-    `bvid=${cold.bvid} score=${cold.score} 耗时=${cold.costMs}ms ` +
+    `source=${cold.source} bvid=${cold.bvid} score=${cold.score} 耗时=${cold.costMs}ms ` +
       `上游 search=${coldUpstream.search} view=${coldUpstream.view} playurl=${coldUpstream.playurl}`
   );
-  eq('真实打了一次搜索', coldUpstream.search, 1);
-  eq('真实取了一次 cid', coldUpstream.view, 1);
-  eq('真实取了一次 playurl', coldUpstream.playurl, 1);
   check('结果已落库', getSource(key) !== null);
 
   if (!cold.ok) {
@@ -201,10 +205,12 @@ async function main(): Promise<number> {
   eq('全部命中层级为 upstream（共享同一次上游请求）', [
     ...new Set(batch.map(r => r.hitLevel)),
   ], ['upstream']);
-  eq('10 次结果 bvid 一致', [...new Set(batch.map(r => r.bvid))], [cold.bvid]);
-  eq('上游 search 恰好 1 次（不是 10 次）', batchUpstream.search, 1);
-  eq('上游 view 恰好 1 次', batchUpstream.view, 1);
-  eq('上游 playurl 恰好 1 次', batchUpstream.playurl, 1);
+  eq('10 次结果一致', [...new Set(batch.map(r => r.sourceUrl))].length, 1);
+  if (cold.source === 'bilibili') {
+    eq('上游 search 恰好 1 次（不是 10 次）', batchUpstream.search, 1);
+    eq('上游 view 恰好 1 次', batchUpstream.view, 1);
+    eq('上游 playurl 恰好 1 次', batchUpstream.playurl, 1);
+  }
   eq('解析服务统计 upstreamCalls = 1', resolverStats().upstreamCalls, 1);
   eq('去重期间没有任何内存命中', resolverStats().memoryHits, 0);
   check('去重后结果已回填缓存', getSource(key) !== null);

@@ -284,20 +284,9 @@ public class SuenAudioService extends MediaSessionService {
         MediaSession.ControllerInfo controller,
         List<MediaItem> mediaItems) {
 
-      // 直连模式例外：整队都登记过直连地址时不需要服务器地址与流会话令牌。
-      // 否则"没配服务端"会在这一层直接抛异常 —— 那正是客户端脱离后端后
-      // 第一个卡死的地方（解析走到这里才发现播不了）。
-      boolean allDirect = true;
-      for (MediaItem item : mediaItems) {
-        if (!SuenAudio.hasDirectUrl(item.mediaId)) {
-          allDirect = false;
-          break;
-        }
-      }
-      if (!allDirect
-          && (SuenAudio.getBaseUrl() == null || SuenAudio.getSessionToken() == null)) {
+      if (SuenAudio.getBaseUrl() == null || SuenAudio.getBaseUrl().trim().isEmpty()) {
         return Futures.immediateFailedFuture(
-            new IllegalStateException("尚未配置服务器地址或流会话令牌"));
+            new IllegalStateException("尚未配置服务器地址"));
       }
 
       List<MediaItem> resolved = new ArrayList<>();

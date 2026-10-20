@@ -10,20 +10,19 @@ import { useRoute } from 'vue-router';
 import PlayerBar from '@/components/PlayerBar.vue';
 import FullPlayer from '@/components/FullPlayer.vue';
 import { registerBackHandler } from '@/native/back.ts';
+import { hasBackend } from '@/api/client.ts';
 import { navItems } from './nav.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
-import { useUiStore } from '@/stores/ui.ts';
 
 const route = useRoute();
 const player = usePlayerStore();
 const session = useSessionStore();
-const ui = useUiStore();
 
 const isActive = (name: string) => route.name === name;
 
-/** 直连模式隐藏「专属」 */
-const items = computed(() => navItems(!!ui.baseUrl.trim()));
+/** 无后端时隐藏「专属」；Web 端同源为后端 */
+const items = computed(() => navItems(hasBackend()));
 
 /** 全屏播放页是否展开 */
 const fullOpen = ref(false);

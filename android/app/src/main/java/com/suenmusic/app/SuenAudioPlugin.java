@@ -301,27 +301,11 @@ public class SuenAudioPlugin extends Plugin {
     // tailOnly=true：items 只覆盖 [startIndex, 队尾) 这一段（重排未播部分）。
     // 正在播的那首不在替换范围内 → 不重新 prepare → 切模式不再"卡一下"。
     final boolean tailOnly = Boolean.TRUE.equals(call.getBoolean("tailOnly", false));
-    // 直连模式：条目自带 directUrl 时不需要服务端地址与流会话令牌。
-    // 先扫一遍再决定要不要因为缺 baseUrl/token 而拒绝。
-    boolean anyDirect = false;
-    if (items != null) {
-      for (int i = 0; i < items.length(); i++) {
-        try {
-          String du = items.getJSONObject(i).optString("directUrl", "");
-          if (du != null && !du.isEmpty()) { anyDirect = true; break; }
-        } catch (Exception ignored) {}
-      }
-    }
-    // direct=true：整个队列都走客户端自己解析的直连地址，不需要服务端地址与令牌。
-    // 直连地址是播放时逐首登记的（setDirectUrl），所以入队时 items 里可能还没有。
-    final boolean direct = Boolean.TRUE.equals(call.getBoolean("direct", false));
-    if (items == null || (!direct && !anyDirect && (baseUrl == null || token == null))) {
+    if (items == null || baseUrl == null || token == null) {
       call.reject("缺少 baseUrl / token / items");
       return;
     }
-    if (baseUrl != null && token != null) {
-      SuenAudio.setStreamSession(baseUrl, token);
-    }
+    SuenAudio.setStreamSession(baseUrl, token);
 
     List<MediaItem> mediaItems = new ArrayList<>();
     try {
@@ -341,11 +325,6 @@ public class SuenAudioPlugin extends Plugin {
           try {
             mb.setArtworkUri(Uri.parse(cover.trim()));
           } catch (Exception ignored) {}
-        }
-        // 直连地址：登记后 streamUrlFor() 会优先用它，不再拼 /api/stream/<id>
-        String directUrl = o.optString("directUrl", "");
-        if (directUrl != null && !directUrl.trim().isEmpty()) {
-          SuenAudio.setDirectUrl(id, directUrl.trim());
         }
         mediaItems.add(new MediaItem.Builder()
             .setMediaId(id)
@@ -404,16 +383,9 @@ public class SuenAudioPlugin extends Plugin {
     return current != null && items.get(0).mediaId.equals(current.mediaId);
   }
 
-  /** 登记单首曲目的直连地址（客户端解析出的上游 URL）。url 为空表示清除。 */
+  /** 兼容旧接口桩方法（服务端单一真相源下无需前端登记直连地址） */
   @PluginMethod
   public void setDirectUrl(PluginCall call) {
-    String id = call.getString("id");
-    String url = call.getString("url");
-    if (id == null || id.isEmpty()) {
-      call.reject("缺少 id");
-      return;
-    }
-    SuenAudio.setDirectUrl(id, url == null ? "" : url);
     call.resolve();
   }
 

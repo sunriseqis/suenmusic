@@ -1,7 +1,14 @@
 # iOS 桌面卡片（WidgetKit）接入
 
-> 源码已经写好，**Xcode target 需要手动加一次**：本机是 Linux，没有 Xcode，
-> 手改 `project.pbxproj` 无法验证，容易把工程写坏。加 target 是一次性的。
+> **2026-10-19 已下线**：App target 的 `Embed Foundation Extensions` 阶段已移除，
+> 产物不再包含 `PlugIns/SuenMusicWidget.appex`。源码与 target 保留但未参与构建；
+> 需要恢复时把 Embed 阶段加回 `project.pbxproj`。
+> 下线原因见 `docs/memory/2026-10-19-iOS直连播放链路与锁屏上限.md` 第六节。
+>
+> 下面是当初的接入记录，留作恢复时的参考。
+>
+> 扩展 target 已写进 `project.pbxproj`，仓库里拉下来就能编译，不需要在 Xcode 里
+> 手动加。改动见 `docs/memory/2026-10-19-小组件扩展target补齐.md`。
 
 ## 已经准备好的文件
 
@@ -18,30 +25,36 @@ ios/App/App/
   Info.plist                       已注册 suenmusic:// URL scheme
 ```
 
-## Xcode 里要做的
+## 工程接线（已在 pbxproj 中完成）
 
-1. 打开 `ios/App/App.xcodeproj`。
-2. **File → New → Target → Widget Extension**
-   - Product Name：`SuenMusicWidget`
-   - Bundle Identifier：`com.suenmusic.app.widget`
-   - 取消勾选 "Include Configuration App Intent"（我们用 StaticConfiguration）
-   - 取消勾选 "Include Live Activity"（如出现）
-3. 删除模板生成的 `SuenMusicWidget.swift` / `Info.plist` / `Assets`，
-   把本仓 `ios/App/SuenMusicWidget/` 下的四个文件加入工程。
-4. **Target Membership**
-   - `SuenMusicWidget.swift` → Widget target
-   - `SharedNowPlaying.swift` → **App 与 Widget 两个 target 都要勾**
-   - `PlaybackIntents.swift` → **两个 target 都要勾**（App 侧才真正执行 intent）
-   - `SuenMusicWidget-Info.plist` → Build Settings 的 `INFOPLIST_FILE`
-     指向 `SuenMusicWidget/SuenMusicWidget-Info.plist`
-5. **Signing & Capabilities**
-   - App target：+ App Groups → `group.com.suenmusic.app`
-   - Widget target：同样勾 `group.com.suenmusic.app`
-   - Code Signing Entitlements 分别指向 `App/App.entitlements` 与
-     `SuenMusicWidget/SuenMusicWidget.entitlements`
-6. Deployment Target 两个 target 都设 15.0（Widget 视图对 17 的
-   `containerBackground` 做了可用性判断）。
-7. 运行 App → 播放一首歌 → 回桌面长按 → 添加「SuenMusic · 正在播放」。
+| 项 | 值 |
+|---|---|
+| target | `SuenMusicWidget`（`com.apple.product-type.app-extension`） |
+| Bundle ID | `com.suenmusic.app.widget`（App 的子级） |
+| Info.plist | `SuenMusicWidget/SuenMusicWidget-Info.plist` |
+| Entitlements | App → `App/App.entitlements`；Widget → `SuenMusicWidget/SuenMusicWidget.entitlements` |
+| App Group | 两侧均为 `group.com.suenmusic.app` |
+| Deployment Target | 两个 target 均为 15.0（与 App 历史口径一致；`AppIntents` 的使用已由 `@available(iOS 17.0, *)` 隔离，实测 15.0 可编译） |
+| 嵌入 | App target 的 `Embed Foundation Extensions`（`dstSubfolderSpec = 13`） |
+
+Target Membership：`SuenMusicWidget.swift` 只进 Widget；`SharedNowPlaying.swift`
+与 `PlaybackIntents.swift` 两个 target 都进（同一文件需要两条 PBXBuildFile）。
+
+验证命令（不签名）：
+
+```bash
+cd ios/App
+xcodebuild -project App.xcodeproj -target App -configuration Debug \
+  -sdk iphonesimulator SYMROOT=build/widget-check \
+  CODE_SIGNING_ALLOWED=NO build
+ls build/widget-check/Debug-iphonesimulator/App.app/PlugIns
+```
+
+出现 `SuenMusicWidget.appex` 即为接线正确；随后运行 App → 播放一首歌 →
+回桌面长按 → 添加「SuenMusic · 正在播放」。
+
+**签名侧仍需人工确认**：开发者账号里要有 `group.com.suenmusic.app`，且 App 与
+Widget 两个 Bundle ID 的描述文件都启用该 capability，否则卡片永远显示空态。
 
 ## 数据链路
 
@@ -88,3 +101,4 @@ Widget 点了没有接收方，按钮只会骗人。
 | 有歌名没封面 | `cover.jpg` 是否在共享容器；封面 URL 是否允许 ATS |
 | 没有歌词 | 是否在 iOS 上推过 `setLyricTimeline`（Web 已改成 iOS 无条件推送） |
 | 点击卡片没反应 | App 的 URL scheme `suenmusic` 是否注册 |
+| 安装报 `missing or invalid CFBundleExecutable` | `SuenMusicWidget-Info.plist` 必须有 `CFBundleExecutable = $(EXECUTABLE_NAME)`（构建系统不会替 appex 注入） |

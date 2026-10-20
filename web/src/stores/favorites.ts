@@ -1,16 +1,15 @@
 /**
- * 收藏 store（**本地优先**）。
+ * 收藏 store。
  *
- * 直连架构下收藏是本机的主数据：
+ * 职责只有一个：维护"哪些曲目已收藏"的**全局一致视图**，让红心状态在
+ * 曲目行 / 播放条 / 收藏页之间不需要各自请求就能对齐。
  *
- *   读 → 只读 IndexedDB（毫秒级，断网照样有）
- *   写 → 先落本地，**再**尽力推一份到服务端（配了服务器且已登录时）
- *
- * 这与旧实现的区别是根本性的：旧版是"乐观更新 + 失败回滚"，因为服务端是
- * 唯一真相源；现在本地就是真相源，网络失败**不回滚**（回滚等于把用户
- * 刚点的红心撤销，只因为网不好）。服务端那份是备份，迟一点到不影响。
- *
- * `reset()` 也不再清数据 —— 退出登录只是断开同步，不该把设备上的收藏删掉。
+ * 设计要点：
+ * - id 集合一次拉全（分页循环），之后 `contains` 全走内存，不逐行发请求
+ * - `toggle` 是**乐观更新**：先改本地集合再发请求，失败回滚 ——
+ *   红心是即时反馈型交互，等往返一次再变色会让人觉得"点了没反应"
+ * - 收藏数据属于账号：退出登录必须 `reset()`，否则下一个人会看见
+ *   上一个人的红心（与 player.reset 同理）
  */
 
 import { defineStore } from 'pinia';
@@ -18,16 +17,10 @@ import { computed, ref } from 'vue';
 import {
   addFavorite,
   batchAddFavorites,
+  checkFavorites,
   fetchFavorites,
   removeFavorite,
 } from '@/api/library.ts';
-import { serverReady } from '@/offline/syncMode.ts';
-import {
-  listFavorites,
-  removeFavorite as removeLocalFavorite,
-  saveFavorite,
-  type LocalFavorite,
-} from '@/offline/localdb.ts';
 import type { Track } from '@/api/types.ts';
 
 /** 单页条数。服务端对该参数有上限校验，100 是安全值 */
@@ -36,23 +29,42 @@ const PAGE_SIZE = 100;
 /** 拉全集的页数上限。家庭级使用到不了这个量，纯粹防御上游异常导致的死循环 */
 const MAX_PAGES = 50;
 
+/**
+ * 把某首曲目的收藏状态报给鸿蒙原生（AVSession / 桌面卡片显示红心）。
+ *
+ * 原生侧拿 assetId 对比当前曲目，不是当前曲目就直接忽略 —— 所以这里
+ * 不用关心"切的这首是不是正在播的"。Web 环境没有 SuenHarmony 时静默。
+ */
+function reportHarmonyFavorite(assetId: string, favorite: boolean): void {
+  if (typeof window === 'undefined' || !window.SuenHarmony?.updateFavorite) return;
+  try {
+    window.SuenHarmony.updateFavorite(JSON.stringify({ assetId, favorite }));
+  } catch {
+    /* ignore */
+  }
+}
+
 export const useFavoritesStore = defineStore('favorites', () => {
   /** 已收藏曲目 id 集合。Vue 3 的响应式系统原生支持 Set 的增删追踪 */
   const ids = ref<Set<string>>(new Set());
 
-  /** 本地收藏总数 */
+  /** 服务端记录的收藏总数。与 ids.size 应当一致，不一致说明集合还没拉全 */
   const total = ref(0);
 
-  /** 是否已从本地读过一次 */
+  /** 集合是否已经完整拉过一次（含拉到空）。登录后首次用到才拉 */
   const loaded = ref(false);
 
-  /** 曲目快照，按加入时间倒序。收藏页直接用它渲染，不用再查一遍 */
-  const rows = ref<LocalFavorite[]>([]);
-
-  /** 读取中的标记，防止并发触发多轮读取 */
+  /** 拉取中的标记，防止并发触发多轮全量拉取 */
   let loadingPromise: Promise<void> | null = null;
 
-  /** 同一首的 toggle 不允许并发（连点两下会算出相反的结果） */
+  /**
+   * 切换在途的曲目 id。
+   *
+   * 同一首的 `toggle` 不允许并发：乐观更新是"先改本地再发请求"，
+   * 两个请求同时在飞时，后回来的失败回滚会把前一个的成功结果抹掉
+   * （红心自己跳回去）。滑动收藏连点两下就能触发，所以必须有这层锁。
+   * 非响应式 —— 它只用于门禁，不参与渲染。
+   */
   const pending = new Set<string>();
 
   const count = computed(() => ids.value.size);
@@ -61,76 +73,69 @@ export const useFavoritesStore = defineStore('favorites', () => {
     return ids.value.has(id);
   }
 
-  /** 从本地重读。启动、切回前台、以及写完之后都可以调 */
-  async function hydrate(): Promise<void> {
-    const list = await listFavorites();
-    rows.value = list;
-    ids.value = new Set(list.map(r => r.id));
-    total.value = list.length;
-    loaded.value = true;
-  }
-
+  /**
+   * 确保 id 集合已就绪。
+   *
+   * 已加载过就直接返回；否则从第一页开始把游标走完。
+   * 批量校验接口（`/api/favorites/check`）作为兜底：若拉全量时上游失败，
+   * 至少把调用方关心的那几个 id 的真实状态补进来。
+   */
   async function ensureLoaded(): Promise<void> {
     if (loaded.value) return;
     if (loadingPromise) return loadingPromise;
+
     loadingPromise = (async () => {
       try {
-        await hydrate();
+        const acc = new Set<string>();
+        let cursor: string | null = null;
+        let totalCount = 0;
+
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const res = await fetchFavorites({ limit: PAGE_SIZE, cursor });
+          totalCount = res.total;
+          for (const item of res.items) acc.add(item.track?.id ?? item.trackId);
+          if (!res.nextCursor) break;
+          cursor = res.nextCursor;
+        }
+
+        ids.value = acc;
+        total.value = totalCount;
+        loaded.value = true;
       } finally {
         loadingPromise = null;
       }
     })();
+
     return loadingPromise;
   }
 
   /**
-   * 与服务端对一次账（只在配了服务器且已登录时调用）。
-   *
-   * 合并策略是**并集**：服务端有、本地没有的补进来；本地有、服务端没有的推上去。
-   * 删除不在这里处理 —— 删除是显式动作，靠 `toggle` 当场推。
-   * 这样两台设备交替离线使用也不会互相抹掉对方的收藏。
+   * 兜底校验：向服务端确认这几个 id 的真实收藏状态并合入本地集合。
+   * 供"集合还没拉全就要渲染红心"的调用方使用。
    */
-  async function syncFromServer(): Promise<void> {
-    if (!serverReady()) return;
+  async function syncIds(list: string[]): Promise<void> {
+    const targets = list.filter(id => id && !loaded.value);
+    if (targets.length === 0) return;
     try {
-      const acc: LocalFavorite[] = [];
-      let cursor: string | null = null;
-      for (let page = 0; page < MAX_PAGES; page++) {
-        const res = await fetchFavorites({ limit: PAGE_SIZE, cursor });
-        for (const item of res.items) {
-          if (item.trackId) {
-            acc.push({ id: item.trackId, track: item.track ?? undefined, addedAt: item.createdAt });
-          }
-        }
-        if (!res.nextCursor) break;
-        cursor = res.nextCursor;
+      const res = await checkFavorites(targets);
+      for (const [id, fav] of Object.entries(res.favorites)) {
+        if (fav) ids.value.add(id);
+        else ids.value.delete(id);
       }
-
-      const localIds = new Set(rows.value.map(r => r.id));
-      const remoteIds = new Set(acc.map(r => r.id));
-
-      const missingLocally = acc.filter(r => !localIds.has(r.id) && r.track);
-      for (const row of missingLocally) {
-        await saveFavorite(row.track as Track, row.addedAt);
-      }
-
-      const missingRemotely = rows.value.filter(r => !remoteIds.has(r.id) && r.track);
-      for (const row of missingRemotely) {
-        // 推上去的是"本地有、服务端没有"，失败无所谓（下次还会再对）
-        void addFavorite(row.id, row.track).catch(() => {});
-      }
-
-      if (missingLocally.length > 0) await hydrate();
     } catch {
-      /* 对账失败保持本地现状 —— 本地数据本来就是完整的 */
+      /* 校验失败保持本地现状 —— 红心是显示层，不值得为它报错 */
     }
   }
 
   /**
    * 切换收藏状态。
    *
-   * 本地立即生效，不等网络。返回切换后的状态（true = 已收藏）。
-   * 同一曲目已有切换在途时直接返回当前状态：连点的期望结果本来就是只变一次。
+   * @param track 完整曲目。带上它服务端会把快照写进缓存表，
+   *   收藏页才能直接显示歌名与封面（否则列表只有 id）
+   * @returns 切换后的收藏状态（true = 已收藏）
+   *
+   * 同一曲目已有切换在途时**直接返回当前状态**：既不发第二个请求，
+   * 也不做第二次乐观更新 —— 连点的期望结果本来就是"最终只有一次变化"。
    */
   async function toggle(track: Track): Promise<boolean> {
     const id = track.id;
@@ -139,86 +144,100 @@ export const useFavoritesStore = defineStore('favorites', () => {
 
     const wasFav = ids.value.has(id);
 
-    // 先改本地（真相源）
+    // 乐观更新：先改本地，失败回滚
     if (wasFav) {
       ids.value.delete(id);
       total.value = Math.max(0, total.value - 1);
-      rows.value = rows.value.filter(r => r.id !== id);
     } else {
       ids.value.add(id);
       total.value += 1;
-      rows.value = [{ id, track, addedAt: Date.now() }, ...rows.value];
     }
 
     try {
       if (wasFav) {
-        await removeLocalFavorite(id);
+        await removeFavorite(id);
       } else {
-        await saveFavorite(track);
+        await addFavorite(id, track);
       }
+      return !wasFav;
+    } catch (e) {
+      // 回滚到操作前的状态
+      if (wasFav) {
+        ids.value.add(id);
+        total.value += 1;
+      } else {
+        ids.value.delete(id);
+        total.value = Math.max(0, total.value - 1);
+      }
+      throw e;
     } finally {
       pending.delete(id);
+      // 成功与回滚都要报：以本地集合的最终状态为准，原生侧只认 assetId 匹配的
+      reportHarmonyFavorite(id, ids.value.has(id));
     }
-
-    // 再尽力推服务端（失败不影响本地结果）
-    if (serverReady()) {
-      if (wasFav) {
-        void removeFavorite(id).catch(() => {});
-      } else {
-        void addFavorite(id, track).catch(() => {});
-      }
-    }
-
-    return !wasFav;
   }
 
   /**
-   * 批量收藏（"收藏全部"）。
+   * 批量收藏。
+   *
+   * 用于"收藏全部"场景：一次性把列表中所有曲目加入收藏。
+   * 乐观更新：先把所有 id 加入本地集合，请求失败回滚。
    * @returns 新增收藏数
    */
   async function batchAdd(trackList: Track[]): Promise<number> {
     if (trackList.length === 0) return 0;
 
+    // 只收藏尚未收藏的
     const newTracks = trackList.filter(t => !ids.value.has(t.id));
     if (newTracks.length === 0) return 0;
 
-    const now = Date.now();
-    for (const t of newTracks) {
-      await saveFavorite(t, now);
-    }
-    await hydrate();
+    // 乐观更新
+    const newIds = newTracks.map(t => t.id);
+    for (const id of newIds) ids.value.add(id);
+    total.value += newIds.length;
 
-    if (serverReady()) {
-      void batchAddFavorites(newTracks).catch(() => {});
-    }
+    // 整批占住这些 id：批量在飞时对同一首滑动（"收藏全部"后立刻划掉一首）
+    // 会被 toggle 的在途锁挡掉，避免两个请求互相覆盖、本地集合与服务端分叉
+    const claimed = newIds.filter(id => !pending.has(id));
+    for (const id of claimed) pending.add(id);
 
-    return newTracks.length;
+    try {
+      const res = await batchAddFavorites(newTracks);
+      // 以服务端返回的实际新增数为准
+      total.value = res.total;
+      return res.added;
+    } catch (e) {
+      // 回滚
+      for (const id of newIds) ids.value.delete(id);
+      total.value = Math.max(0, total.value - newIds.length);
+      throw e;
+    } finally {
+      for (const id of claimed) pending.delete(id);
+    }
   }
 
-  /**
-   * 退出登录时的收尾。
-   *
-   * **不清本地数据**：收藏属于这台设备，不属于某个服务端账号。
-   * 只把内存视图放下，下次用到时重新从本地读。
-   */
+  /** 退出登录时清空。收藏数据属于账号，不能留给下一个用户 */
   function reset(): void {
     ids.value = new Set();
-    rows.value = [];
     total.value = 0;
     loaded.value = false;
     loadingPromise = null;
   }
 
+  async function reload(): Promise<void> {
+    reset();
+    await ensureLoaded();
+  }
+
   return {
     ids,
-    rows,
     total,
     loaded,
     count,
     contains,
-    hydrate,
     ensureLoaded,
-    syncFromServer,
+    reload,
+    syncIds,
     toggle,
     batchAdd,
     reset,

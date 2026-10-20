@@ -25,19 +25,16 @@ import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import { fetchHome } from '@/api/catalog.ts';
-import { directHome } from '@/api/direct/home.ts';
-import { ApiError, hasBackend } from '@/api/client.ts';
+import { ApiError } from '@/api/client.ts';
 import { isNativeAudio } from '@/native/audio.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useSessionStore } from '@/stores/session.ts';
-import { useFavoritesStore } from '@/stores/favorites.ts';
 import { artistNames } from '@/utils/format.ts';
 import type { HomeData } from '@/api/types.ts';
 
 const router = useRouter();
 const session = useSessionStore();
 const player = usePlayerStore();
-const favorites = useFavoritesStore();
 
 const data = ref<HomeData | null>(null);
 
@@ -70,10 +67,6 @@ const headText = computed(() => {
   return session.displayName ? `${greeting.value}，${session.displayName}` : greeting.value;
 });
 
-/** 当前是不是"没配服务端"的直连模式 —— 首页空状态的文案要区分开 */
-/* 浏览器同源即后端；只有原生且没配地址才是直连 */
-const localMode = computed(() => !hasBackend());
-
 const hasAnything = computed(() => {
   const d = data.value;
   if (!d) return false;
@@ -81,20 +74,6 @@ const hasAnything = computed(() => {
 });
 
 async function load() {
-  // 直连模式：走 QQ 的同一组 module（新碟 / 新歌 / 榜单），不发 /api/home
-  if (localMode.value) {
-    loading.value = true;
-    try {
-      data.value = await directHome();
-      void setupPosters();
-    } catch (e) {
-      errorText.value = e instanceof Error ? e.message : '获取首页失败';
-    } finally {
-      loading.value = false;
-      void favorites.ensureLoaded();
-    }
-    return;
-  }
   loading.value = true;
   errorText.value = '';
   try {

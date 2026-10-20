@@ -22,9 +22,7 @@ import NeuSkeleton from '@/components/neu/NeuSkeleton.vue';
 import TrackRow from '@/components/TrackRow.vue';
 import CoverCard from '@/components/CoverCard.vue';
 import ArtistLinks from '@/components/ArtistLinks.vue';
-import { ApiError, hasBackend } from '@/api/client.ts';
-import { directArtistSongs } from '@/api/direct/catalog.ts';
-import { directAlbum, directToplist } from '@/api/direct/home.ts';
+import { ApiError } from '@/api/client.ts';
 import {
   fetchAlbum,
   fetchArtist,
@@ -186,11 +184,6 @@ function moreAlbums() {
 
 /** 取下一批歌曲。追加时按 id 去重：搜索分页并不保证不重叠 */
 async function loadMoreSongs(name: string, seq: number) {
-  // 直连模式一次取完，没有"下一批"
-  if (!hasBackend()) {
-    songsHasMore.value = false;
-    return;
-  }
   if (songsLoadingMore.value || !songsHasMore.value) return;
   if (songBatch.value >= MAX_BATCH) {
     songsHasMore.value = false;
@@ -400,9 +393,7 @@ async function load() {
   try {
     switch (props.kind) {
       case 'toplist': {
-        const res = !hasBackend()
-          ? await directToplist(props.id)
-          : await fetchToplist(props.id, { limit: 200 });
+        const res = await fetchToplist(props.id, { limit: 200 });
         title.value = res.topInfo?.name || '排行榜';
         subtitle.value = res.topInfo?.updateFrequency || '';
         cover.value = res.topInfo?.picUrl || res.topInfo?.coverImgUrl || '';
@@ -419,9 +410,7 @@ async function load() {
         break;
       }
       case 'album': {
-        const res = !hasBackend()
-          ? await directAlbum(props.id)
-          : await fetchAlbum(props.id);
+        const res = await fetchAlbum(props.id);
         title.value = res.album.name;
         albumArtists.value = res.album.artists ?? [];
         albumCompany.value = res.album.company || '';
@@ -435,18 +424,6 @@ async function load() {
         break;
       }
       case 'artist': {
-        // 直连模式没有歌手详情/专辑接口，用「按名搜索 + 歌手过滤」拼一个能听的页面
-        if (!hasBackend()) {
-          const name = artistName.value || props.id;
-          singerName.value = name;
-          const songs = await directArtistSongs(name);
-          title.value = name;
-          subtitle.value = '热门歌曲 · 直连';
-          cover.value = coverUrl(songs[0]?.al?.picUrl, 300);
-          tracks.value = songs;
-          songsHasMore.value = false;
-          break;
-        }
         // 歌手的歌曲要按名字走搜索召回，所以名字能省一次上游请求就省
         const name = artistName.value || (await fetchArtist(props.id)).artist.name;
         singerName.value = name;

@@ -39,7 +39,7 @@ import { useUpdateStore } from '@/stores/update.ts';
 import { applyDedupe, previewDedupe, type DupGroup } from '@/offline/dedupe.ts';
 import { applyBackup, buildBackup, downloadBackup } from '@/offline/backup.ts';
 import { loadWebdav, saveWebdav, webdavGet, webdavPut } from '@/offline/webdav.ts';
-import { directQQPlaylist } from '@/api/direct/playlist.ts';
+import { importQQPlaylist } from '@/api/library.ts';
 import { fetchPersona, tunePersona } from '@/api/ai.ts';
 import {
   fetchBilibiliStatus,
@@ -104,9 +104,9 @@ async function importPlaylist(): Promise<void> {
   importing.value = true;
   importMsg.value = '';
   try {
-    const pl = await directQQPlaylist(raw);
-    const added = await favorites.batchAdd(pl.tracks);
-    importMsg.value = `${pl.name} · 新增 ${added} 首`;
+    const res = await importQQPlaylist(raw);
+    void favorites.ensureLoaded();
+    importMsg.value = `${res.playlistName} · 新增 ${res.added} 首（共 ${res.total} 首）`;
     playlistLink.value = '';
   } catch (e) {
     importMsg.value = e instanceof Error ? e.message : '导入失败';
@@ -153,7 +153,7 @@ async function runDedup(): Promise<void> {
     const removed = await applyDedupe(dupGroups.value);
     dupGroups.value = [];
     dupMsg.value = `已清理 ${removed} 首`;
-    await favorites.ensureLoaded();
+    await favorites.reload();
   } catch (e) {
     dupMsg.value = e instanceof Error ? e.message : '清理失败';
   } finally {
@@ -191,8 +191,8 @@ async function onBackupFile(ev: Event): Promise<void> {
     const res = await applyBackup(await file.text());
     backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
     webdav.value = loadWebdav();
-    await favorites.ensureLoaded();
-    await dislikes.ensureLoaded();
+    await favorites.reload();
+    await dislikes.reload();
   } catch (e) {
     backupMsg.value = e instanceof Error ? e.message : '导入失败';
   } finally {
@@ -220,8 +220,8 @@ async function downloadWebdav(): Promise<void> {
     const res = await applyBackup(await webdavGet(webdav.value));
     backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
     webdav.value = loadWebdav();
-    await favorites.ensureLoaded();
-    await dislikes.ensureLoaded();
+    await favorites.reload();
+    await dislikes.reload();
   } catch (e) {
     backupMsg.value = e instanceof Error ? e.message : '下载失败';
   } finally {

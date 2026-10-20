@@ -12,6 +12,7 @@ import BrandLockup from '@/components/brand/BrandLockup.vue';
 import NeuIconButton from '@/components/neu/NeuIconButton.vue';
 import PlayerBar from '@/components/PlayerBar.vue';
 import DesktopFullPlayer from '@/components/DesktopFullPlayer.vue';
+import { hasBackend } from '@/api/client.ts';
 import { navItems } from './nav.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useUiStore } from '@/stores/ui.ts';
@@ -25,8 +26,8 @@ const detailOpen = ref(false);
 
 const isActive = (name: string) => route.name === name;
 
-/** 直连模式隐藏「专属」 */
-const items = computed(() => navItems(!!ui.baseUrl.trim()));
+/** 无后端时隐藏「专属」；Web 端同源为后端 */
+const items = computed(() => navItems(hasBackend()));
 /** 设置单独放在「管理」分组 */
 const browseItems = computed(() => items.value.filter(i => i.name !== 'settings'));
 

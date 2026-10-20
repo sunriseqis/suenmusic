@@ -45,6 +45,10 @@ struct SuenTrack {
     let album: String?
     let coverUrl: String?
     let durationMs: Int
+    /// 客户端自己解析出的上游直连地址（不配服务端时用）。
+    /// 空 = 仍走 `<baseUrl>/api/stream/<id>` 代理路径。
+    /// Web 端在播放那一刻逐首登记（`SuenAudio.setDirectUrl`），入队时通常还没有。
+    var directUrl: String?
 }
 
 // MARK: - 插件
@@ -61,6 +65,7 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "seek", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "seekToIndex", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "reloadCurrent", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "setDirectUrl", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setRepeatMode", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setLyricTimeline", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "setLyricLine", returnType: CAPPluginReturnPromise),
@@ -105,21 +110,15 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         // 卡片（Widget）播放命令的落地点。
         // intent 在 App 进程执行，但插件实例可能还没被 Capacitor 建出来
         // （冷启动去后台跑 intent 时）；PlaybackCommand 内部会排队兜底。
+        //
+        // ⚠️ 这里只做转发，真正的 switch 在 `AudioEngine.handleWidgetAction(_:)`：
+        // `playingIntent` 是引擎的私有状态（不能用 `player.rate` 代替，见其声明处的说明），
+        // `play()` / `pause()` / `skipToNext()` 也全都是引擎的方法。
+        // 在插件侧直接写 `self.play()` 会撞上同名的 `@objc func play(_ call: CAPPluginCall)`
+        // —— 那个要传参数，于是报「missing argument for parameter #1」。
         PlaybackCommand.shared.handler = { [weak self] action in
-            guard let self = self else { return }
-            switch action {
-            case .playPause:
-                // 与锁屏 toggle 同源：看意图而不是 rate，缓冲时 rate 为 0
-                self.playingIntent ? self.pause() : self.play()
-            case .play:
-                self.play()
-            case .pause:
-                self.pause()
-            case .next:
-                self.skipToNext()
-            case .previous:
-                self.skipToPrevious()
-            }
+            guard let engine = self?.engine else { return }
+            engine.handleWidgetAction(action)
         }
         PlaybackCommand.shared.drainQueue()
 
@@ -158,12 +157,14 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     ///   - tailOnly=true：items 只覆盖 [startIndex, 队尾)，正在播的那首不动
     ///     （切播放模式重排未播部分时不再"卡一下"）
     @objc func setQueue(_ call: CAPPluginCall) {
-        guard let baseUrl = call.getString("baseUrl"),
-              let token = call.getString("token"),
-              let rawItems = call.getArray("items") else {
-            call.reject("缺少 baseUrl / token / items")
+        // 直连模式下 Web 端传 baseUrl=""、token=""（整队走客户端解析的直链），
+        // 空串不能再当成"缺参数"拒绝 —— 对齐 Android setQueue 的 anyDirect/direct 判断。
+        guard let rawItems = call.getArray("items") else {
+            call.reject("缺少 items")
             return
         }
+        let baseUrl = call.getString("baseUrl") ?? ""
+        let token = call.getString("token") ?? ""
         let startIndex = intArg(call, "startIndex") ?? 0
         let startPositionMs = intArg(call, "startPositionMs") ?? 0
         let autoplay = call.getBool("autoplay") ?? true
@@ -179,7 +180,9 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
                 artist: o["artist"] as? String ?? "未知歌手",
                 album: o["album"] as? String,
                 coverUrl: o["coverUrl"] as? String,
-                durationMs: intOf(o["durationMs"])
+                durationMs: intOf(o["durationMs"]),
+                directUrl: (o["directUrl"] as? String)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
             ))
         }
         if tracks.isEmpty {
@@ -190,6 +193,8 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         // 本地流代理要拿上游地址与令牌才能代播；每次 setQueue 都刷新一遍
         // （反代地址可能变、会话令牌会轮换）
         LocalStreamProxy.shared.configure(base: baseUrl, token: token)
+        LocalStreamProxy.shared.startIfNeeded()
+        NSLog("%@", "[StreamUrl] setQueue items=\(tracks.count) baseUrl=\(baseUrl.isEmpty ? "empty" : "set")")
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -277,6 +282,11 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// 兼容接口：向后兼容旧前端调用。服务端单一真相源下所有音源统一走代理/缓存
+    @objc func setDirectUrl(_ call: CAPPluginCall) {
+        call.resolve()
+    }
+
     /// 播放模式：让原生队列自己接续时也遵守单曲/列表循环（off/one/all）
     @objc func setRepeatMode(_ call: CAPPluginCall) {
         let mode = call.getString("mode") ?? "off"
@@ -301,9 +311,11 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
             parsed.append(WidgetLyricLine(ms: max(0, ms), text: text))
         }
         parsed.sort { $0.ms < $1.ms }
-        widgetLyricLines = parsed
-        publishWidgetSnapshot()
-        call.resolve()
+        withEngine(call) { engine in
+            // 数据归引擎管：`widgetLyricLines` 与 `publishWidgetSnapshot()` 都是它的私有成员
+            engine.setWidgetLyrics(parsed)
+            call.resolve()
+        }
     }
 
     @objc func setLyricLine(_ call: CAPPluginCall) {
@@ -540,6 +552,10 @@ final class AudioEngine: NSObject {
 
     private var baseUrl = ""
     private var sessionToken = ""
+    /// 直连取流时的 UA：部分 CDN（B 站）对空 UA 直接拒
+    private static let streamUserAgent =
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
+        + "(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 
     /// 程序化换条目期间抑制 KVO 自动发 trackChange（手动发的带 reason=SEEK）
     private var suppressTransitionEvent = false
@@ -582,7 +598,10 @@ final class AudioEngine: NSObject {
         isActivated = true
 
         player.actionAtItemEnd = .none
-        player.automaticallyWaitsToMinimizeStalling = true
+        // 关掉"先评估缓冲速率再起播"：上游是本地回环代理（或直连 CDN），
+        // 不需要它算带宽；开着时对 B 站 fMP4 会长期停在
+        // AVPlayerWaitingWhileEvaluatingBufferingRateReason（进度条不动）。
+        player.automaticallyWaitsToMinimizeStalling = false
 
         // 进度心跳：500ms，对齐 Android TICK_MS
         let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
@@ -687,18 +706,20 @@ final class AudioEngine: NSObject {
                     player.remove(stale)
                 }
             }
+            var lastInserted = current
             for (offset, track) in tracks.enumerated() {
                 let item = makeItem(for: track)
                 itemIndex[ObjectIdentifier(item)] = startIndex + offset
-                player.insert(item, after: current)
+                player.insert(item, after: lastInserted)
+                lastInserted = item
             }
             // 对齐 Android：tailOnly 路径不动播放状态（不 seek、不 play）
             lastCurrentItem = player.currentItem
             return
         }
 
-        // 整队列重发：全量重建。player 队列只需要 [startIndex, 队尾)
-        // （i 前面的条目永远不会被"接续"到，回退切歌走 rebuildQueue）。
+        // 整队列重发：全量重建。player 队列装载 [startIndex, 队尾) 全部条目，
+        // 由 AVQueuePlayer 原生接续，锁屏熄屏不依赖 JS 唤醒。
         self.tracks = tracks
         player.removeAllItems()
         itemIndex.removeAll()
@@ -712,6 +733,8 @@ final class AudioEngine: NSObject {
         }
         if startPositionMs > 0 {
             player.seek(to: CMTime(seconds: Double(startPositionMs) / 1000.0, preferredTimescale: 600))
+        } else {
+            player.seek(to: .zero)
         }
         if autoplay {
             startPlayback()
@@ -730,7 +753,7 @@ final class AudioEngine: NSObject {
             if let item = player.currentItem, item.currentTime() >= item.duration, item.duration > CMTime.zero {
                 player.seek(to: .zero)
             }
-            player.play()
+            player.playImmediately(atRate: 1.0)
         }
         // 无论走没走进上面的分支都表一次"要播"。去重后不会重复发事件，
         // 但能保证"用户按了播放"这件事一定被 Web 端听到。
@@ -745,6 +768,33 @@ final class AudioEngine: NSObject {
     func stop() {
         player.pause()
         reportPlaying(false)
+    }
+
+    /// 卡片（Widget）播放命令的落地实现。
+    ///
+    /// ⚠️ **必须留在引擎里，不能让插件自己 switch**：`playingIntent` 是引擎的私有状态
+    /// （不能用 `player.rate` 代替，见其声明处的说明），`play()` / `pause()` /
+    /// `skipToNext()` / `skipToPrevious()` 也同样都是引擎的方法。插件只做转发。
+    func handleWidgetAction(_ action: PlaybackAction) {
+        switch action {
+        case .playPause:
+            // 与锁屏 toggle 同源：看意图而不是 rate，缓冲时 rate 为 0
+            playingIntent ? pause() : play()
+        case .play:
+            play()
+        case .pause:
+            pause()
+        case .next:
+            skipToNext()
+        case .previous:
+            skipToPrevious()
+        }
+    }
+
+    /// 卡片用的歌词时间轴（与蓝牙歌词共用同一份数据，由插件的 `setLyricTimeline` 透传）。
+    func setWidgetLyrics(_ lines: [WidgetLyricLine]) {
+        widgetLyricLines = lines
+        publishWidgetSnapshot()
     }
 
     func seek(to positionMs: Int) {
@@ -771,6 +821,7 @@ final class AudioEngine: NSObject {
     /// 换音源硬重载：停掉 → 重建条目（新 URL + 丢缓冲）→ 定位 → 出声
     func reloadCurrent(index: Int, positionMs: Int, autoplay: Bool) {
         guard tracks.indices.contains(index) else { return }
+        pendingAdvanceIndex = nil
         suppressTransitionEvent = true
 
         let track = tracks[index]
@@ -788,9 +839,9 @@ final class AudioEngine: NSObject {
         suppressTransitionEvent = false
         lastCurrentItem = fresh
 
-        if positionMs > 0 {
-            player.seek(to: CMTime(seconds: Double(positionMs) / 1000.0, preferredTimescale: 600))
-        }
+        // 无条件 seek：AVQueuePlayer 的时间轴是全局的，换条目后不归零会承接上一首的
+        // 位置 —— 上一首 4:19 结束、下一首从 4:20 继续走，但新的 item 并没有起播。
+        player.seek(to: CMTime(seconds: Double(max(0, positionMs)) / 1000.0, preferredTimescale: 600))
         if autoplay { startPlayback() }
         updateNowPlaying()
         // 通知 Web 端索引与元数据已就位（reason=SEEK，与 Android 行为一致）
@@ -821,22 +872,24 @@ final class AudioEngine: NSObject {
     /// reason: 1=AUTO（repeat all 环绕接续） 2=SEEK
     private func rebuildQueue(from index: Int, positionMs: Int, autoplay: Bool, reason: Int) {
         guard tracks.indices.contains(index) else { return }
+        pendingAdvanceIndex = nil
         if reason == 2 {
             consecutiveErrors = 0
         }
         suppressTransitionEvent = true
 
         player.removeAllItems()
-        var newItems: [AVPlayerItem] = []
+        itemIndex.removeAll()
+        var previous: AVPlayerItem?
         for i in index..<tracks.count {
             let item = makeItem(for: tracks[i])
             itemIndex[ObjectIdentifier(item)] = i
-            newItems.append(item)
-            player.insert(item, after: newItems.dropLast().last)
+            player.insert(item, after: previous)
+            previous = item
         }
-        if positionMs > 0 {
-            player.seek(to: CMTime(seconds: Double(positionMs) / 1000.0, preferredTimescale: 600))
-        }
+        // 无条件 seek：AVQueuePlayer 的时间轴是全局的，换条目后不归零会承接上一首的
+        // 位置 —— 上一首 4:19 结束、下一首从 4:20 继续走，但新的 item 并没有起播。
+        player.seek(to: CMTime(seconds: Double(max(0, positionMs)) / 1000.0, preferredTimescale: 600))
         if autoplay { startPlayback() }
 
         suppressTransitionEvent = false
@@ -876,6 +929,9 @@ final class AudioEngine: NSObject {
                     self.player.pause()
                     self.reportPlaying(false)
                 }
+            } else if self.player.items().count <= 1 {
+                // 队列中后续条目未预加载（罕见异常态），安全重建从下一首接续
+                self.rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 1)
             } else {
                 self.player.advanceToNextItem()
                 // 正常靠上面的 currentItem KVO 发 trackChange(reason=1)；这里主动补一次
@@ -956,7 +1012,8 @@ final class AudioEngine: NSObject {
     /// 不等 `timeControlStatus` 走完 waiting → playing 再报 —— 否则从用户按下播放
     /// 到按钮变样之间会有一段空窗（网络慢时尤其明显）。
     private func startPlayback() {
-        player.play()
+        // playImmediately 跳过 buffering-rate 评估，避免起播前长时间 waiting
+        player.playImmediately(atRate: 1.0)
         reportPlaying(true)
     }
 
@@ -1002,7 +1059,14 @@ final class AudioEngine: NSObject {
         plugin?.emitTrackChange(index: idx, id: tracks[idx].id, reason: 1)
     }
 
+    /// 直连模式下"下一首还没入队"时的逻辑索引。
+    ///
+    /// 队列里只有当前曲目（后续曲目要等 Web 解析直链），播完后 `currentItem` 会变成
+    /// nil —— 没有这个值，Now Playing / 卡片会退回第 0 首，UI 与真实位置脱节。
+    private var pendingAdvanceIndex: Int?
+
     var currentIndex: Int {
+        if let pending = pendingAdvanceIndex { return pending }
         guard let item = player.currentItem, let idx = itemIndex[ObjectIdentifier(item)] else {
             return 0
         }
@@ -1024,21 +1088,23 @@ final class AudioEngine: NSObject {
     }
 
     private func makeItem(for track: SuenTrack) -> AVPlayerItem {
-        let url = URL(string: streamUrl(track.id))!
-        let asset = AVURLAsset(url: url)
-        return AVPlayerItem(asset: asset)
+        let raw = streamUrl(track)
+        let url = URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 }
+            ?? URL(string: "suenmusic://invalid-stream/\(track.id)")!
+        NSLog("%@", "[StreamUrl] makeItem id=\(track.id) url=\(raw.prefix(300))")
+        return AVPlayerItem(asset: AVURLAsset(url: url))
     }
 
-    /// 组装流地址：**优先走本地回环代理**（P2 离线缓存）。
-    ///
-    /// 代理不可用时回退直连 —— 缓存是增强项，任何情况下都不能因为它
-    /// 没准备好而播不出来。回退代价只是这首不落缓存。
-    private func streamUrl(_ trackId: String) -> String {
-        if let local = LocalStreamProxy.shared.localURL(trackId: trackId) {
+    /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
+    private func streamUrl(_ track: SuenTrack) -> String {
+        if let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
             return local
         }
-        return directStreamUrl(trackId)
+        return directStreamUrl(track.id)
     }
+
+    /// 兼容方法：服务端单一真相源模式下无需客户端直连地址
+    func setDirectUrl(_ trackId: String, _ url: String) {}
 
     /// 直连上游（对齐 Android SuenAudio.streamUrlFor，防御双斜杠）
     private func directStreamUrl(_ trackId: String) -> String {
@@ -1115,15 +1181,16 @@ final class AudioEngine: NSObject {
     func skipToNext() -> Bool {
         guard !tracks.isEmpty else { return false }
         let idx = currentIndex
+        let next: Int
         if idx + 1 < tracks.count {
-            rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 2)
-            return true
+            next = idx + 1
+        } else if repeatMode == .all {
+            next = 0
+        } else {
+            return false
         }
-        if repeatMode == .all {
-            rebuildQueue(from: 0, positionMs: 0, autoplay: true, reason: 2)
-            return true
-        }
-        return false
+        rebuildQueue(from: next, positionMs: 0, autoplay: true, reason: 2)
+        return true
     }
 
     /// 上一首。队首且非列表循环时失败（与 Android 一致）。
@@ -1132,8 +1199,8 @@ final class AudioEngine: NSObject {
         guard !tracks.isEmpty else { return false }
         let idx = currentIndex
         guard idx > 0 || repeatMode == .all else { return false }
-        rebuildQueue(from: idx > 0 ? idx - 1 : tracks.count - 1,
-                     positionMs: 0, autoplay: true, reason: 2)
+        let prev = idx > 0 ? idx - 1 : tracks.count - 1
+        rebuildQueue(from: prev, positionMs: 0, autoplay: true, reason: 2)
         return true
     }
 

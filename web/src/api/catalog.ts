@@ -6,10 +6,7 @@
  */
 
 import { loadOffline, saveOffline } from '@/offline/snapshot.ts';
-import { ApiError, http } from './client.ts';
-import { serverReady } from '@/offline/syncMode.ts';
-import { directSearch } from './direct/catalog.ts';
-import { qqLyric } from './direct/upstream.ts';
+import { http } from './client.ts';
 import type {
   AlbumDetail,
   Artist,
@@ -33,9 +30,6 @@ import type {
  * 这里先保证"不报错、界面能进"，用户可以直接去搜索。
  */
 export function fetchHome(signal?: AbortSignal): Promise<HomeData> {
-  if (!serverReady()) {
-    return Promise.resolve({ newAlbums: [], newSongs: [], toplists: [] });
-  }
   return http.get<HomeData>('/api/home', { signal });
 }
 
@@ -49,10 +43,6 @@ export interface SearchParams {
 
 /**
  * 搜索。
- *
- * 有服务端走服务端（它有多源匹配与缓存），服务端不可达时**自动改直连** ——
- * 这是"服务端不在关键路径上"的第一处落地：后端挂了，搜索照样能用。
- * 无服务端时直接用 QQ 搜索（实测零凭据可用）。
  */
 export async function search({
   q,
@@ -61,20 +51,11 @@ export async function search({
   limit = 30,
   signal,
 }: SearchParams): Promise<SearchResult> {
-  if (serverReady()) {
-    try {
-      return await http.get<SearchResult>('/api/search', {
-        query: { q, type, page, limit },
-        signal,
-        // 搜索要等上游，给足时间
-        timeoutMs: 25_000,
-      });
-    } catch (e) {
-      // 只有"连不上"才降级；服务端明确返回的业务错误要照实抛
-      if (!(e instanceof ApiError && e.isNetworkError)) throw e;
-    }
-  }
-  return directSearch(q, page, limit);
+  return http.get<SearchResult>('/api/search', {
+    query: { q, type, page, limit },
+    signal,
+    timeoutMs: 25_000,
+  });
 }
 
 export function fetchToplist(
@@ -149,50 +130,22 @@ export function fetchTrack(
   return http.get(`/api/tracks/${encodeURIComponent(id)}`, { signal });
 }
 
-/** 歌词。无翻译时 `tlyric.lyric` 为空串，不是错误 */
 /**
  * 歌词。
  *
- * 三条路，优先级从高到低：
- *   1. 服务端（它会做多源兜底）
- *   2. 直连 QQ 歌词（无凭据可用；服务端不在时这就是主路径）
- *   3. 本地快照（断网且没直连成功时，至少还剩上次那份）
+ * 优先向服务端请求（服务端自带多源兜底）；离线失败时回退至本地快照。
  */
 export async function fetchLyrics(id: string, signal?: AbortSignal): Promise<LyricResult> {
-  if (serverReady()) {
-    try {
-      const res = await http.get<LyricResult>(`/api/lyrics/${encodeURIComponent(id)}`, { signal });
-      // 落一份本地：离线时歌词不该是空白（用户报障"离线歌词也没了"）
-      void saveOffline(`lyric:${id}`, res);
-      return res;
-    } catch (err) {
-      // 业务错误照实抛；只有"连不上"才继续往下试直连
-      if (!(err instanceof ApiError && err.isNetworkError)) {
-        const cached = await loadOffline<LyricResult>(`lyric:${id}`);
-        if (cached) return cached;
-        throw err;
-      }
-    }
+  try {
+    const res = await http.get<LyricResult>(`/api/lyrics/${encodeURIComponent(id)}`, { signal });
+    // 落一份本地：离线时歌词不该是空白
+    void saveOffline(`lyric:${id}`, res);
+    return res;
+  } catch (err) {
+    const cached = await loadOffline<LyricResult>(`lyric:${id}`);
+    if (cached) return cached;
+    throw err;
   }
-
-  // 直连只认 QQ 曲目 id（`qq_<mid>`），其它来源没有直连歌词实现
-  const mid = id.startsWith('qq_') ? id.slice(3) : '';
-  if (mid) {
-    try {
-      const { lyric, trans } = await qqLyric(mid);
-      if (lyric) {
-        const res: LyricResult = { id, lrc: { lyric }, tlyric: { lyric: trans } };
-        void saveOffline(`lyric:${id}`, res);
-        return res;
-      }
-    } catch {
-      /* 落到快照 */
-    }
-  }
-
-  const cached = await loadOffline<LyricResult>(`lyric:${id}`);
-  if (cached) return cached;
-  throw new Error('歌词暂不可用');
 }
 
 /** 批量取曲目快照。只读本地缓存，不消耗上游配额 */

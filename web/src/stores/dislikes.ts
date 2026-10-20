@@ -1,12 +1,7 @@
 /**
- * 不喜欢（黑名单）store —— 本地优先。
+ * 不喜欢（黑名单）store。
  *
- * 单曲/歌手黑名单是"减少打扰"的偏好，断了网也必须生效：用户在车上点了
- * "不再推荐这位歌手"，回家连上网之前不该又冒出来。所以和收藏一样，
- * 本地是真相源，服务端只是备份。
- *
- * 对外暴露的条目形状沿用 `api/recommend.ts` 的 `DislikeItem`，
- * 这样设置页的列表渲染不用改。
+ * 服务端为单一真相源，乐观更新 + 失败回滚。
  */
 
 import { defineStore } from 'pinia';
@@ -18,12 +13,6 @@ import {
   type DislikeItem,
   type DislikeType,
 } from '@/api/recommend.ts';
-import { serverReady } from '@/offline/syncMode.ts';
-import {
-  listDislikes,
-  removeDislike as removeLocalDislike,
-  saveDislike,
-} from '@/offline/localdb.ts';
 
 export const useDislikesStore = defineStore('dislikes', () => {
   const items = ref<DislikeItem[]>([]);
@@ -39,23 +28,16 @@ export const useDislikesStore = defineStore('dislikes', () => {
     return items.value.some(d => d.type === type && d.targetId === id);
   }
 
-  async function hydrate(): Promise<void> {
-    const rows = await listDislikes();
-    items.value = rows.map(r => ({
-      type: r.type,
-      targetId: r.id,
-      name: r.name,
-      createdAt: r.addedAt,
-    }));
-    loaded.value = true;
-  }
-
   async function ensureLoaded(): Promise<void> {
     if (loaded.value) return;
     if (loadingPromise) return loadingPromise;
     loadingPromise = (async () => {
       try {
-        await hydrate();
+        const res = await fetchDislikes();
+        items.value = res.dislikes;
+        loaded.value = true;
+      } catch {
+        /* 静默失败 */
       } finally {
         loadingPromise = null;
       }
@@ -64,52 +46,38 @@ export const useDislikesStore = defineStore('dislikes', () => {
   }
 
   async function add(type: DislikeType, id: string, name = ''): Promise<void> {
-    await saveDislike(type, id, name);
+    const prev = [...items.value];
     items.value = [
       { type, targetId: id, name, createdAt: Date.now() },
       ...items.value.filter(d => !(d.type === type && d.targetId === id)),
     ];
-    if (serverReady()) {
-      void addDislikeRemote(type, id, name).catch(() => {});
+    try {
+      await addDislikeRemote(type, id, name);
+    } catch (e) {
+      items.value = prev;
+      throw e;
     }
   }
 
   async function remove(type: DislikeType, id: string): Promise<void> {
-    await removeLocalDislike(type, id);
+    const prev = [...items.value];
     items.value = items.value.filter(d => !(d.type === type && d.targetId === id));
-    if (serverReady()) {
-      void removeDislikeRemote(type, id).catch(() => {});
-    }
-  }
-
-  /** 与服务端对账：并集合并，本地独有的推上去。删除靠显式动作当场推 */
-  async function syncFromServer(): Promise<void> {
-    if (!serverReady()) return;
     try {
-      const res = await fetchDislikes();
-      const localKeys = new Set(items.value.map(d => `${d.type}:${d.targetId}`));
-      const remoteKeys = new Set(res.dislikes.map(d => `${d.type}:${d.targetId}`));
-
-      const missingLocally = res.dislikes.filter(
-        d => !localKeys.has(`${d.type}:${d.targetId}`)
-      );
-      for (const d of missingLocally) {
-        await saveDislike(d.type, d.targetId, d.name, d.createdAt);
-      }
-
-      for (const d of items.value) {
-        if (!remoteKeys.has(`${d.type}:${d.targetId}`)) {
-          void addDislikeRemote(d.type, d.targetId, d.name).catch(() => {});
-        }
-      }
-
-      if (missingLocally.length > 0) await hydrate();
-    } catch {
-      /* 对账失败保持本地现状 */
+      await removeDislikeRemote(type, id);
+    } catch (e) {
+      items.value = prev;
+      throw e;
     }
   }
 
-  /** 退出登录：只放下内存视图，本地黑名单保留（属于这台设备） */
+  /** 强制从服务端重新拉取（如导入备份后） */
+  async function reload(): Promise<void> {
+    loaded.value = false;
+    loadingPromise = null;
+    return ensureLoaded();
+  }
+
+  /** 退出登录：清空内存视图 */
   function reset(): void {
     items.value = [];
     loaded.value = false;
@@ -122,11 +90,10 @@ export const useDislikesStore = defineStore('dislikes', () => {
     trackItems,
     artistItems,
     has,
-    hydrate,
     ensureLoaded,
+    reload,
     add,
     remove,
-    syncFromServer,
     reset,
   };
 });

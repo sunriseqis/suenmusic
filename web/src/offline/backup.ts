@@ -1,21 +1,13 @@
 /**
  * 本机备份：导出 / 导入 `.sm`（JSON 快照）。
  *
- * 与服务端无关 —— 服务端挂了，本机数据还是本机数据；任何手段（文件、WebDAV）
- * 只要能把这个 JSON 还原回来就能用。备份范围：收藏、不喜欢、锚点、主题。
- *
- * 格式与服务端导出的 `.sm` 内层结构对齐（`type: 'favorites_backup'`），
- * 多出的 dislikes / anchors / settings 字段旧版本会忽略。
+ * 与服务端真相源对齐：导出时从服务端获取最新收藏列表与不喜欢列表，
+ * 导入时批量回写至服务端。备份范围：收藏、不喜欢、锚点、主题。
  */
 import type { Track } from '@/api/types.ts';
-import {
-  listDislikes,
-  listFavorites,
-  saveDislike,
-  saveFavorite,
-  type LocalDislike,
-} from './localdb.ts';
-import { getLocalAnchor, setLocalAnchor } from '@/api/direct/anchor.ts';
+import { fetchFavoriteTracks, batchAddFavorites } from '@/api/library.ts';
+import { fetchDislikes, addDislike, type DislikeItem } from '@/api/recommend.ts';
+import { anchorTrack } from '@/api/playback.ts';
 import { loadWebdav, saveWebdav, type WebdavConfig } from './webdav.ts';
 
 const ANCHORS_KEY = 'suenmusic.anchors';
@@ -28,7 +20,7 @@ export interface SmBackup {
   exportedAt: string;
   total: number;
   tracks: Track[];
-  dislikes: LocalDislike[];
+  dislikes: DislikeItem[];
   anchors: Record<string, unknown>;
   /** 设备级偏好（主题等）。换设备时一起带走 */
   settings: { theme?: string };
@@ -37,10 +29,21 @@ export interface SmBackup {
 }
 
 export async function buildBackup(): Promise<SmBackup> {
-  const rows = await listFavorites();
-  rows.sort((a, b) => a.addedAt - b.addedAt);
-  const tracks = rows.map(r => r.track).filter((t): t is Track => !!t);
-  const dislikes = await listDislikes();
+  let tracks: Track[] = [];
+  try {
+    const res = await fetchFavoriteTracks();
+    tracks = res.tracks ?? [];
+  } catch {
+    tracks = [];
+  }
+
+  let dislikes: DislikeItem[] = [];
+  try {
+    const res = await fetchDislikes();
+    dislikes = res.dislikes ?? [];
+  } catch {
+    dislikes = [];
+  }
 
   let anchors: Record<string, unknown> = {};
   try {
@@ -92,8 +95,7 @@ export interface ImportResult {
 }
 
 /**
- * 导入：合并而不是覆盖。
- * 已存在的收藏会被跳过（`saveFavorite` 以 id 为主键，重复写不会产生副本）。
+ * 导入备份至服务端。
  */
 export async function applyBackup(text: string): Promise<ImportResult> {
   let data: Partial<SmBackup>;
@@ -106,41 +108,57 @@ export async function applyBackup(text: string): Promise<ImportResult> {
     throw new Error('备份结构不正确（缺少 tracks）');
   }
 
-  const existing = new Set((await listFavorites()).map(r => r.id));
   let added = 0;
   let skipped = 0;
-  for (const t of data.tracks) {
-    if (!t || typeof t.id !== 'string') continue;
-    if (existing.has(t.id)) {
-      skipped += 1;
-      continue;
+  if (data.tracks.length > 0) {
+    try {
+      const res = await batchAddFavorites(data.tracks);
+      added = res.added ?? 0;
+      skipped = Math.max(0, (data.tracks.length) - added);
+    } catch {
+      // 容错处理
     }
-    await saveFavorite(t);
-    added += 1;
   }
 
   let dislikes = 0;
   for (const d of data.dislikes ?? []) {
-    if (!d || (d.type !== 'track' && d.type !== 'artist') || !d.id) continue;
-    await saveDislike(d.type, d.id, d.name ?? '');
-    dislikes += 1;
+    const targetId = (d as any).targetId || (d as any).id;
+    if (!d || (d.type !== 'track' && d.type !== 'artist') || !targetId) continue;
+    try {
+      await addDislike(d.type, targetId, d.name ?? '');
+      dislikes += 1;
+    } catch {
+      /* ignore */
+    }
   }
 
+  let currentAnchors: Record<string, unknown> = {};
+  try {
+    currentAnchors = JSON.parse(localStorage.getItem(ANCHORS_KEY) || '{}');
+  } catch {
+    currentAnchors = {};
+  }
   let anchors = 0;
   for (const [trackId, a] of Object.entries(data.anchors ?? {})) {
     const rec = a as { bvid?: string; title?: string; author?: string; durationSec?: number };
     if (!rec?.bvid) continue;
-    if (getLocalAnchor(trackId)) {
-      skipped += 1;
-      continue;
-    }
-    setLocalAnchor(trackId, {
-      bvid: rec.bvid,
-      title: rec.title ?? '',
-      author: rec.author ?? '',
-      durationSec: rec.durationSec ?? 0,
-    });
+    currentAnchors[trackId] = rec;
     anchors += 1;
+    try {
+      await anchorTrack(trackId, {
+        bvid: rec.bvid,
+        title: rec.title || '',
+        author: rec.author || '',
+        durationSec: rec.durationSec || 0,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  try {
+    localStorage.setItem(ANCHORS_KEY, JSON.stringify(currentAnchors));
+  } catch {
+    /* ignore */
   }
 
   if (data.settings?.theme) {

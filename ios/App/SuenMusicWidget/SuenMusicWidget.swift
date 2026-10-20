@@ -94,12 +94,30 @@ private struct Progress: View {
     }
 }
 
-private func lyricWindow(_ snap: WidgetNowPlaying) -> [WidgetLyricLine] {
+/// 快照只在 App 进度心跳里 2 秒写一次，Widget 两次刷新之间不会自己走。
+/// 这里按 `updatedAt` 推算"此刻"的位置，歌词与进度条才能和 App 内同步。
+private func livePosition(_ snap: WidgetNowPlaying, at now: Date) -> Int {
+    guard snap.playing, !isStale(snap) else { return snap.positionMs }
+    let delta = Int(max(0, now.timeIntervalSince1970 - snap.updatedAt) * 1000)
+    let position = snap.positionMs + delta
+    if snap.durationMs > 0 {
+        return min(position, snap.durationMs)
+    }
+    return position
+}
+
+/// 4×2 卡片的歌词窗口。
+///
+/// 刻意**不做当前句高亮**：Widget 的时间轴粒度做不到逐句同步，
+/// 一旦高亮就会暴露"高亮的和听到的对不上"。改成多行平铺 + 更长的时间窗口，
+/// 用户看到的是"一片歌词在缓慢滚动"，几十秒的偏差不会被察觉。
+private func lyricWindow(_ snap: WidgetNowPlaying, positionMs: Int) -> [WidgetLyricLine] {
     guard !snap.lyrics.isEmpty else { return [] }
-    var idx = snap.lyrics.lastIndex(where: { $0.ms <= snap.positionMs }) ?? 0
-    if idx > 0 { idx -= 1 }
-    let end = min(snap.lyrics.count, idx + 4)
-    return Array(snap.lyrics[idx..<end])
+    let idx = snap.lyrics.lastIndex(where: { $0.ms <= positionMs }) ?? 0
+    // 当前句放在第 3 行，上下各留余量：窗口覆盖更长时间，滚动更平缓
+    let start = max(0, idx - 2)
+    let end = min(snap.lyrics.count, start + 6)
+    return Array(snap.lyrics[start..<end])
 }
 
 /// 传输三键：上一首 / 播放暂停 / 下一首。
@@ -167,6 +185,8 @@ private struct TransportKeys: View {
 
 private struct SmallView: View {
     let snap: WidgetNowPlaying
+    /// 推算后的当前播放位置（见 `livePosition`），不是快照里的静态值
+    let positionMs: Int
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
@@ -186,12 +206,12 @@ private struct SmallView: View {
                 Spacer(minLength: 0)
             }
             Spacer(minLength: 0)
-            Text(isStale(snap) ? "已暂停" : elapsedText(snap.positionMs))
+            Text(isStale(snap) ? "已暂停" : elapsedText(positionMs))
                 .font(.system(size: 9, design: .monospaced))
                 .foregroundColor(cardT2)
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.bottom, 4)
-            Progress(value: snap.durationMs > 0 ? Double(snap.positionMs) / Double(snap.durationMs) : 0)
+            Progress(value: snap.durationMs > 0 ? Double(positionMs) / Double(snap.durationMs) : 0)
                 .opacity(isStale(snap) ? 0.35 : 1)
             if #available(iOS 17.0, *) {
                 TransportKeys(snap: snap, compact: true)
@@ -205,6 +225,8 @@ private struct SmallView: View {
 
 private struct MediumView: View {
     let snap: WidgetNowPlaying
+    /// 推算后的当前播放位置（见 `livePosition`），不是快照里的静态值
+    let positionMs: Int
     var body: some View {
         HStack(spacing: 0) {
             // 封面格：垂直居中，右侧发丝线
@@ -229,27 +251,27 @@ private struct MediumView: View {
                         .padding(.top, 2)
                 }
                 Spacer(minLength: 0)
-                let lines = lyricWindow(snap)
+                let lines = lyricWindow(snap, positionMs: positionMs)
                 if lines.isEmpty {
                     Text("暂无歌词")
-                        .font(.system(size: 10))
+                        .font(.system(size: 9.5))
                         .foregroundColor(cardT2.opacity(0.7))
                 } else {
-                    VStack(alignment: .leading, spacing: 3) {
+                    // 平铺多行、统一字重字色：不做"当前句"强调，避免高亮与听到的对不上
+                    VStack(alignment: .leading, spacing: 1.5) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                            let active = line.ms <= snap.positionMs &&
-                                (lines.last(where: { $0.ms <= snap.positionMs })?.ms == line.ms)
                             Text(line.text)
-                                .font(.system(size: active ? 11 : 10, weight: active ? .bold : .regular))
-                                .foregroundColor(active ? cardAccent : cardT2)
+                                .font(.system(size: 9.5))
+                                .foregroundColor(cardT2)
                                 .lineLimit(1)
                         }
                     }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 8) {
-                    Text(isStale(snap) ? "已暂停" : elapsedText(snap.positionMs))
-                    Progress(value: snap.durationMs > 0 ? Double(snap.positionMs) / Double(snap.durationMs) : 0)
+                    Text(isStale(snap) ? "已暂停" : elapsedText(positionMs))
+                    Progress(value: snap.durationMs > 0 ? Double(positionMs) / Double(snap.durationMs) : 0)
                     Text(totalText(snap.durationMs))
                 }
                 .font(.system(size: 9, design: .monospaced))
@@ -260,7 +282,8 @@ private struct MediumView: View {
             // 运输轨格：三键纵向居中，左侧发丝线
             if #available(iOS 17.0, *) {
                 TransportKeys(snap: snap, vertical: true)
-                    .frame(width: 56, maxHeight: .infinity)
+                    .frame(width: 56)
+                    .frame(maxHeight: .infinity)
                     .overlay(alignment: .leading) {
                         Rectangle()
                             .fill(Color.white.opacity(0.10))
@@ -277,11 +300,15 @@ struct SuenWidgetEntryView: View {
     let entry: SuenEntry
 
     var body: some View {
-        Group {
-            if family == .systemMedium {
-                MediumView(snap: entry.snap)
-            } else {
-                SmallView(snap: entry.snap)
+        // 每秒重算一次播放位置：快照是 2 秒一写的，不推算的话歌词会一格一格跳
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let position = livePosition(entry.snap, at: context.date)
+            Group {
+                if family == .systemMedium {
+                    MediumView(snap: entry.snap, positionMs: position)
+                } else {
+                    SmallView(snap: entry.snap, positionMs: position)
+                }
             }
         }
         .widgetURL(URL(string: "suenmusic://nowplaying"))
