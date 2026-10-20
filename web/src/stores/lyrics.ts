@@ -11,7 +11,6 @@ import {
   isHarmonyLyricsEnabled,
   type NativeLyricLine,
 } from '@/native/audio.ts';
-import { isIOS } from '@/native/update.ts';
 import type { LyricLine } from '@/utils/lyric.ts';
 
 /**
@@ -86,9 +85,7 @@ export const useLyricsStore = defineStore('lyrics', () => {
   }
 
   async function sendTimeline(trackId: string, lyricLines: LyricLine[]): Promise<void> {
-    // iOS 的 Widget 需要歌词时间轴，无论蓝牙歌词开关如何；
-    // Android 仍只在蓝牙歌词开启时推送，避免无谓的桥调用。
-    if (!isNativeAudio || (!isBluetoothLyricsEnabled() && !isIOS)) return;
+    if (!isNativeAudio || !isBluetoothLyricsEnabled()) return;
     const payload: NativeLyricLine[] = lyricLines
       .map(line => ({ startMs: Math.max(0, Math.round(line.time)), text: line.text.trim() }))
       .filter(line => line.text.length > 0);

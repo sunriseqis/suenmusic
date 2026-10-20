@@ -1,0 +1,18 @@
+{
+  "name": "suenmusic",
+  "private": true,
+  "version": "1.5.0",
+  "description": "SuenMusic 单仓：服务端 + Web + 三端原生壳 + fnOS 套件",
+  "scripts": {
+    "ios:sync": "node scripts/build-ios.mjs --sync-only",
+    "ios:build": "node scripts/build-ios.mjs",
+    "ios:unsigned": "node scripts/build-ios.mjs --unsigned",
+    "hw:sync": "node scripts/sync-hw.mjs",
+    "fn:build": "node scripts/build-fn.mjs",
+    "icons": "python3 scripts/gen-brand-icons.py",
+    "wordmark": "python3 web/scripts/write-wordmark-assets.py"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

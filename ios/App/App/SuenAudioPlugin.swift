@@ -107,21 +107,6 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
          * 第一首就走缓存；万一还没就绪，`streamUrl` 会回退直连（照样能播，
          * 只是这首不落缓存）。
          */
-        // 卡片（Widget）播放命令的落地点。
-        // intent 在 App 进程执行，但插件实例可能还没被 Capacitor 建出来
-        // （冷启动去后台跑 intent 时）；PlaybackCommand 内部会排队兜底。
-        //
-        // ⚠️ 这里只做转发，真正的 switch 在 `AudioEngine.handleWidgetAction(_:)`：
-        // `playingIntent` 是引擎的私有状态（不能用 `player.rate` 代替，见其声明处的说明），
-        // `play()` / `pause()` / `skipToNext()` 也全都是引擎的方法。
-        // 在插件侧直接写 `self.play()` 会撞上同名的 `@objc func play(_ call: CAPPluginCall)`
-        // —— 那个要传参数，于是报「missing argument for parameter #1」。
-        PlaybackCommand.shared.handler = { [weak self] action in
-            guard let engine = self?.engine else { return }
-            engine.handleWidgetAction(action)
-        }
-        PlaybackCommand.shared.drainQueue()
-
         LocalStreamProxy.shared.startIfNeeded()
         AudioCacheStore.shared.setDebugLog(SuenAudioPlugin.cacheDebugLog)
         LocalStreamProxy.shared.setDebugLog(SuenAudioPlugin.cacheDebugLog)
@@ -299,23 +284,7 @@ public class SuenAudioPlugin: CAPPlugin, CAPBridgedPlugin {
     /// 蓝牙歌词：iOS 的 Now Playing 不支持实时改 artist 字段（AVRCP 转发机制不同），
     /// 此功能在 iOS 上不可复刻 —— 空操作保持 JS 契约兼容，设置页开关由 Web 端按平台隐藏。
     @objc func setLyricTimeline(_ call: CAPPluginCall) {
-        let rows = call.getArray("lines") ?? []
-        var parsed: [WidgetLyricLine] = []
-        for raw in rows {
-            guard
-                let dict = raw as? [String: Any],
-                let ms = dict["startMs"] as? Int,
-                let text = dict["text"] as? String,
-                !text.isEmpty
-            else { continue }
-            parsed.append(WidgetLyricLine(ms: max(0, ms), text: text))
-        }
-        parsed.sort { $0.ms < $1.ms }
-        withEngine(call) { engine in
-            // 数据归引擎管：`widgetLyricLines` 与 `publishWidgetSnapshot()` 都是它的私有成员
-            engine.setWidgetLyrics(parsed)
-            call.resolve()
-        }
+        call.resolve()
     }
 
     @objc func setLyricLine(_ call: CAPPluginCall) {
@@ -584,9 +553,6 @@ final class AudioEngine: NSObject {
     /// 只有 Xcode、没有真机的阶段，这行日志是唯一能自证"数据源已就绪"的手段。
     /// 真机验收通过后可以关掉。
     private var nowPlayingDebugLog = true
-    /// 卡片用的歌词时间轴（与蓝牙歌词共用同一份数据）
-    private var widgetLyricLines: [WidgetLyricLine] = []
-    private var lastWidgetPublish = Date.distantPast
 
     init(plugin: SuenAudioPlugin) throws {
         self.plugin = plugin
@@ -768,33 +734,6 @@ final class AudioEngine: NSObject {
     func stop() {
         player.pause()
         reportPlaying(false)
-    }
-
-    /// 卡片（Widget）播放命令的落地实现。
-    ///
-    /// ⚠️ **必须留在引擎里，不能让插件自己 switch**：`playingIntent` 是引擎的私有状态
-    /// （不能用 `player.rate` 代替，见其声明处的说明），`play()` / `pause()` /
-    /// `skipToNext()` / `skipToPrevious()` 也同样都是引擎的方法。插件只做转发。
-    func handleWidgetAction(_ action: PlaybackAction) {
-        switch action {
-        case .playPause:
-            // 与锁屏 toggle 同源：看意图而不是 rate，缓冲时 rate 为 0
-            playingIntent ? pause() : play()
-        case .play:
-            play()
-        case .pause:
-            pause()
-        case .next:
-            skipToNext()
-        case .previous:
-            skipToPrevious()
-        }
-    }
-
-    /// 卡片用的歌词时间轴（与蓝牙歌词共用同一份数据，由插件的 `setLyricTimeline` 透传）。
-    func setWidgetLyrics(_ lines: [WidgetLyricLine]) {
-        widgetLyricLines = lines
-        publishWidgetSnapshot()
     }
 
     func seek(to positionMs: Int) {
@@ -1292,31 +1231,6 @@ final class AudioEngine: NSObject {
     /// （Apple 的 Now Playing 指南把"每秒刷新 elapsed"明确列为反模式）。
     /// 所以在 play / pause / seek / 换曲 / 队列重建 时各写一次即可，
     /// 另外用 `resyncNowPlayingIfStale()` 做低频校准兜底。
-    /// 把当前状态写进 App Group，供 Widget 读取。
-    /// 进度心跳里调用时机由 `lastWidgetPublish` 节流到 2 秒一次。
-    private func publishWidgetSnapshot() {
-        guard tracks.indices.contains(currentIndex) else {
-            SharedNowPlaying.clear()
-            return
-        }
-        let track = tracks[currentIndex]
-        let snap = WidgetNowPlaying(
-            title: track.title,
-            artist: track.artist,
-            album: track.album ?? "",
-            playing: playingIntent,
-            positionMs: max(0, Int(player.currentTime().seconds * 1000)),
-            durationMs: max(0, currentItemDurationMs()),
-            lyrics: widgetLyricLines,
-            updatedAt: Date().timeIntervalSince1970,
-            coverUrl: track.coverUrl ?? ""
-        )
-        SharedNowPlaying.publish(snap)
-        if let cover = track.coverUrl, !cover.isEmpty {
-            SharedNowPlaying.syncCover(urlString: cover)
-        }
-    }
-
     private func updateNowPlaying() {
         lastNowPlayingUpdate = Date()
 
@@ -1345,7 +1259,6 @@ final class AudioEngine: NSObject {
             loadArtwork(for: track.id, url: coverUrl)
         }
         refreshRemoteCommandAvailability()
-        publishWidgetSnapshot()
         logNowPlayingDiagnostics(reason: "update")
     }
 

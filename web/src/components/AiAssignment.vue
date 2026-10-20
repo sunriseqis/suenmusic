@@ -86,27 +86,43 @@ onMounted(load);
 .assign {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .row {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: var(--sp-3);
   min-height: 44px;
+  /* 与全站行节奏一致：没有内边距时文字会贴着面板边框（真机截图问题） */
+  padding: 0 var(--sp-4);
+  min-width: 0;
 }
 .row + .row {
   border-top: 1px solid var(--line);
 }
 .row-name {
-  flex: 1 1 auto;
+  /* 不伸缩：标签就那几个字，长出来的是下拉 */
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: var(--fs-sm);
 }
 .row-val {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: var(--fs-sm);
   color: var(--t2);
 }
 .select {
-  flex: none;
+  /*
+   * 关键：flex 0 1 auto + max-width + min-width 0。
+   * 之前是 flex:none + width:180 —— 原生 <select> 在安卓 WebView 里
+   * 不收缩，窄容器下直接顶破面板右边界（真机截图验证过）。
+   */
+  flex: 0 1 auto;
   width: 180px;
+  max-width: 60%;
+  min-width: 0;
   height: 32px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -114,5 +130,7 @@ onMounted(load);
   color: var(--t1);
   padding: 0 8px;
   font-size: var(--fs-sm);
+  font-family: inherit;
+  text-align: left;
 }
 </style>

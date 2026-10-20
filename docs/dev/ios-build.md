@@ -17,8 +17,8 @@ node scripts/build-ios.mjs --sync-only  # 只做到"Web 产物同步进 iOS 工�
 node scripts/build-ios.mjs --unsigned   # 不签名，产出 app/unsigned/ 下的 IPA（交重签工具）
 ```
 
-> 注意：脚本头部虽写着 `npm run ios:*`，但仓库根没有 package.json，
-> 实际请用上面的 `node scripts/build-ios.mjs` 形式（见 plan/2026-10-19-iOS-config-xml残留引用.md）。
+> 仓库根 `package.json` 已登记 `npm run ios:sync` / `ios:build` / `ios:unsigned`，
+> 与上面的 `node scripts/build-ios.mjs ...` 等价。
 
 ## 手工分步（排查问题时用）
 
@@ -54,8 +54,8 @@ xcodebuild -project ios/App/App.xcodeproj -target App -configuration Release \
 4. **版本号**：`MARKETING_VERSION` 取自仓库根 `VERSION` 文件，必须与它一致——
    服务端 iOS 更新判定走版本名比较，不一致则更新通道失效。
    `CURRENT_PROJECT_VERSION = 20000 + git 提交数`（与安卓同源）。
-5. **`IPHONEOS_DEPLOYMENT_TARGET` 保持 15.0**（App 与 `SuenMusicWidget` 两个
-   target 都是）。Xcode 的 "Update to recommended settings" 会把它抬到当前
+5. **`IPHONEOS_DEPLOYMENT_TARGET` 保持 15.0**（iOS 桌面卡片已于 2026-10-20
+   移除，现在只有 App 一个 target）。Xcode 的 "Update to recommended settings" 会把它抬到当前
    SDK 大版本（曾出现 26.0），产物随即只能在 iOS 26+ 安装、旧 Xcode 也无法构建。
    详见 `docs/memory/2026-10-19-部署目标被抬到26.0.md`。
 6. **IPA 命名**必须是 `SuenMusic-v<版本>-release.ipa`，服务端按

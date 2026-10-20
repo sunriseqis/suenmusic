@@ -1,5 +1,9 @@
 # iOS `config.xml` 残留引用待决（2026-10-19）
 
+> **状态：已按方案 B 解决（2026-10-20）。** `ios/.gitignore` 移除忽略、
+> 最小存根 `ios/App/App/config.xml` 提交进仓库，干净克隆不再复现 4 个编译 error。
+> 方案 A（删 pbxproj 引用）留作以后有 Xcode 环境时的清理项。
+
 背景：[`docs/memory/2026-10-19-iOS编译四报错与单仓同步.md`](../memory/2026-10-19-iOS编译四报错与单仓同步.md)
 
 ## 问题
