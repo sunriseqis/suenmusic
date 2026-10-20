@@ -144,6 +144,19 @@ async function main(): Promise<number> {
   });
   const token: string = reg.json.accessToken;
 
+  // 产品行为：首个账号注册成功后注册通道自动收闭（规划：注册完后由管理员决定开不开）。
+  // 先验证"默认已关"，再用管理员身份打开，然后才建得到第二个号。
+  const closedReg = await req('POST', '/api/auth/register', {
+    body: { username: 'blockeduser', password: PASSWORD },
+  });
+  checkError('首个账号后注册自动收闭', closedReg, 403, 'forbidden');
+
+  const openReg = await req('PATCH', '/api/admin/settings', {
+    token,
+    body: { allowRegistration: true },
+  });
+  check('管理员可重新打开注册', openReg.status === 200);
+
   const reg2 = await req('POST', '/api/auth/register', {
     body: { username: 'otheruser', password: PASSWORD },
   });

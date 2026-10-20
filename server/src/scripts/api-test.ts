@@ -177,6 +177,21 @@ async function main(): Promise<number> {
   let refreshToken: string = reg.json.refreshToken;
   const userId: number = reg.json.user.id;
 
+  // 产品行为：首个账号注册后注册通道自动收闭（规划：注册完后由管理员决定开不开）。
+  // 先验证已关，再用这个管理员身份打开 —— 后面重复用户名 / 弱口令等校验
+  // 都要求在"敞开"状态下才会走到，否则会被 403 挡住。
+  checkErrorShape(
+    '首个账号后注册自动收闭',
+    await req('POST', '/api/auth/register', { body: { username: 'blocked', password: PASSWORD } }),
+    403,
+    'forbidden'
+  );
+  const openReg = await req('PATCH', '/api/admin/settings', {
+    token: accessToken,
+    body: { allowRegistration: true },
+  });
+  eq('管理员重新打开注册', openReg.status, 200);
+
   checkErrorShape(
     '重复用户名',
     await req('POST', '/api/auth/register', { body: { username: 'tester', password: PASSWORD } }),

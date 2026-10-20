@@ -14,7 +14,7 @@ import { createLogger } from '../logger.ts';
 import { toNumber } from '../db/index.ts';
 import * as tokensRepo from '../db/repo/tokens.ts';
 import * as usersRepo from '../db/repo/users.ts';
-import { getSetting } from '../db/repo/settings.ts';
+import { getSetting, setSetting } from '../db/repo/settings.ts';
 import { PASSWORD_MIN_LENGTH } from '../utils/password.ts';
 import { InvalidUsernameError, UsernameTakenError, WeakPasswordError } from '../db/repo/users.ts';
 import type { PublicUser } from '../db/repo/users.ts';
@@ -176,6 +176,10 @@ export function registrationAllowed(): boolean {
 }
 
 export function register(input: Credentials): AuthSession {
+  // 首个账号注册成功后立刻收闭注册通道：之后开不开由管理员在设置里决定
+  // （规划原话："注册完后立刻自动管理注册通道，用户自己决定开不开"）。
+  // 不在这里写，countUsers()>0 后会回落到环境变量默认值 true，等于永远敞开。
+  let closeRegistrationAfterSetup = false;
   const { username, password, displayName } = normalizeRegisterCredentials(input);
 
   // 个人部署场景：允许关闭注册，但"库里一个用户都没有"时永远放行，
@@ -187,10 +191,17 @@ export function register(input: Credentials): AuthSession {
   if (password.length < minLen) {
     throw badRequest(`口令至少 ${minLen} 位`, 'weak_password');
   }
+  // 判定"这是不是首个账号"必须在 createUser 之前取
+  closeRegistrationAfterSetup = usersRepo.countUsers() === 0;
 
   try {
     const user = usersRepo.createUser({ username, password, displayName });
     log.info(`新用户注册：${user.username} (id=${user.id})`);
+    if (closeRegistrationAfterSetup) {
+      // 首个账号落地 = 初始化完成：把注册开关置关。之后管理员在设置里自行决定开不开。
+      setSetting('allow_registration', '0');
+      log.info('首个账号已创建，注册通道自动收闭（管理员可在设置中重新打开）');
+    }
     return issueSession(user, input.userAgent);
   } catch (err) {
     if (err instanceof UsernameTakenError) {
