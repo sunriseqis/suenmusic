@@ -15,7 +15,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import { chmod, cp, mkdir, readFile, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -37,6 +37,35 @@ function log(msg) {
 function fail(message) {
   console.error(`\n✖ [build-fn] ${message}`);
   process.exit(1);
+}
+
+/** 目录树里最新的 mtime（毫秒）。用于判断产物是否比源码旧。 */
+function newestMtime(dir) {
+  let newest = 0;
+  const walk = (current) => {
+    let entries;
+    try {
+      entries = readdirSync(current, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name === 'dist') continue;
+        walk(full);
+        continue;
+      }
+      try {
+        const m = statSync(full).mtimeMs;
+        if (m > newest) newest = m;
+      } catch {
+        /* ignore */
+      }
+    }
+  };
+  walk(dir);
+  return newest;
 }
 
 function run(command, args, options = {}) {
@@ -128,11 +157,44 @@ async function prepareNativeAppPayload() {
   // 清理任何历史 Docker 遗留
   await rm(join(APP_DIR, 'docker'), { recursive: true, force: true });
 
-  // 1. 确保前端 Web 产物存在
-  const webDist = join(ROOT, 'web/dist');
-  if (!existsSync(join(webDist, 'index.html'))) {
-    log('web/dist 不存在，正在执行前端编译...');
-    run('npm', ['run', 'build'], { cwd: join(ROOT, 'web') });
+  // 1. 确保前端 Web 产物存在且**不陈旧**
+  //
+  // 只判断"存在"是不够的：改了 web/src 却没重新 build，打包会静默带上旧前端 ——
+  // 表现是"新版 fpk 里前端还是上一个版本"，而包体积、校验和都正常，极难发现。
+  const webDir = join(ROOT, 'web');
+  const webDist = join(webDir, 'dist');
+  const distMissing = !existsSync(join(webDist, 'index.html'));
+  let distStale = false;
+  if (!distMissing) {
+    // 覆盖范围要包含 public/（字体、图标、favicon 都在这里）与 lockfile ——
+    // 只比 src 会漏掉"只换了 Gunstop.ttf"这种最典型的静默陈旧（重审 R-5）。
+    const srcNewest = Math.max(
+      newestMtime(join(webDir, 'src')),
+      newestMtime(join(webDir, 'public')),
+      ...[
+        join(webDir, 'index.html'),
+        join(webDir, 'vite.config.ts'),
+        join(webDir, 'package.json'),
+        join(webDir, 'package-lock.json'),
+      ]
+        .filter(existsSync)
+        .map(f => {
+          try {
+            return statSync(f).mtimeMs;
+          } catch {
+            return 0;
+          }
+        })
+    );
+    const distNewest = newestMtime(webDist);
+    distStale = srcNewest > distNewest;
+    if (distStale) {
+      log('web/dist 比 web 源码/public 旧（改过但没重新构建），强制重新编译前端');
+    }
+  }
+  if (distMissing || distStale) {
+    if (distMissing) log('web/dist 不存在，正在执行前端编译...');
+    run('npm', ['run', 'build'], { cwd: webDir });
   }
 
   // 同步前端静态文件到 app/web/dist
@@ -151,13 +213,23 @@ async function prepareNativeAppPayload() {
   await cp(join(ROOT, 'server/package.json'), join(appServer, 'package.json'));
   await cp(join(ROOT, 'server/package-lock.json'), join(appServer, 'package-lock.json'));
 
-  // 复制生产 node_modules
-  const serverNodeModules = join(ROOT, 'server/node_modules');
-  if (existsSync(serverNodeModules)) {
-    await cp(serverNodeModules, join(appServer, 'node_modules'), { recursive: true });
-  } else {
-    log('server/node_modules 不存在，正在安装生产依赖...');
-    run('npm', ['ci', '--omit=dev'], { cwd: appServer });
+  // 生产依赖：**必须重新安装**，不能直接拷开发目录的 node_modules。
+  //
+  // 以前的做法是"有就拷、没有才装"，于是构建机上只要装了 devDependencies
+  //（我本地 npm ci 装了 typescript / @types/node），typescript、@types 就会一起进包，
+  // 白占体积且让"这个包到底是哪来的依赖"不可复现。
+  // `npm ci --omit=dev` 严格按 package-lock 装，结果可复现。
+  log('安装生产依赖（npm ci --omit=dev，严格按 lockfile，不含 devDependencies）...');
+  try {
+    run('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: appServer });
+  } catch (err) {
+    fail(`生产依赖安装失败（打包需要网络）: ${err?.message ?? err}`);
+  }
+  const devLeftovers = ['typescript', '@types'].filter(name =>
+    existsSync(join(appServer, 'node_modules', name))
+  );
+  if (devLeftovers.length > 0) {
+    fail(`生产依赖里出现了开发依赖（${devLeftovers.join(', ')}），拒绝打包`);
   }
 
   // 删掉 .bin：里面全是 npm 生成的 CLI 软链，服务端运行时不依赖。

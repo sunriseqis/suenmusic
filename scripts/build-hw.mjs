@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 /**
- * 鸿蒙 NEXT HAP 构建脚本：Web 编译 → 同步至 rawfile → hvigorw 构建未签名 HAP。
+ * 鸿蒙 NEXT HAP 构建脚本：hvigorw 构建**未签名** HAP（供 CI 与侧签工具使用）。
+ *
+ * 客户端已全原生化（`pages/NativeRoot` 是 ArkUI 页面），**不再消费 web/dist** ——
+ * 所以默认构建不再跑 web 同步。旧的 ArkWeb 壳（`pages/Index.ets`）已不是入口页，
+ * 只有在需要手工回退验证 WebView 壳时，才显式加 `--with-web`。
  *
  * 用法：
- *   node scripts/build-hw.mjs --sync-only      # 仅执行 web build 并同步到 hw rawfile
- *   node scripts/build-hw.mjs                  # 编译未签名 HAP，产出 app/SuenMusic-v<版本>-unsigned.hap
+ *   node scripts/build-hw.mjs               # 编译未签名 HAP → output/SuenMusic-v<版本>-unsigned.hap
+ *   node scripts/build-hw.mjs --with-web    # 额外把 web/dist 同步进 rawfile（仅回退壳用）
+ *   node scripts/build-hw.mjs --sync-only   # 只做 web → rawfile 同步
+ *
+ * 签名：**故意不配**。CI 出未签名 HAP，真机由侧签工具签名；虚拟机不需要签名。
  */
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { copyFile, mkdir, readFile, writeFile, stat } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, writeFile, stat, chmod } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,6 +24,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const HW_DIR = join(ROOT, 'hw');
 const OUTPUT_DIR = join(ROOT, 'output');
 const SYNC_ONLY = process.argv.includes('--sync-only');
+/** 默认不再同步 web/dist：原生客户端不消费它；只有回退 WebView 壳时才需要 */
+const WITH_WEB = process.argv.includes('--with-web') || SYNC_ONLY;
 
 function log(msg) {
   console.log(`[build-hw] ${msg}`);
@@ -61,12 +70,12 @@ function readVersionCode(versionName) {
 }
 
 async function syncWeb() {
-  log('1/3 同步 Web 静态资源至鸿蒙 rawfile 目录...');
+  log('同步 Web 静态资源至鸿蒙 rawfile 目录（仅回退 WebView 壳需要）...');
   run('node', [join(ROOT, 'scripts/sync-hw.mjs')]);
 }
 
 async function injectVersion(versionName, versionCode) {
-  log(`2/3 注入版本号至鸿蒙工程: ${versionName} (${versionCode})...`);
+  log(`注入版本号至鸿蒙工程: ${versionName} (${versionCode})...`);
   const appJsonPath = join(HW_DIR, 'AppScope/app.json5');
   if (existsSync(appJsonPath)) {
     let content = await readFile(appJsonPath, 'utf8');
@@ -77,7 +86,7 @@ async function injectVersion(versionName, versionCode) {
 }
 
 async function assembleHap(versionName, versionCode) {
-  log('3/3 执行 Hvigor 编译未签名 HAP...');
+  log('执行 Hvigor 编译未签名 HAP...');
   const hvigorw = join(HW_DIR, 'hvigorw');
 
   // `hvigorw` 是 bash 脚本（#!/usr/bin/env bash），Windows 不能直接 spawn，
@@ -85,6 +94,17 @@ async function assembleHap(versionName, versionCode) {
   // 本地 Windows 请用 DevEco Studio 构建，或在 Git Bash / WSL 里跑本脚本。
   if (process.platform === 'win32') {
     fail('hvigorw 是 bash 脚本，Windows 上无法直接执行；请用 DevEco Studio 构建，或在 Git Bash / WSL 里运行本脚本。');
+  }
+
+  // 兜底补执行位：git 索引里是 100755，但 Windows 上 clone/copy 会丢，
+  // 丢失后 execFileSync 直接 EACCES（报错只是一句 Permission denied，很难定位）。
+  if (!existsSync(hvigorw)) {
+    fail(`缺少 ${hvigorw}：鸿蒙工程不完整`);
+  }
+  try {
+    await chmod(hvigorw, 0o755);
+  } catch (err) {
+    fail(`无法为 hvigorw 补执行位：${err?.message ?? err}`);
   }
 
   const args = [
@@ -135,7 +155,9 @@ const versionName = process.env.CUSTOM_VERSION || (await readVersionName());
 const { code: versionCode, source } = readVersionCode(versionName);
 log(`当前目标版本: v${versionName} / versionCode: ${versionCode} (${source})`);
 
-await syncWeb();
+if (WITH_WEB) {
+  await syncWeb();
+}
 
 if (SYNC_ONLY) {
   log('✔ 已完成静态资源同步（--sync-only）。');

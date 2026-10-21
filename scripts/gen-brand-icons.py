@@ -11,6 +11,7 @@
     web/public/           favicon.svg / favicon-16/32/192/512.png / apple-touch-icon.png / favicon.ico
     ios/                   AppIcon-1024.png
     android/app/src/main   adaptive（vector + 背景色）+ 各密度 mipmap PNG + monochrome
+    hw/                    AppScope 分层图标（background/foreground/layered_image.json）+ app_icon
     fn/                    ICON.PNG / ICON_256.PNG / app/ui/images/icon_*.png
     docs/icon/             母版 SVG + 渲染 PNG（README 同步更新）
 
@@ -390,6 +391,36 @@ def gen_splash() -> None:
         save(splash(w, h), f)
 
 
+def gen_harmony() -> None:
+    """
+    鸿蒙 NEXT 图标。
+
+    · `AppScope` 的 `app_icon.png` 是应用图标（桌面显示），必须与 Web/iOS 同一字形；
+    · 分层图标（API 12+ 推荐）：`background.png` 纯底板色 + `foreground.png` 只画字
+      （字控制在 52% 安全区内，系统会按各机型裁切）+ `layered_image.json` 聚合。
+    · `entry` 里的 `app_icon.png` 是应用内占位图（播放条/播放页的封面 fallback）。
+    """
+    app_scope = ROOT / "hw/AppScope/resources/base/media"
+    entry_media = ROOT / "hw/entry/src/main/resources/base/media"
+
+    save(render(1024), app_scope / "app_icon.png", opaque=True)
+    save(render(512), entry_media / "app_icon.png", opaque=True)
+
+    bg = Image.new("RGBA", (1024, 1024), PLATE)
+    save(bg, app_scope / "background.png")
+    save(render(1024, glyph_only=True, glyph_fit=0.52), app_scope / "foreground.png")
+    layered = app_scope / "layered_image.json"
+    layered.parent.mkdir(parents=True, exist_ok=True)
+    layered.write_text(
+        '{\n  "layered-image": {\n'
+        '    "background": "$media:background",\n'
+        '    "foreground": "$media:foreground"\n'
+        '  }\n}\n',
+        encoding="utf8",
+    )
+    print(f"  {layered.relative_to(ROOT)}")
+
+
 def main() -> None:
     print("web/public:")
     gen_web()
@@ -399,6 +430,8 @@ def main() -> None:
     gen_android()
     print("splash:")
     gen_splash()
+    print("hw:")
+    gen_harmony()
     print("fn:")
     gen_fn()
     print("docs/icon:")
