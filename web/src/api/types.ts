@@ -336,8 +336,15 @@ export interface ResolveResult {
   expiresInSec: number;
   /** 缓存命中层级：memory / db / upstream / cooldown */
   hitLevel: string;
-  /** 音源来源。客户端据此显示音源角标；缺省视为 bilibili */
-  source?: 'bilibili' | 'netease';
+  /**
+   * 音源来源。客户端据此显示音源角标。
+   *
+   * 服务端保证非空：`routes/resolve.ts` 统一 `row?.source ?? outcome.source ?? 'bilibili'`
+   * 归一化后才下发（缓存命中读库，库里那列也只会是 bilibili/netease）。
+   * 所以声明为必填 —— 客户端不再需要 `?? 'bilibili'`，
+   * 那种兜底只会把「服务端漏字段」掩盖成静默错标。
+   */
+  source: 'bilibili' | 'netease';
   costMs: number;
   topCandidates: ResolveCandidate[];
   /** B 站视频封面。曲目没有 Q 音专辑封面时的显示层兜底 */
@@ -401,26 +408,7 @@ export interface FavoritePage {
   summary?: string | null;
 }
 
-/** 用户自建歌单（与 QQ 官方歌单是两回事，后者见 `Playlist`） */
-export interface UserPlaylist {
-  id: string;
-  userId: number;
-  name: string;
-  description: string;
-  /** 没设封面时服务端已回落到首曲封面，不会是空串（除非歌单为空） */
-  coverUrl: string;
-  sort: number;
-  trackCount: number;
-  createdAt: number;
-  updatedAt: number;
-}
 
-export interface PlaylistItemEntry {
-  itemId: string;
-  trackId: string;
-  addedAt: number;
-  track: Track | null;
-}
 
 // ---------------------------------------------------------------------------
 // B 站音源账号（服务端持有的凭证）

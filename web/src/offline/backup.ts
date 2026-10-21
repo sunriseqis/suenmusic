@@ -5,6 +5,7 @@
  * 导入时批量回写至服务端。备份范围：收藏、不喜欢、锚点、主题。
  */
 import type { Track } from '@/api/types.ts';
+import { downloadBlob, type DownloadResult } from '@/utils/download.ts';
 import { fetchFavoriteTracks, batchAddFavorites } from '@/api/library.ts';
 import { fetchDislikes, addDislike, type DislikeItem } from '@/api/recommend.ts';
 import { anchorTrack } from '@/api/playback.ts';
@@ -73,18 +74,24 @@ export async function buildBackup(): Promise<SmBackup> {
   };
 }
 
-/** 触发浏览器/WebView 下载。原生端会走系统下载器 */
-export function downloadBackup(backup: SmBackup): void {
+/**
+ * 导出 .sm 备份。
+ *
+ * **必须走 `downloadBlob`**：安卓壳里 `blob:` + `<a download>` 不会触发系统下载，
+ * 同仓为此专门写了 `SuenNativeBackup` 桥（MediaStore 落到 Downloads/SuenMusic）。
+ * 之前这里自己拼 `<a download>` —— 壳里点「导出」什么都没生成，界面却报「已导出」，
+ * 换机时才发现备份不存在。
+ *
+ * @returns `'native'` = 已存进系统下载目录；`'browser'` = 已交给浏览器下载
+ */
+export async function downloadBackup(backup: SmBackup): Promise<DownloadResult> {
   const name = `suenmusic_backup_${backup.exportedAt.slice(0, 10)}.sm`;
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  const result = await downloadBlob(blob, name);
+  if (result === 'failed') {
+    throw new Error('导出失败：系统没有保存文件（可改用 Web 面板导出）');
+  }
+  return result;
 }
 
 export interface ImportResult {
@@ -111,13 +118,12 @@ export async function applyBackup(text: string): Promise<ImportResult> {
   let added = 0;
   let skipped = 0;
   if (data.tracks.length > 0) {
-    try {
-      const res = await batchAddFavorites(data.tracks);
-      added = res.added ?? 0;
-      skipped = Math.max(0, (data.tracks.length) - added);
-    } catch {
-      // 容错处理
-    }
+    // 不再吞异常：备份恢复是「数据兜底」路径，静默变成 0 首比直接报错危险得多
+    //（用户会以为库里本来就有，换机时才发现备份没生效）。
+    // 分片提交由 api/library.ts 的 batchAddFavorites 负责。
+    const res = await batchAddFavorites(data.tracks);
+    added = res.added ?? 0;
+    skipped = Math.max(0, data.tracks.length - added);
   }
 
   let dislikes = 0;

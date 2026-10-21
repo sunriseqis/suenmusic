@@ -30,9 +30,16 @@ const props = withDefaults(
 
 /** 两档尺寸：md 给侧边栏，lg 给登录页（登录页要撑起整张卡片的分量） */
 const DIMS = {
-  // md 给侧边栏：高度与导航项一致（46），字形略大以撑住同宽面板
-  md: { height: 46, padX: 14, gap: 10, mark: 24, word: 18 },
-  lg: { height: 58, padX: 18, gap: 13, mark: 27, word: 21 },
+  /**
+   * md 给侧边栏。
+   *
+   * ⚠️ MarkBold 的字形在 viewBox(8000) 里只占约 70%（X:-802~4800 / Y:-964~6024），
+   * 四周有 ~30% 留白 —— 之前 mark 配 24px，实际字形只有 ~17px，
+   * 底板颜色又与网页背景接近，视觉上就是"LOGO 极小"。
+   * 现在 mark 提到 34（字形有效 ≈24px），面板同步放大到 52。
+   */
+  md: { height: 52, padX: 10, gap: 10, mark: 34, word: 19 },
+  lg: { height: 64, padX: 16, gap: 12, mark: 38, word: 22 },
 } as const;
 
 const dim = DIMS[props.size];

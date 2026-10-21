@@ -115,13 +115,3 @@ export function coverSrc(raw: string | undefined | null): string {
   }
   return url;
 }
-
-/** 主动预缓存一批封面（列表页可调用；不调用也会在渲染时顺手缓存） */
-export function prefetchCovers(urls: Array<string | undefined | null>): void {
-  if (!isNativeAudio) return;
-  for (const u of urls) {
-    const url = String(u ?? '');
-    if (url && /^https?:/.test(url) && !localMap.has(url)) pending.add(url);
-  }
-  schedule();
-}

@@ -6,8 +6,8 @@
  * 登出需要清空本地令牌，也由 session store 统一处理。
  */
 
-import { getRefreshToken, http, publicRequest } from './client.ts';
-import type { AuthConfig, AuthSession, PublicUser, SessionInfo } from './types.ts';
+import { http, publicRequest } from './client.ts';
+import type { AuthConfig, AuthSession, PublicUser } from './types.ts';
 
 export function fetchAuthConfig(): Promise<AuthConfig> {
   return publicRequest<AuthConfig>('/api/auth/config');
@@ -50,17 +50,6 @@ export function changePassword(oldPassword: string, newPassword: string): Promis
 
 export function fetchMe(): Promise<{ user: PublicUser }> {
   return http.get<{ user: PublicUser }>('/api/auth/me');
-}
-
-export function fetchSessions(): Promise<{ sessions: SessionInfo[] }> {
-  const currentToken = getRefreshToken();
-  return http.get<{ sessions: SessionInfo[] }>('/api/auth/sessions', {
-    query: currentToken ? { current_token: currentToken } : undefined,
-  });
-}
-
-export function revokeSession(sessionId: string): Promise<{ ok: boolean; revoked: boolean }> {
-  return http.post('/api/auth/revoke', { sessionId });
 }
 
 /** Web 同源会话：cookie 由服务端下发，响应只带 user */

@@ -48,6 +48,9 @@ function readStreamSession(): { baseUrl: string; token: string } | null {
   }
 }
 
+/** 通知权限只在首次播放时申请一次 */
+let notificationPermissionRequested = false;
+
 export class NativeAudioBridge extends EventTarget {
   private srcField = '';
   preload = 'none';
@@ -124,7 +127,10 @@ export class NativeAudioBridge extends EventTarget {
     // IllegalArgumentException 直接崩掉应用（实测踩过）。这里只做防御，
     // 真正的保障是 store 在改动队列时调用 syncNativeQueue。
     if (idx !== null && idx >= 0 && idx < this.items.length) {
-      void SuenAudio.seekToIndex({ index: idx, autoplay: false, force: true }).catch(() => {});
+      // 不能传 force：原生侧 force 会无条件 `seekTo(index, 0)`，把"恢复会话"
+      // 停在续播位置的那首歌一键归零（真机报障："一点播放就从头开始"）。
+      // IDLE/ENDED 这类故障态由原生自己判（见 SuenAudioPlugin.setQueue 的 needPrepare）。
+      void SuenAudio.seekToIndex({ index: idx, autoplay: false, force: false }).catch(() => {});
     }
   }
 
@@ -151,6 +157,14 @@ export class NativeAudioBridge extends EventTarget {
       await SuenAudio.seekToIndex({ index: idx }).catch(() => {});
     }
     this.pausedFlag = false;
+    // Android 13+ 的通知权限必须**在运行时申请**，否则系统静默屏蔽通知栏
+    // 与锁屏的媒体控制条 —— 那正是这个壳宣称的核心能力。以前全仓没人调用这个
+    // 插件方法（MainActivity 里那个同名方法是死的），所以 13+ 上从来没有通知
+    //（重审 F）。挂在"首次真正播放"上：既符合按需原则，又借到了用户手势。
+    if (!notificationPermissionRequested) {
+      notificationPermissionRequested = true;
+      void SuenAudio.requestNotificationPermission().catch(() => {});
+    }
     await SuenAudio.play().catch(() => {});
   }
 

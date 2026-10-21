@@ -31,19 +31,6 @@ export async function saveAiModels(payload: {
   });
 }
 
-export async function testAiModel(payload: {
-  id?: string;
-  baseUrl?: string;
-  apiKey?: string;
-  model?: string;
-}): Promise<{ ok: boolean; latencyMs: number }> {
-  return request<{ ok: boolean; latencyMs: number }>('/api/ai/models/test', {
-    method: 'POST',
-    body: payload,
-    timeoutMs: 30_000,
-  });
-}
-
 export async function fetchPersona(): Promise<PersonaDetail> {
   return request<PersonaDetail>('/api/ai/persona');
 }
@@ -71,10 +58,3 @@ export async function tunePersona(guidance: string): Promise<{ ok: boolean; pers
   });
 }
 
-export async function refreshPersona(): Promise<{ ok: boolean; persona: PersonaDetail }> {
-  return request<{ ok: boolean; persona: PersonaDetail }>('/api/ai/persona/refresh', {
-    method: 'POST',
-    timeoutMs: LONG_AI_TIMEOUT_MS,
-    noFailover: true,
-  });
-}

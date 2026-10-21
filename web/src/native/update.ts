@@ -7,18 +7,11 @@ export const isIOS = Capacitor.getPlatform() === 'ios';
  * 鸿蒙 NEXT：**不走 Capacitor** —— 那套桥在鸿蒙端不存在，`isAndroid` / `isIOS` /
  * `isNativeAudio` 在这里全是 false。鸿蒙只通过 ArkTS 注入的全局对象
  * `window.SuenHarmony` 通信，所以用"注入对象在不在"来认平台。
- */
-export const isHarmony = typeof window !== 'undefined' && !!window.SuenHarmony;
-
-/**
- * 是不是「Web 面板」——同源浏览器里的控制台（服务端自己发的前端）。
  *
- * 服务器配置类操作（账号管理、AI 模型增删改、音源扫码、数据备份）只允许
- * 从这里发起：约定见 docs/memory/2026-10-18-设置页与服务端边界.md，
- * 服务端配套 requireWebAdmin（Bearer 一律 403）。
- * 三个原生壳（安卓/iOS 的 Capacitor、鸿蒙的 bridge）都不是 Web 面板。
+ * 平台判定统一收在 `native/platform.ts`，这里只做再导出：
+ * 2026-10-20 审计发现「两处各写一套」导致鸿蒙被当成同源 Web 面板、整端连不上服务端。
  */
-export const isWebPanel = !isHarmony && !Capacitor.isNativePlatform();
+export { isHarmony, isNativeShell, isWebPanel } from './platform.ts';
 
 /**
  * 原生端是否存在应用更新通道。

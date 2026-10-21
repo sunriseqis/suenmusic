@@ -48,9 +48,6 @@
 }
 
 /** 分界线：一条发丝线，不用阴影 */
-.neu-divide-b {
-  box-shadow: 0 1px 0 var(--line);
-}
 
 /* --------------------------------------------------------------------------
    交互态
@@ -111,9 +108,6 @@
 .neu-t2 {
   color: var(--t2);
 }
-.neu-accent-text {
-  color: var(--accent-text);
-}
 
 .neu-ellipsis {
   overflow: hidden;
@@ -134,23 +128,8 @@
    排版辅助
    -------------------------------------------------------------------------- */
 
-.neu-row {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  min-width: 0;
-}
 
-.neu-col {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
 
-.neu-spacer {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 
 .neu-sr {
   position: absolute;

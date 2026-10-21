@@ -123,13 +123,6 @@ export function fetchSimilarArtists(
   });
 }
 
-export function fetchTrack(
-  id: string,
-  signal?: AbortSignal
-): Promise<{ track: Track; source: string }> {
-  return http.get(`/api/tracks/${encodeURIComponent(id)}`, { signal });
-}
-
 /**
  * 歌词。
  *

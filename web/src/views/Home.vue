@@ -840,62 +840,6 @@ onBeforeUnmount(() => {
   gap: var(--sp-4);
 }
 
-.resume {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  width: 100%;
-  padding: var(--sp-3);
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--t1);
-  text-align: left;
-  cursor: pointer;
-}
-.resume-art {
-  width: 52px;
-  height: 52px;
-  border-radius: var(--r-sm);
-  object-fit: cover;
-  flex: none;
-  border: 1px solid var(--line);
-}
-.resume-art.ph {
-  display: block;
-  background: var(--panel-2);
-}
-.resume-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-.resume-title {
-  font-size: var(--fs-md);
-  font-weight: var(--fw-medium);
-}
-.resume-sub {
-  font-size: var(--fs-xs);
-  color: var(--t2);
-}
-.resume-bar {
-  display: block;
-  height: 2px;
-  margin-top: 3px;
-  background: var(--line);
-}
-.resume-bar i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-}
-.local-actions {
-  display: flex;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-}
-
 .block-head {
   display: flex;
   align-items: center;

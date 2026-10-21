@@ -41,10 +41,6 @@ declare global {
       updatePlaybackState(stateJson: string): void;
       updateLyric?(lyricJson: string): void;
       updateFavorite?(favJson: string): void;
-      getAppVersion?(): string;
-      openInBrowser?(url: string): boolean;
-      isNativePlatform?(): boolean;
-      getPlatform?(): string;
     };
     __suenAudioControl?: {
       play: () => void;
@@ -360,6 +356,15 @@ export const usePlayerStore = defineStore('player', () => {
     // 1. 同步至鸿蒙 NEXT 原生 AVSession（原生端自动拉取图片并解码为 PixelMap 显示至播控中心与锁屏）
     if (typeof window !== 'undefined' && window.SuenHarmony?.updateMediaMetadata) {
       try {
+        // 收藏态：桌面卡片上的红心。
+        //
+        // 只有收藏集合**已加载**时才带这个键 —— 否则会把"还没拉过收藏"当成
+        // "没收藏"，每次元数据上报都把红心清掉（重审 F）。
+        // 原生侧只在键存在时才覆盖（见 Index.ets 的 parseMeta / updateMetadata）。
+        const favStore = useFavoritesStore();
+        const favoriteField = favStore.loaded
+          ? { favorite: favStore.ids.has(track.id) }
+          : {};
         window.SuenHarmony.updateMediaMetadata(
           JSON.stringify({
             assetId: track.id,
@@ -368,6 +373,7 @@ export const usePlayerStore = defineStore('player', () => {
             album,
             coverUrl: cover,
             durationMs: duration,
+            ...favoriteField,
           })
         );
       } catch {
@@ -434,8 +440,15 @@ export const usePlayerStore = defineStore('player', () => {
   function setupMediaSessionControls(): void {
     if (typeof window === 'undefined') return;
 
-    // 供鸿蒙原生 AVSession 反向控制网页播放器
+    // 供鸿蒙原生 AVSession 反向控制网页播放器。
+    //
+    // ⚠️ **必须合并，不能整体覆盖**：`registerGlobalAudioControl()`（`main.ts` 启动时
+    // 调用一次）注册的是全量版，额外带 `toggle` / `toggleFavorite`（桌面卡片中间键
+    // 与收藏键要用），而且它有 `if (window.__suenAudioControl) return` 守卫 ——
+    // 这里若整体替换，全量版永远不会重建，卡片那两个键从此是 undefined，
+    // `PlayerControlHub` 里 `runJavaScript` 静默失败（重审 F）。
     window.__suenAudioControl = {
+      ...(window.__suenAudioControl ?? {}),
       play: () => {
         if (audio && audio.paused) void toggle();
       },
@@ -483,6 +496,9 @@ export const usePlayerStore = defineStore('player', () => {
    * 时长显示历史脏值，用户看到的就是"播不了 + 时长信息全是错的"（实测报障）。
    */
   function attachAudioListeners(el: HTMLAudioElement): void {
+    /** 停顿看门狗定时器（见 STALL_TIMEOUT_MS） */
+    let stallTimer: ReturnType<typeof setTimeout> | null = null;
+
     /**
      * 鸿蒙播控中心的歌词滚动，是靠原生 AVSession 的 playbackState 推算"现在播到哪"。
      * 原来只在 play / pause / ended / loadedmetadata / seek() 这些时刻上报一次，
@@ -571,8 +587,30 @@ export const usePlayerStore = defineStore('player', () => {
       void advance(true);
     });
 
+    /**
+     * 停顿看门狗：`waiting` 之后迟迟不前进就自愈一次（见 STALL_TIMEOUT_MS 注释）。
+     * `handlePlaybackError` 内部有 `retriedForCurrent` 门闩，所以最多只会重试一次，
+     * 不会和 `error` 事件那条路叠加成死循环。
+     */
+    const clearStallWatchdog = (): void => {
+      if (stallTimer) {
+        clearTimeout(stallTimer);
+        stallTimer = null;
+      }
+    };
+    const armStallWatchdog = (): void => {
+      clearStallWatchdog();
+      stallTimer = setTimeout(() => {
+        stallTimer = null;
+        // 已经没在播（用户暂停 / 已切歌）就别打扰
+        if (!playing.value) return;
+        void handlePlaybackError();
+      }, STALL_TIMEOUT_MS);
+    };
+
     el.addEventListener('waiting', () => {
       loading.value = true;
+      armStallWatchdog();
     });
     // 元数据一到就落位置：比原来在 playing 里设更早，既避免"先出声再跳"，
     // 也让"就位但不自动播放"的恢复会话能拿到正确位置
@@ -583,16 +621,24 @@ export const usePlayerStore = defineStore('player', () => {
     });
     el.addEventListener('canplay', () => {
       loading.value = false;
+      clearStallWatchdog();
       applyPendingSeek();
     });
     el.addEventListener('playing', () => {
       loading.value = false;
+      clearStallWatchdog();
       // 兜底：前面两次若因 seekable 未就绪而没设上，这里再试
       applyPendingSeek();
       syncMediaSessionPlaybackState('playing', positionMs.value, durationMs.value);
     });
 
+    el.addEventListener('timeupdate', () => {
+      // 时间在走 = 没卡住
+      clearStallWatchdog();
+    });
+
     el.addEventListener('error', () => {
+      clearStallWatchdog();
       void handlePlaybackError();
     });
   }
@@ -761,6 +807,11 @@ export const usePlayerStore = defineStore('player', () => {
           if (opts.allowResume !== true) anchorCandidate.value = track;
           return false;
         }
+        if (!hasOfflineCache()) {
+          // 没有离线缓存 → 跳下一首也放不了，直接停在当前曲并给出明确提示
+          errorMessage.value = '当前网络连接失败，请检查网络后重试';
+          return false;
+        }
         networkFailStreak += 1;
         if (networkFailStreak >= MAX_NETWORK_FAILS) {
           networkFailStreak = 0;
@@ -781,10 +832,30 @@ export const usePlayerStore = defineStore('player', () => {
       if (seq !== loadSequence) return false;
       if (!probe.ok) {
         lastFailedTrackId = track.id;
-        errorMessage.value =
-          probe.status === 403 || probe.status === 404
-            ? '音源链接已失效，正在重新匹配'
-            : `音源不可用（HTTP ${probe.status}）`;
+        /**
+         * 401 = **流令牌过期**（服务端 `stream.ts authorize` 对无效/过期令牌回 401），
+         * 403/404 = 音源地址失效。三者都是"重新解析一次就好"，不是"音源不可用"。
+         *
+         * 以前只判 403/404 且文案写"正在重新匹配"却并没有任何重解析动作；401 直接
+         * 落进 else，用户看到"音源不可用（HTTP 401）"，且永远不会自愈（重审 P1）。
+         */
+        const expired = probe.status === 401 || probe.status === 403 || probe.status === 404;
+        if (expired && !retriedForCurrent) {
+          retriedForCurrent = true;
+          errorMessage.value = '播放凭据已过期，正在重新解析';
+          // 刻意不 force：force 是"重新匹配音源"（会真打上游搜索、可能触发限流），
+          // 令牌过期只需要普通重解析。
+          return load(track, { ...opts, force: false });
+        }
+        if (probe.status === 0) {
+          // 探测期间网络断了（fetch 直接失败，没有 HTTP 状态码）——
+          // 这不是"音源不可用"，别把 0 当成 HTTP 状态码甩给用户
+          errorMessage.value = '当前网络连接失败，请检查网络后重试';
+          return false;
+        }
+        errorMessage.value = expired
+          ? '音源链接已失效，请重新选择音源'
+          : `音源不可用（HTTP ${probe.status}）`;
         return false;
       }
 
@@ -794,7 +865,8 @@ export const usePlayerStore = defineStore('player', () => {
       streamTtlMs = Math.max(0, result.streamTokenExpiresInSec) * 1000;
       streamTrackId = track.id;
       // 音源角标数据：网易云的歌标红、B 站的歌标粉（用户拍板的约定）
-      currentSource.value = result.source ?? 'bilibili';
+      // 直接用服务端归一化后的值（契约见 api/types.ts 的 ResolveResponse.source）
+      currentSource.value = result.source;
       currentSourceTrackId.value = track.id;
 
       // 时长优先级：流的精确时长（服务端 X-Audio-Duration-Ms）> 曲目元数据
@@ -814,6 +886,9 @@ export const usePlayerStore = defineStore('player', () => {
       el.load();
 
       lastFailedTrackId = null;
+      // 成功装载 = 网通了。注释里写的"成功播出一首就清零"以前没真的实现，
+      // 于是累计 5 次失败后会永久停跳（重审 P2）。
+      networkFailStreak = 0;
       return true;
     } catch (e) {
       lastFailedTrackId = track.id;
@@ -828,6 +903,11 @@ export const usePlayerStore = defineStore('player', () => {
       if (offline === 'uncached' || (e instanceof ApiError && e.isNetworkError)) {
         if (opts.noSkip || preservePos) {
           errorMessage.value = '当前网络连接失败，请稍后再试';
+          notifyNetworkError('当前网络连接失败，已暂停播放');
+          return false;
+        }
+        if (!hasOfflineCache()) {
+          errorMessage.value = '当前网络连接失败，请检查网络后重试';
           notifyNetworkError('当前网络连接失败，已暂停播放');
           return false;
         }
@@ -887,10 +967,30 @@ export const usePlayerStore = defineStore('player', () => {
    * 出去 → 跳下一首继续试。缓存只负责"有缓存走缓存"，不做"去后台找有缓存的歌"
    * 那种事（那是把冗余手段当功能）。
    */
+  /**
+   * 这台设备有没有「离线缓存」能力 —— 决定网络失败后该不该自动跳下一首。
+   *
+   * 只有 Android / iOS 有原生磁盘缓存（`SuenAudio.isCached`）。浏览器与鸿蒙没有：
+   * 断网时**换哪一首都放不了**，自动跳歌只会让队列一首首闪过去、每首都报错，
+   * 比停住并明确提示更差（用户以为"播放器疯了"）。
+   * 有缓存的平台继续跳是合理的：下一首可能已经缓存过。
+   */
+  const hasOfflineCache = (): boolean => isNativeAudio;
+
   let networkFailStreak = 0;
   /** 上一次失败是否属于"上游限速"（决定播到一半失败时是提示繁忙还是跳下一首） */
   let lastFailureRateLimited = false;
   const MAX_NETWORK_FAILS = 5;
+
+  /**
+   * 停顿看门狗的超时。
+   *
+   * 断网时 `<audio>` 往往既不报 error、也不前进 —— 只发 `waiting`，于是 loading
+   * 会永远转圈。服务端的 8 秒空闲守护救不了这种：上游流是好的，是**客户端这边**
+   * 断了。12 秒没有任何进度就按"一次播放失败"处理，交给既有的
+   * `handlePlaybackError` 自愈一次（它会带位置重新解析）。
+   */
+  const STALL_TIMEOUT_MS = 12_000;
 
   /**
    * 解析失败后前进一首继续试（走到队尾不绕回，由失败计数兜底）。
@@ -1205,6 +1305,18 @@ export const usePlayerStore = defineStore('player', () => {
    *   有值时不再去问服务端的续播记录 —— 服务端那条记录可能缺失或被写坏
    * @returns 音源是否装载成功
    */
+  /**
+   * `startCurrent` 的调用序号。
+   *
+   * 为什么需要：`load()` 内部用 `loadSequence` 判断「我是不是被后面的装载顶掉了」，
+   * 被顶掉时同样 `return false` —— 与「真的失败」共用一个返回值。
+   * 于是连点「下一首」时，第 1 次调用会走进失败分支，对**共享的** audio 执行
+   * `pause + removeAttribute('src')`，把第 2 次已经装好的音频摘掉：
+   * 界面显示第二首、实际无声、playing=false。
+   * 这里给 startCurrent 自己一个序号，只有「最新那次」才允许做失败收尾。
+   */
+  let startSequence = 0;
+
   async function startCurrent(
     opts: {
       allowResume?: boolean;
@@ -1219,6 +1331,7 @@ export const usePlayerStore = defineStore('player', () => {
     const track = currentTrack.value;
     if (!track) return false;
 
+    const startSeq = ++startSequence;
     const el = ensureAudio();
     retriedForCurrent = false;
     pendingSeekMs = null;
@@ -1238,6 +1351,9 @@ export const usePlayerStore = defineStore('player', () => {
           : null,
     });
     if (!ok) {
+      // 被后一次点播顶掉 ≠ 失败：此时 audio 里装的已经是新曲的流，
+      // 绝不能在这里 pause / 摘 src（那正是"点了没反应、自己停了"的成因）。
+      if (startSeq !== startSequence) return false;
       playing.value = false;
       // 装载失败必须把发声体一起停掉：`<audio>` 里还装着上一首的流，
       // 不摘的话会出现"界面显示的是这首失败的曲子，声音还是上一首"的错位
@@ -1246,6 +1362,10 @@ export const usePlayerStore = defineStore('player', () => {
       el.load();
       return false;
     }
+
+    // 成功但已被顶掉：后续的状态写入（位置 / 会话快照 / 自动播放）都属于上一条曲目，
+    // 一律不做 —— 否则会把新曲的 positionMs、currentTrack 快照覆盖成旧值
+    if (startSeq !== startSequence) return false;
 
     /**
      * 带起播位置的装载（恢复会话）要把位置**在 saveSession 之前**写回状态。
@@ -1845,6 +1965,8 @@ export const usePlayerStore = defineStore('player', () => {
       streamTrackId = null;
       streamTtlMs = 0;
       clearSession();
+      // 原生侧也要停：否则锁屏/通知栏还挂着一条已经空掉的队列继续接续
+      if (isNativeAudio) void SuenAudio.stop({ positionMs: 0 }).catch(() => {});
       return;
     }
 
@@ -1859,6 +1981,22 @@ export const usePlayerStore = defineStore('player', () => {
         // 原本就是暂停状态的话，装载但不出声
         audio?.pause();
       }
+    }
+
+    /**
+     * 队列是原生队列的镜像，**任何增删都必须同步** —— 这是同文件 `syncNativeQueue`
+     * 上方的契约。之前 removeAt 漏了这一步：从队列里删掉一首之后，原生队列仍留着它，
+     * 锁屏/熄屏接续就会播「已经不在队列里的歌」，`seekToIndex` 也会因为索引错位
+     * 跳到别的曲目上。
+     *
+     * 用整队列重发而不是 tailOnly：被删的项可能在当前曲**之前**，
+     * 尾段替换法删不掉它。
+     */
+    if (isNativeAudio) {
+      await syncNativeQueue({
+        autoplay: wasPlaying,
+        startPositionMs: positionMs.value,
+      }).catch(() => {});
     }
 
     saveSession();
@@ -1940,6 +2078,10 @@ export const usePlayerStore = defineStore('player', () => {
     syncMediaSessionPlaybackState('stopped', 0, 0);
     // 队列属于上一个账号，快照也不能留给下一个用户
     clearSession();
+    // 原生侧（Media3 / AVQueuePlayer）也要停：`audio` 那三行只作用于 WebView 的
+    // <audio>，原生队列与通知栏/车机控件仍挂着上一个账号的曲目，登出后还能被操作
+    //（重审 F）。与 removeAt 清空队列时的处理保持一致。
+    if (isNativeAudio) void SuenAudio.stop({ positionMs: 0 }).catch(() => {});
   }
 
   /**
@@ -1965,17 +2107,28 @@ export const usePlayerStore = defineStore('player', () => {
       audio.removeAttribute('src');
       playing.value = false;
     }
-    if (!resumeTrack || !wasPlaying) return;
+    // 暂停态也要重绑：原生队列里存的是**绝对**流地址，换 base 后整条队列失效，
+    // 之后从通知栏/锁屏按播放必然 404（重审 P1）。
+    if (!resumeTrack) return;
 
     void (async () => {
       try {
         if (isNativeAudio) {
           const bridge = ensureAudio() as unknown as NativeAudioBridge;
           bridge.rebindBaseUrl(getBaseUrl());
-          await syncNativeQueue();
+          await syncNativeQueue({ autoplay: wasPlaying, startPositionMs: resumeAt });
         }
-        pendingSeekMs = resumeAt > RESUME_MIN_MS ? resumeAt : null;
-        await startCurrent();
+        if (!wasPlaying) return;   // 暂停态：只把队列与位置重绑好，不出声
+
+        // ⚠️ 位置必须走 `startPositionMs` 传进去。`startCurrent()` 入口第一件事就是
+        // `pendingSeekMs = null`，所以原来那行 `pendingSeekMs = resumeAt` 会被立刻清掉
+        // —— 表现为每次自动切服都从 0:00 重听，还把 positionMs=0 写进会话快照（重审 P1）。
+        const resumeFrom = resumeAt > RESUME_MIN_MS ? resumeAt : undefined;
+        if (resumeFrom !== undefined) {
+          // 让用户知道刚才那一下断音是"切换路径"，不是故障
+          useUiStore().ok('已切换到备用服务器，正在恢复播放');
+        }
+        await startCurrent({ startPositionMs: resumeFrom });
         await ensureAudio().play();
       } catch {
         /* 自动播放可能被浏览器策略拦下；此时停在暂停态，等用户点播放 */

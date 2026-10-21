@@ -37,18 +37,6 @@ export function resolveTrack(
 }
 
 /**
- * 批量解析（队列预取）。
- * 服务端是**串行**执行的（并发会把 B 站搜索瞬间打到风控），最多 10 首。
- */
-export function resolveBatch(trackIds: string[]): Promise<{ results: ResolveResult[] }> {
-  return http.post(
-    '/api/resolve/batch',
-    { trackIds: trackIds.slice(0, 10) },
-    { timeoutMs: 120_000 }
-  );
-}
-
-/**
  * 取可直接喂给 `<audio>` 的绝对地址。
  * 解析成功但拿不到地址时返回 null —— 调用方要处理这种情况，不要直接抛。
  */
@@ -62,11 +50,6 @@ export async function resolveStreamUrl(
     result,
     url: result.ok && result.streamUrl ? resolveUrl(result.streamUrl) : null,
   };
-}
-
-/** 让服务端丢掉某曲目的音源缓存（下次解析会重新匹配） */
-export function invalidateStream(trackId: string): Promise<{ ok: boolean }> {
-  return http.post(`/api/stream/${encodeURIComponent(trackId)}/invalidate`);
 }
 
 // ---------------------------------------------------------------------------
@@ -146,33 +129,12 @@ export function reportPlay(input: {
   return http.post('/api/history', input);
 }
 
-/** 批量补报（离线队列） */
-export function reportPlays(
-  plays: Array<{
-    trackId: string;
-    playedMs?: number;
-    durationMs?: number;
-    completed?: boolean;
-    playedAt?: number;
-  }>,
-  tracks?: unknown[]
-): Promise<{ ok: boolean; recorded: number; skipped: number; ids: number[] }> {
-  return http.post('/api/history', { plays: plays.slice(0, 500), tracks });
-}
-
 /**
  * 取某首歌的续播位置。从未播过时服务端返回 **404** ——
  * 这不是错误，调用方应当捕获后按 0 处理。
  */
 export function fetchProgress(trackId: string): Promise<TrackProgress> {
   return http.get<TrackProgress>(`/api/history/progress/${encodeURIComponent(trackId)}`);
-}
-
-/** 批量取续播位置（首页"继续听"）。无记录的曲目不会出现在返回里 */
-export function fetchProgressBatch(ids: string[]): Promise<{
-  progress: Record<string, { playedMs: number; playedAt: number }>;
-}> {
-  return http.post('/api/history/progress', { ids: ids.slice(0, 200) });
 }
 
 // ---------------------------------------------------------------------------

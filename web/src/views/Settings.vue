@@ -22,9 +22,10 @@ import OfflineCachePanel from '@/components/OfflineCachePanel.vue';
 import ServerListEditor from '@/components/ServerListEditor.vue';
 import AdminUsers from '@/components/AdminUsers.vue';
 import AdminMaintenance from '@/components/AdminMaintenance.vue';
+import AdminUpdateChannel from '@/components/AdminUpdateChannel.vue';
 import AdminAiModels from '@/components/AdminAiModels.vue';
 import Sheet from '@/components/Sheet.vue';
-import { isAndroid, isWebPanel } from '@/native/update.ts';
+import { isAndroid, isNativeShell, isWebPanel } from '@/native/update.ts';
 import {
   isBluetoothLyricsEnabled,
   isNativeAudio,
@@ -170,8 +171,8 @@ async function exportBackup(): Promise<void> {
   if (backupBusy.value) return;
   backupBusy.value = true;
   try {
-    downloadBackup(await buildBackup());
-    backupMsg.value = '已导出';
+    const via = await downloadBackup(await buildBackup());
+    backupMsg.value = via === 'native' ? '已导出到系统下载目录' : '已交给浏览器下载';
   } catch (e) {
     backupMsg.value = e instanceof Error ? e.message : '导出失败';
   } finally {
@@ -265,8 +266,10 @@ async function doLogin(): Promise<void> {
   loginBusy.value = true;
   loginErr.value = '';
   try {
-    /* 浏览器同源，不需要地址；只有原生壳才读这一栏 */
-    if (isNativeAudio) {
+    /* 浏览器同源，不需要地址；只有原生壳才读这一栏。
+       判据必须是 isNativeShell（Capacitor ∪ 鸿蒙）：鸿蒙没有 Capacitor 音频插件，
+       用 isNativeAudio 会让它在设置页永远没有填地址的入口（2026-10-21 重审 R-6）。 */
+    if (isNativeShell) {
       const addr = loginAddr.value.trim().replace(/\/+$/, '');
       if (!addr) throw new Error('请填写服务端地址');
       if (addr !== ui.baseUrl) ui.setBaseUrl(addr);
@@ -596,7 +599,9 @@ onBeforeUnmount(() => {
 
     <!-- ==================== 高级 ==================== -->
     <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
-      <section v-if="isNativeAudio" class="sec">
+      <!-- 多服务端：门禁用 isNativeShell（Capacitor ∪ 鸿蒙），不能用 isNativeAudio ——
+           鸿蒙没有 Capacitor 音频插件，用它当门禁会让鸿蒙永远没有改地址的入口 -->
+      <section v-if="isNativeShell" class="sec">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
       </section>
@@ -632,6 +637,12 @@ onBeforeUnmount(() => {
       <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">数据维护</h2>
         <AdminMaintenance />
+      </section>
+
+      <!-- 更新通道（GitHub 源 + 下载代理）：仅 Web 面板管理员；接口层有渠道闸 -->
+      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
+        <h2 class="label">更新通道</h2>
+        <AdminUpdateChannel />
       </section>
 
       <section v-if="isWebPanel" class="sec">
@@ -698,7 +709,10 @@ onBeforeUnmount(() => {
 
     <Sheet :open="sheet === 'dedupe'" title="去重" @close="sheet = null">
       <p v-if="dupBusy" class="hint">检查中…</p>
-      <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
+      <!-- 弹层里**不能**再套 activeTab 门禁：入口在「本机/资料库」分组，
+           弹层正文却要求 advanced 页签 → 手机上点「去重」只闪一下"检查中…"，
+           结果永远无处显示（重审 F）。这里只保留 serverConfigured。 -->
+      <template v-if="serverConfigured">
         <p v-if="dupMsg" class="hint">{{ dupMsg }}</p>
         <NeuButton
           v-if="dupGroups.length > 0"
@@ -761,7 +775,8 @@ onBeforeUnmount(() => {
     </Sheet>
 
     <Sheet :open="sheet === 'login'" title="登入" @close="sheet = null">
-      <div v-if="isNativeAudio" class="field">
+      <!-- 同 doLogin 里的判据：原生壳（Capacitor ∪ 鸿蒙）才需要填地址 -->
+      <div v-if="isNativeShell" class="field">
         <span class="field-name">服务端</span>
         <NeuInput v-model="loginAddr" placeholder="http://192.168.1.10:3210" />
       </div>

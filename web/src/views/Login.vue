@@ -9,7 +9,7 @@ import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
-import { ApiError, isWebPlatform } from '@/api/client.ts';
+import { ApiError, isPrivateIpUrl, isWebPlatform } from '@/api/client.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useUiStore } from '@/stores/ui.ts';
 
@@ -30,6 +30,21 @@ const canRegister = computed(() => session.canRegister);
 const showRegister = computed(() => setupMode.value || registerMode.value);
 
 const title = computed(() => (setupMode.value ? '创建管理员' : showRegister.value ? '注册' : '登录'));
+
+/**
+ * 公网地址用 http 的告警（不拦，只提示）。
+ *
+ * 本应用的口令、访问令牌、`/api/stream/:id?t=` 的流令牌都会走明文 HTTP，
+ * 在咖啡馆/公司 Wi-Fi 上可被直接嗅探。局域网私网地址没有证书是现实约束，
+ * 但公网域名没有理由不用 https（反代/隧道都能给）。
+ */
+const addrWarning = computed(() => {
+  if (isWebPlatform) return '';
+  const addr = serverAddr.value.trim();
+  if (!/^http:\/\//i.test(addr)) return '';
+  if (isPrivateIpUrl(addr)) return '';
+  return '公网地址用 http 会明文传输口令与播放令牌，建议改用 https（反向代理或隧道）。';
+});
 
 async function onServerAddrChange(): Promise<void> {
   if (isWebPlatform) return;
@@ -95,6 +110,7 @@ async function submit(): Promise<void> {
           autocomplete="url"
           @blur="onServerAddrChange"
         />
+        <p v-if="addrWarning" class="hint">{{ addrWarning }}</p>
       </div>
 
       <div class="field">
@@ -167,6 +183,14 @@ async function submit(): Promise<void> {
   letter-spacing: 0.16em;
   color: var(--t2);
 }
+.hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #E8A33D;
+  opacity: 0.9;
+}
+
 .err {
   margin: 0;
   font-size: var(--fs-xs);

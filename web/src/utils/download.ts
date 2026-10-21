@@ -4,7 +4,10 @@
  * 1. 若宿主为 Android 壳且注入了 SuenNativeBackup 原生桥接，则转为 Base64 走 MediaStore 保存到系统 Downloads/SuenMusic 目录。
  * 2. 否则通过标准 Web 的 URL.createObjectURL + <a download> 触发浏览器下载。
  */
-export async function downloadBlob(blob: Blob, defaultFilename: string): Promise<boolean> {
+/** 下载结果：native = 走了壳内原生保存；browser = 交给浏览器/WebView 下载；failed = 都没成 */
+export type DownloadResult = 'native' | 'browser' | 'failed';
+
+export async function downloadBlob(blob: Blob, defaultFilename: string): Promise<DownloadResult> {
   const nativeBackup = (
     window as unknown as {
       SuenNativeBackup?: { saveBackup?: (b64: string, name: string) => boolean };
@@ -22,7 +25,7 @@ export async function downloadBlob(blob: Blob, defaultFilename: string): Promise
       }
       const b64 = btoa(binary);
       const ok = nativeBackup.saveBackup(b64, defaultFilename);
-      if (ok) return true;
+      if (ok) return 'native';
     } catch {
       // 降级走标准 Web 下载
     }
@@ -37,8 +40,8 @@ export async function downloadBlob(blob: Blob, defaultFilename: string): Promise
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return true;
+    return 'browser';
   } catch {
-    return false;
+    return 'failed';
   }
 }

@@ -14,7 +14,7 @@
  * （通过 `onSessionChanged` 订阅），依赖是单向的。
  */
 
-import { Capacitor } from '@capacitor/core';
+import { isNativeShell } from '@/native/platform.ts';
 import type { ApiErrorBody, AuthSession } from './types.ts';
 
 // ---------------------------------------------------------------------------
@@ -101,12 +101,16 @@ export function getBaseUrl(): string {
  * 浏览器里**同源就是后端**：前端本来就是服务端的一部分，
  * 由它自己的静态资源服务发出，`/api` 直接打同源即可，不需要填地址。
  * 原生壳没有同源概念，必须显式配置基地址；没配才是「直连模式」。
+ *
+ * ⚠️ 「原生壳」= Capacitor（Android/iOS）**∪ 鸿蒙 ArkTS 桥**，判定见
+ * `native/platform.ts`。曾经只看 Capacitor，鸿蒙因此被判成浏览器、
+ * 地址框被藏起来、`/api` 打回 WebView 自身 —— 整端连不上服务端。
  */
 /** 浏览器（同源、cookie 会话） */
-export const isWebPlatform = !Capacitor.isNativePlatform();
+export const isWebPlatform = !isNativeShell;
 
 export function hasBackend(): boolean {
-  return Capacitor.isNativePlatform() ? baseUrl.trim().length > 0 : true;
+  return isNativeShell ? baseUrl.trim().length > 0 : true;
 }
 
 export function setBaseUrl(url: string): void {
@@ -414,7 +418,7 @@ async function rawFetch(path: string, opts: RequestOptions): Promise<Response> {
   const { signal, cleanup } = joinSignals(opts.signal, timeoutMs);
 
   const headers: Record<string, string> = { Accept: 'application/json' };
-  const web = !Capacitor.isNativePlatform();
+  const web = !isNativeShell;
   const method = opts.method ?? 'GET';
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
   if (accessToken && !opts._noAuth) headers.Authorization = `Bearer ${accessToken}`;
@@ -470,7 +474,14 @@ export function refreshSession(): Promise<AuthSession> {
   refreshPromise = (async () => {
     const token = refreshToken;
     if (!token) {
-      throw new ApiError(401, 'unauthorized', '登录已失效，请重新登录');
+      // Web 面板走同源 cookie 会话，**从来不会**有 refreshToken —— 这里如果只抛错，
+      // session store 里的 user 仍然非空：路由守卫继续放行、每个请求都报"登录已失效"、
+      // 而 /login 又被守卫弹回首页，用户只能整页刷新才回到登录页（重审 F）。
+      // 所以必须走真正的会话失效收尾（清快照 + 通知应用跳登录）。
+      const err = new ApiError(401, 'unauthorized', '登录已失效，请重新登录');
+      clearSession();
+      emitAuthLost(err);
+      throw err;
     }
 
     // 刻意用 rawFetch：刷新本身不能再走"401 就刷新"的逻辑，否则无限递归
@@ -503,8 +514,14 @@ export function refreshSession(): Promise<AuthSession> {
 
     if (!res.ok) {
       const err = await parseError(res);
-      clearSession();
-      emitAuthLost(err);
+      // 只有「服务端明确说这个刷新令牌不行」才清会话。
+      // 以前 `!res.ok` 一把抓：反代 502、服务重启、数据库恢复中的 503 都会把
+      // refresh+user 从 localStorage 里删掉 —— 用户被静默登出，原生端连离线
+      // 冷启动用的登录快照一起丢（重审 F）。
+      if (err.isUnauthorized) {
+        clearSession();
+        emitAuthLost(err);
+      }
       throw err;
     }
 

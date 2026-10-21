@@ -27,10 +27,20 @@ server {
     # 后端 API 与流媒体反向代理
     location /api/ {
         proxy_pass ${BACKEND_URL};
+
+        # 上传体积上限。nginx 默认只有 1m，而服务端已经放宽：
+        #   /api/admin/db/restore      200MB（整库 base64）
+        #   /api/favorites/*-sm          4MB（.sm 归档导入）
+        # 不在这里对齐，反代后保存恢复/导入会一律 413，前端只看到「失败」。
+        client_max_body_size 200m;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # 注意：服务端默认 **不** 采信 X-Forwarded-For（防伪造 IP 绕过登录节流）。
+        # 走这个反代时，请给服务端设 SUENMUSIC_TRUST_PROXY 为 nginx 的来源地址
+        # （同机部署 127.0.0.1，容器网络填网段如 172.16.0.0/12），
+        # 否则日志与节流里看到的都是 nginx 的 IP。
 
         # 针对实时音频流的优化：透传 Range、关闭中间缓冲、维持长连接
         proxy_http_version 1.1;

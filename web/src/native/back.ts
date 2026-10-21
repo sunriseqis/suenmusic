@@ -13,7 +13,7 @@
  * - 谁都没吃就先收起软键盘（键盘开着时返回的第一下永远先关键盘）；
  * - 还轮不到就交给原生做历史后退，历史也到底了原生把任务丢到后台。
  */
-import { Capacitor } from '@capacitor/core';
+import { isNativeShell } from './platform.ts';
 
 type BackHandler = () => boolean;
 
@@ -59,13 +59,17 @@ declare global {
 }
 
 /**
- * 把分发器挂到 window 上供原生调用（仅原生平台）。
+ * 把分发器挂到 window 上供原生调用（所有原生壳）。
  *
  * 原生侧用 `evaluateJavascript("…window.__suenBack() === true")` 求值：
  * 表达式**必须返回布尔值**，返回字符串会被 JSON 引号包一层（`"\"true\""`），
  * 原生那边按 `"true"` 比较就永远判为"没消费"。
+ *
+ * ⚠️ 判据是 `isNativeShell`（Capacitor ∪ 鸿蒙）而不是 `Capacitor.isNativePlatform()`：
+ * 鸿蒙没有 Capacitor，用它当判据会让 `window.__suenBack` 在鸿蒙上**根本不存在**，
+ * 于是 ArkTS 侧无论怎么接都只能拿到 undefined —— 浮层/搜索态按返回直接退应用。
  */
 export function installBackBridge(): void {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!isNativeShell) return;
   window.__suenBack = dispatchBack;
 }

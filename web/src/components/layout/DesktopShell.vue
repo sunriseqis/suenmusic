@@ -171,10 +171,11 @@ const themeLabel = computed(() => {
   gap: 2px;
 }
 .nav-label {
-  padding: 0 10px 8px;
-  font-size: 10px;
-  letter-spacing: 0.2em;
-  color: var(--t3);
+  padding: 0 12px 10px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  font-weight: 600;
+  color: var(--t2);
 }
 .nav-label-gap {
   margin-top: 18px;
@@ -187,7 +188,7 @@ const themeLabel = computed(() => {
   padding: 0 10px;
   border-radius: var(--r-md);
   color: var(--t2);
-  font-size: 13px;
+  font-size: 14px;
   letter-spacing: 0.02em;
   text-decoration: none;
   transition: color var(--dur-fast) var(--ease);
@@ -214,8 +215,8 @@ const themeLabel = computed(() => {
   justify-content: space-between;
   gap: var(--sp-2);
   padding: 0 10px;
-  font-size: 10px;
-  color: var(--t3);
+  font-size: 11px;
+  color: var(--t2);
   font-variant-numeric: tabular-nums;
 }
 .server b {
