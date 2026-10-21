@@ -118,6 +118,16 @@ final class AudioCacheEntry {
         return readers == 0 && state != .downloading
     }
 
+    /// 上游声明的总字节数（未知时为 0）。
+    ///
+    /// sidecar 里必须存这个值而不是 `storedBytes`：完整性校验是
+    /// 「落盘字节 ≥ 声明总长」，若存的是落盘字节，这个判断恒等成立，
+    /// 等于完全没有校验（重审 P1 的附带发现）。
+    var declaredTotal: Int64 {
+        lock.lock(); defer { lock.unlock() }
+        return knownTotal
+    }
+
     var lastAccessAt: Date {
         lock.lock(); defer { lock.unlock() }
         return accessAt
@@ -709,6 +719,59 @@ final class AudioCacheStore {
             used = usedBytes()
             if used <= Self.maxBytes { return }
         }
+        // 内存里能淘汰的都淘汰完了还超限 → 还剩"上一次进程留下的文件"。
+        // `entries` 只装本进程碰过的条目，冷启动后旧文件虽然占着 usedBytes()，
+        // 却永远进不了候选集 —— 缓存目录就这样无上限增长，4GB 上限形同虚设。
+        _ = enforceLimitFromDisk(protecting: id)
+    }
+
+    /// 扫盘淘汰：按 sidecar 的 lastAccess 从旧到新删。
+    ///
+    /// **必须排除所有「内存里存在且不可淘汰」的条目**（`readers > 0` 或正在下载）：
+    /// 它们的 sidecar/.bin 同样躺在磁盘上，只按「正在 ensureDownload 的那一首」排除
+    /// 是错的 —— 会把**正在播放**的文件删掉，`read()` 随后返回 nil，流被截断
+    /// （表现是播到一半 -1005）。2026-10-21 重审 R-1 修的就是这里。
+    ///
+    /// 真正可以删的只有两类：内存里根本没有的（上一次进程遗留），以及内存里
+    /// 存在但可淘汰的（无读者、未在下载）。
+    /// 文件名是「净化前缀 + id 哈希」，无法反解回 id，所以保护对象按**文件名**比对。
+    @discardableResult
+    private func enforceLimitFromDisk(protecting id: String) -> Bool {
+        guard let list = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: [.contentModificationDateKey]) else {
+            return false
+        }
+
+        var inUse: Set<String> = [
+            sidecarURL(id).lastPathComponent,
+            fileURL(id).lastPathComponent,
+        ]
+        for entry in allEntries() where !entry.isEvictable {
+            inUse.insert(fileURL(entry.id).lastPathComponent)
+            inUse.insert(sidecarURL(entry.id).lastPathComponent)
+        }
+
+        var candidates: [(bin: URL, lastAccess: Date)] = []
+        for url in list where url.pathExtension == "json" {
+            if inUse.contains(url.lastPathComponent) { continue }
+            let binURL = url.deletingPathExtension().appendingPathExtension("bin")
+            if inUse.contains(binURL.lastPathComponent) { continue }
+            let access = (try? Data(contentsOf: url))
+                .flatMap { try? JSONDecoder().decode(Sidecar.self, from: $0) }?
+                .lastAccess
+                ?? (try? url.resourceValues(forKeys: [.contentModificationDateKey])
+                    .contentModificationDate)
+                ?? Date.distantPast
+            candidates.append((binURL, access))
+        }
+
+        for candidate in candidates.sorted(by: { $0.lastAccess < $1.lastAccess }) {
+            try? FileManager.default.removeItem(at: candidate.bin)
+            try? FileManager.default.removeItem(
+                at: candidate.bin.deletingPathExtension().appendingPathExtension("json"))
+            if usedBytes() <= Self.maxBytes { return true }
+        }
+        return usedBytes() <= Self.maxBytes
     }
 
     // MARK: 路径与侧车
@@ -743,7 +806,11 @@ final class AudioCacheStore {
     }
 
     private func saveSidecar(_ entry: AudioCacheEntry) {
-        let sidecar = Sidecar(total: entry.storedBytes,
+        // 存**上游声明的总长**（未知时才退回落盘字节）。
+        // 以前这里存的是 storedBytes，于是 makeEntry / isComplete 里的
+        // `total <= 落盘` 恒为真 —— 「文件被截断但仍标 complete」这种坏状态永远发现不了。
+        let declared = entry.declaredTotal
+        let sidecar = Sidecar(total: declared > 0 ? declared : entry.storedBytes,
                               complete: entry.isComplete,
                               contentType: entry.contentType,
                               durationMs: entry.declaredDurationMs,
@@ -920,9 +987,6 @@ final class LocalStreamProxy {
         let encoded = trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId
         return "http://127.0.0.1:\(ready)/stream/\(encoded)"
     }
-
-    /// 兼容接口：服务端单一真相源下无客户端直链需求
-    func setDirectUrl(trackId: String, url: String) {}
 
     /// 上游流地址（带会话令牌）。`startOffset > 0` 时带 Range 续拉。
     func upstreamRequest(trackId: String, startOffset: Int64) -> URLRequest? {
