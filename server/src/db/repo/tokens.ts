@@ -15,7 +15,6 @@ export interface TokenRow {
   expiresAt: number;
   revokedAt: number | null;
   createdAt: number;
-  lastUsedAt: number;
   userAgent: string;
 }
 
@@ -33,7 +32,6 @@ interface TokenDbRow {
   expires_at: number;
   revoked_at: number | null;
   created_at: number;
-  last_used_at: number;
   user_agent: string;
 }
 
@@ -44,7 +42,6 @@ function toToken(r: TokenDbRow): TokenRow {
     expiresAt: toNumber(r.expires_at),
     revokedAt: r.revoked_at === null ? null : toNumber(r.revoked_at),
     createdAt: toNumber(r.created_at),
-    lastUsedAt: toNumber(r.last_used_at),
     userAgent: r.user_agent,
   };
 }
@@ -61,8 +58,8 @@ export function issueRefreshToken(
 
   getDatabase()
     .prepare(
-      `INSERT INTO tokens (id, user_id, token_hash, expires_at, created_at, last_used_at, user_agent)
-       VALUES (?, ?, ?, ?, ?, 0, ?)`
+      `INSERT INTO tokens (id, user_id, token_hash, expires_at, created_at, user_agent)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     .run(id, userId, sha256(token), expiresAt, ts, userAgent.slice(0, 200));
 
@@ -82,12 +79,6 @@ export function findValidRefreshToken(token: string): TokenRow | null {
   if (toNumber(row.expires_at) <= now()) return null;
 
   return toToken(row);
-}
-
-export function touchRefreshToken(id: string): void {
-  getDatabase()
-    .prepare('UPDATE tokens SET last_used_at = ? WHERE id = ?')
-    .run(now(), id);
 }
 
 export function revokeRefreshToken(id: string): boolean {

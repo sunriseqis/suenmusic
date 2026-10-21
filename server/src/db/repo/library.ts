@@ -39,16 +39,6 @@ export function getLibraryArtist(mid: string): LibraryArtist | null {
   return row ? rowToArtist(row) : null;
 }
 
-/** 已拉过热门歌的全局歌手数（日志/状态用） */
-export function countLibraryArtists(): { total: number; fetched: number } {
-  const db = getDatabase();
-  const total = db.prepare('SELECT COUNT(*) AS n FROM library_artists').get() as { n: number };
-  const fetched = db
-    .prepare('SELECT COUNT(*) AS n FROM library_artists WHERE hot_fetched_at IS NOT NULL')
-    .get() as { n: number };
-  return { total: toNumber(total?.n), fetched: toNumber(fetched?.n) };
-}
-
 // ---------------------------------------------------------------------------
 // 用户归属（按用户隔离的池子）
 // ---------------------------------------------------------------------------
@@ -69,13 +59,6 @@ export function unlinkUserArtist(userId: number, artistMid: string): void {
   getDatabase()
     .prepare('DELETE FROM library_user_artists WHERE user_id = ? AND artist_mid = ?')
     .run(userId, artistMid);
-}
-
-export function getUserArtistMids(userId: number): string[] {
-  const rows = getDatabase()
-    .prepare('SELECT artist_mid FROM library_user_artists WHERE user_id = ?')
-    .all(userId) as Array<{ artist_mid: string }>;
-  return rows.map(r => r.artist_mid);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,12 +102,6 @@ export function saveLibraryTracks(
   }
 }
 
-/**
- * 按名字批量查库里的歌手（名字 → mid）。
- *
- * 用途：相似歌手名单只有名字（网易云 simi 不给 mid），建库器解析出 mid 后
- * 按名字回填；生成推荐时用这个把"本轮分配到的名字"对上已有的 mid。
- */
 export function findLibraryArtistsByNames(names: string[]): Map<string, string> {
   const out = new Map<string, string>();
   if (names.length === 0) return out;
@@ -226,19 +203,6 @@ export function popBuildJob(): BuildJob | null {
 // ---------------------------------------------------------------------------
 // 滚动刷新
 // ---------------------------------------------------------------------------
-
-/** 找最久没刷新热门歌的全局歌手（不含从未拉过的——那是建库队列的事） */
-export function getStaleLibraryArtists(olderThanMs: number, limit: number): LibraryArtist[] {
-  const cutoff = now() - olderThanMs;
-  const rows = getDatabase()
-    .prepare(
-      `SELECT * FROM library_artists
-       WHERE hot_fetched_at IS NOT NULL AND hot_fetched_at < ?
-       ORDER BY hot_fetched_at LIMIT ?`
-    )
-    .all(cutoff, limit) as any[];
-  return rows.map(rowToArtist);
-}
 
 export function markArtistFetched(mid: string): void {
   getDatabase().prepare('UPDATE library_artists SET hot_fetched_at = ? WHERE mid = ?').run(now(), mid);

@@ -321,7 +321,7 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
   /**
    * 预检 .sm 归档：读取曲目数、是否包含音乐画像及摘要预览
    */
-  app.post('/api/favorites/preview-sm', { bodyLimit: 20 * 1024 * 1024 }, async req => {
+  app.post('/api/favorites/preview-sm', { bodyLimit: 4 * 1024 * 1024 }, async req => {
     requireUser(req);
     const body = asRecord(req.body);
     const b64 = String(body.data ?? '').trim();
@@ -400,7 +400,7 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
    * 导入本应用的 .sm 软加密归档文件（包含 favorites.json 与 persona.md）。
    * 请求体：{ data: base64, importPersona?: boolean }
    */
-  app.post('/api/favorites/import-sm', { bodyLimit: 20 * 1024 * 1024 }, async req => {
+  app.post('/api/favorites/import-sm', { bodyLimit: 4 * 1024 * 1024 }, async req => {
     const user = requireUser(req);
     const body = asRecord(req.body);
     const b64 = String(body.data ?? '').trim();

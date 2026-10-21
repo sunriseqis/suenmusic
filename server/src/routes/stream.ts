@@ -493,9 +493,10 @@ export function registerStreamRoutes(app: FastifyInstance): void {
       throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
     }
 
-    const bearer = extractBearer(req.headers.authorization);
-    if (!bearer || !verifyAccessToken(bearer)) throw unauthorized('需要访问令牌');
-
+    // 以前这里只手认 Bearer，而 Web 面板走的是同源 cookie 会话 ——
+    // 网页端调用必 401（重审 F）。改用统一的 requireUser：Bearer 与 cookie 都认，
+    // cookie 写请求的 CSRF 头校验也在里面。
+    requireUser(req);
     invalidateTrack(parsed.raw);
     return { ok: true, trackId: parsed.raw };
   });

@@ -178,11 +178,10 @@ async function main(): Promise<number> {
   const token2: string = reg2.json.accessToken;
 
   // ---- 1. 鉴权边界 ----
-  section('[1/9] 鉴权边界（未登录必须 401）');
+  section('[1/8] 鉴权边界（未登录必须 401）');
   const protectedPaths: Array<[string, string]> = [
     ['GET', '/api/home'],
     ['GET', '/api/search?q=test'],
-    ['GET', '/api/playlists'],
     ['GET', '/api/favorites'],
     ['GET', '/api/history'],
     ['GET', '/api/resolve/qq_x'],
@@ -195,7 +194,7 @@ async function main(): Promise<number> {
   }
 
   // ---- 2. 搜索 ----
-  section('[2/9] 搜索');
+  section('[2/8] 搜索');
   checkError(
     '缺少 q 参数',
     await req('GET', '/api/search', { token }),
@@ -301,7 +300,7 @@ async function main(): Promise<number> {
   }
 
   // ---- 3. 首页与榜单 ----
-  section('[3/9] 首页与榜单');
+  section('[3/8] 首页与榜单');
   const home = await req('GET', '/api/home', { token });
   eq('首页返回 200', home.status, 200);
   check('返回新歌首发', (home.json?.newSongs?.length ?? 0) > 0, `${home.json?.newSongs?.length}`);
@@ -353,7 +352,7 @@ async function main(): Promise<number> {
   checkError('榜单 id 非法', await req('GET', '/api/toplist/abc', { token }), 400, 'invalid_id');
 
   // ---- 4. 专辑 / 歌手 / 单曲 ----
-  section('[4/9] 专辑 / 歌手 / 单曲');
+  section('[4/8] 专辑 / 歌手 / 单曲');
 
   if (albums[0]) {
     const albumRes = await req('GET', `/api/albums/${albums[0].id}?limit=20`, { token });
@@ -500,133 +499,8 @@ async function main(): Promise<number> {
   }
   checkError('单曲 id 非法', await req('GET', '/api/tracks/nonsense-id', { token }), 400, 'invalid_id');
 
-  // ---- 5. 歌单 ----
-  section('[5/9] 歌单 CRUD');
-  const created = await req('POST', '/api/playlists', {
-    token,
-    body: { name: '  测试歌单  ', description: '验收用' },
-  });
-  eq('创建歌单返回 201', created.status, 201);
-  eq('歌单名被 trim', created.json?.playlist?.name, '测试歌单');
-  const plId: string = created.json.playlist.id;
-
-  checkError(
-    '空歌单名',
-    await req('POST', '/api/playlists', { token, body: { name: '   ' } }),
-    400,
-    'invalid_playlist'
-  );
-
-  const list = await req('GET', '/api/playlists', { token });
-  eq('歌单列表 1 个', list.json?.playlists?.length, 1);
-  eq('列表含曲目数', list.json?.playlists?.[0]?.trackCount, 0);
-  eq('第二个用户看不到别人的歌单', (await req('GET', '/api/playlists', { token: token2 })).json?.playlists?.length, 0);
-  checkError('跨用户取歌单', await req('GET', `/api/playlists/${plId}`, { token: token2 }), 404, 'not_found');
-
-  // 加曲目：连曲目内容一起给
-  const seed = (songs.length ? songs.slice(0, 3) : []);
-  if (seed.length >= 3) {
-    const add = await req('POST', `/api/playlists/${plId}/tracks`, {
-      token,
-      body: { tracks: seed },
-    });
-    eq('加曲目返回 200', add.status, 200);
-    eq('加入 3 首', add.json?.added, 3);
-    eq('歌单曲目数更新为 3', add.json?.playlist?.trackCount, 3);
-
-    const addAgain = await req('POST', `/api/playlists/${plId}/tracks`, {
-      token,
-      body: { trackIds: seed.map((s: any) => s.id) },
-    });
-    eq('重复加被跳过', [addAgain.json?.added, addAgain.json?.skipped], [0, 3]);
-
-    checkError(
-      'trackIds 为空',
-      await req('POST', `/api/playlists/${plId}/tracks`, { token, body: { trackIds: [] } }),
-      400,
-      'missing_param'
-    );
-
-    const detail = await req('GET', `/api/playlists/${plId}`, { token });
-    eq('详情返回 3 条', detail.json?.items?.length, 3);
-    eq('顺序与加入顺序一致', detail.json.items.map((i: any) => i.trackId), seed.map((s: any) => s.id));
-    check('曲目内容已 JOIN 回来', detail.json.items.every((i: any) => i.track !== null));
-    check('无缺失曲目', detail.json.missing.length === 0, JSON.stringify(detail.json.missing));
-
-    // 重排
-    const itemIds = detail.json.items.map((i: any) => i.itemId);
-    const reversed = [...itemIds].reverse();
-    const order = await req('PUT', `/api/playlists/${plId}/order`, { token, body: { itemIds: reversed } });
-    eq('重排返回 200', order.status, 200);
-    const afterOrder = await req('GET', `/api/playlists/${plId}`, { token });
-    eq(
-      '重排生效',
-      afterOrder.json.items.map((i: any) => i.itemId),
-      reversed
-    );
-
-    checkError(
-      '重排条目数不符',
-      await req('PUT', `/api/playlists/${plId}/order`, { token, body: { itemIds: [itemIds[0]] } }),
-      400,
-      'stale_order'
-    );
-    checkError(
-      '重排含未知条目',
-      await req('PUT', `/api/playlists/${plId}/order`, {
-        token,
-        body: { itemIds: [...itemIds.slice(0, 2), 999999] },
-      }),
-      400,
-      'stale_order'
-    );
-
-    // 移除
-    const del = await req('DELETE', `/api/playlists/${plId}/tracks/${itemIds[0]}`, { token });
-    eq('按 itemId 移除返回 200', del.status, 200);
-    checkError(
-      '重复移除返回 404',
-      await req('DELETE', `/api/playlists/${plId}/tracks/${itemIds[0]}`, { token }),
-      404,
-      'not_found'
-    );
-
-    const removeByTrack = await req('POST', `/api/playlists/${plId}/tracks/remove`, {
-      token,
-      body: { trackId: seed[1].id },
-    });
-    eq('按 trackId 移除返回 200', removeByTrack.status, 200);
-    eq('剩余 1 首', (await req('GET', `/api/playlists/${plId}`, { token })).json?.items?.length, 1);
-
-    checkError(
-      '移除不在歌单里的曲目',
-      await req('POST', `/api/playlists/${plId}/tracks/remove`, {
-        token,
-        body: { trackId: 'qq_zzzznotexist' },
-      }),
-      404,
-      'not_found'
-    );
-    checkError(
-      '跨用户加曲目',
-      await req('POST', `/api/playlists/${plId}/tracks`, { token: token2, body: { trackIds: [seed[0].id] } }),
-      404,
-      'not_found'
-    );
-  } else {
-    skip('歌单曲目操作', '搜索未返回足够的曲目');
-  }
-
-  const patched = await req('PATCH', `/api/playlists/${plId}`, {
-    token,
-    body: { name: '改名后', description: '新说明' },
-  });
-  eq('改名返回 200', patched.status, 200);
-  eq('改名生效', patched.json?.playlist?.name, '改名后');
-  eq('说明更新', patched.json?.playlist?.description, '新说明');
-
   // ---- 6. 收藏 ----
-  section('[6/9] 收藏');
+  section('[5/8] 收藏');
   if (songs[0]) {
     const fav1 = await req('POST', '/api/favorites', { token, body: { tracks: undefined, track: songs[0] } });
     eq('收藏返回 201', fav1.status, 201);
@@ -667,7 +541,7 @@ async function main(): Promise<number> {
   }
 
   // ---- 7. 播放历史（增量同步） ----
-  section('[7/9] 播放历史与增量同步');
+  section('[6/8] 播放历史与增量同步');
   const histTrackId = songs[0]?.id ?? 'qq_zzzznotexist';
 
   const single = await req('POST', '/api/history', {
@@ -793,7 +667,7 @@ async function main(): Promise<number> {
   );
 
   // ---- 8. 音源解析（P5 前置） ----
-  section('[8/9] 音源解析');
+  section('[7/8] 音源解析');
   if (biliCooldown.active()) {
     skip('音源解析与流转发', 'B 站处于冷却窗口，避免继续打上游');
   } else {

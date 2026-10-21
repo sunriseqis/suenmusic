@@ -474,9 +474,6 @@ export function adaptQQPlaylist(
   };
 }
 
-/**
- * 将 QQ 音乐 MV（搜索结果 search_type=4）标准化。
- */
 export function adaptQQMv(item: QQRecord | null | undefined) {
   if (!item) return null;
   const singer = (item.singer_list || [])[0] || {};

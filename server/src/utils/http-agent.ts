@@ -20,7 +20,7 @@
  *
  * ⚠️ 注意别把这里设得比调用处更小，否则又会出现"设了 600 秒却 300 秒死"的同类问题。
  */
-import { Agent, setGlobalDispatcher } from 'undici';
+import { Agent, ProxyAgent, setGlobalDispatcher } from 'undici';
 
 /** 出站连接的兜底上限：只防"永远挂着"，不是业务预算（业务预算在各调用处的 timeoutMs） */
 const OUTBOUND_SAFETY_TIMEOUT_MS = 15 * 60 * 1000;
@@ -41,4 +41,33 @@ export function relaxOutboundTimeout(): void {
       connectTimeout: CONNECT_TIMEOUT_MS,
     })
   );
+}
+
+/**
+ * 更新通道的专用 dispatcher。
+ *
+ * 为什么不直接改全局 dispatcher：更新走代理是**管理员的选择**（Web 设置页），
+ * AI 调用、B 站取流等其它出站**不该被牵连** —— 代理挂了不能让全站出站跟着死。
+ *
+ * undici 的 `ProxyAgent` 原生支持：
+ *   - `http://host:port`      普通 HTTP 代理
+ *   - `https://host:port`     TLS 代理
+ *   访问 https 目标时自动走 CONNECT 隧道。
+ *
+ * SOCKS5 由 Node 24+ 的 undici 原生支持（`socks5://` scheme）——
+ * 本工程 undici 8.x 已内置，不再引入 socks-proxy-agent。
+ */
+let updateDispatcher: ProxyAgent | null = null;
+let updateDispatcherUri: string | null = null;
+
+export function updateProxyDispatcher(proxyUri: string): ProxyAgent {
+  if (updateDispatcher === null || updateDispatcherUri !== proxyUri) {
+    // 代理地址变了就换一个 dispatcher（旧的让 GC 回收）
+    updateDispatcher = new ProxyAgent({
+      uri: proxyUri,
+      requestTls: { timeout: CONNECT_TIMEOUT_MS },
+    });
+    updateDispatcherUri = proxyUri;
+  }
+  return updateDispatcher;
 }

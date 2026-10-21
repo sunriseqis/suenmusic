@@ -45,16 +45,36 @@ export interface Config {
   loginMaxAttempts: number;
   /** 登录失败节流窗口（毫秒） */
   loginWindowMs: number;
-  /** UGREENlink 更新分享 API 基地址 */
-  updateUgreenBaseUrl: string;
-  /** UGREENlink 分享 ID；为空时关闭更新检查 */
-  updateShareId: string;
-  /** 分享内 APK 所在目录 */
-  updateSharePath: string;
-  /** 当前发布 APK 的 versionCode（可选，文件名没有该信息） */
-  updateVersionCode: number;
-  /** 可选的 APK SHA-256 */
-  updateSha256: string;
+  /**
+   * 更新来源。
+   *   `github` —— 从 GitHub Releases 检查最新构建并缓存到本地（唯一来源）
+   *   `off`    —— 关闭更新通道（`/api/update/check` 返回 not_configured）
+   *
+   * （老的 `ugreen` 分享源已按用户要求于 2026-10-21 删除。）
+   */
+  updateSource: 'github' | 'off';
+  /** GitHub 仓库（`owner/repo`），`updateSource=github` 时必填 */
+  updateGithubRepo: string;
+  /** GitHub token（可选）：把 API 限额从 60/小时提到 5000/小时 */
+  updateGithubToken: string;
+  /**
+   * GitHub API 基地址（可选）。默认 `https://api.github.com`。
+   *
+   * 给国内环境用：可以把请求指向自建反代或镜像（例如 `https://gh.example.com/api`），
+   * 与 `updateGithubProxy`（只代理**产物下载**）分开配置 —— 用文件代理前缀去套 JSON API
+   * 通常会失败，所以两者不共用同一个变量。
+   */
+  updateGithubApiBase: string;
+  /**
+   * 资产下载代理前缀（可选）。国内直连 `objects.githubusercontent.com` 常失败时填它：
+   *   `https://gh-proxy.com/` → 最终 URL = 前缀 + 原始 browser_download_url
+   * 只影响**下载**，不影响 API 查询。
+   */
+  updateGithubProxy: string;
+  /** 产物本地缓存目录（docker 挂卷 / fnOS 数据目录都指到能持久化的地方） */
+  updateCacheDir: string;
+  /** 后台轮询 GitHub 的间隔（分钟，0 = 不自动轮询，只响应手动 force） */
+  updatePollMinutes: number;
   /**
    * 业务时区相对**系统时区**的额外小时偏移。
    *
@@ -63,6 +83,19 @@ export interface Config {
    * 显式设成 0 表示完全跟随系统时区。
    */
   tzOffsetHours: number | null;
+  /**
+   * Fastify 的 `trustProxy`。
+   *
+   * **不能无条件 true**：那等于采信任何客户端发来的 `X-Forwarded-For`，
+   * 而登录节流按 IP 分桶 —— 攻击者每个请求换一个伪造 IP 就永远撞不到上限，
+   * 字典攻击变成无限次（2026-10-20 审计 P1）。
+   *
+   * 取值语义（`SUENMUSIC_TRUST_PROXY`）：
+   *   - 留空（默认）→ `false`：只信 TCP 对端地址，最安全；
+   *   - `127.0.0.1,10.0.0.0/8` → 只信这些代理传来的 XFF（推荐用法）；
+   *   - `true` → 全信（直连暴露时等于放弃 IP 维度的节流，需显式承担风险）。
+   */
+  trustProxy: boolean | string[];
 }
 
 function envStr(key: string, fallback: string): string {
@@ -100,6 +133,35 @@ function envList(key: string, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
+/**
+ * 解析 `SUENMUSIC_UPDATE_SOURCE`。
+ *
+ * 缺省策略：配了 `SUENMUSIC_UPDATE_GITHUB_REPO` 就用 github，否则 **off**。
+ * （ugreen 源已于 2026-10-21 移除，不再有"没配就沿用老源"的兜底。）
+ */
+function envUpdateSource(name: string): 'github' | 'off' {
+  const raw = envStr(name, '').trim().toLowerCase();
+  if (raw === 'github' || raw === 'off') return raw;
+  if (raw !== '') {
+    throw new Error(`${name} 只能是 github / off，收到：${raw}`);
+  }
+  // 公开仓库有默认值 → 默认开启；用户可在 Web 设置页关掉
+  return 'github';
+}
+
+/** 解析 SUENMUSIC_TRUST_PROXY，语义见 Config.trustProxy 的注释 */
+function envTrustProxy(key: string): boolean | string[] {
+  const raw = process.env[key];
+  if (raw === undefined || raw.trim() === '') return false;
+  const v = raw.trim().toLowerCase();
+  if (v === 'true' || v === '*' || v === 'all') return true;
+  if (v === 'false' || v === '0' || v === 'none') return false;
+  return raw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
 const LOG_LEVELS: LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
 function envLogLevel(key: string, fallback: LogLevel): LogLevel {
@@ -107,7 +169,66 @@ function envLogLevel(key: string, fallback: LogLevel): LogLevel {
   return LOG_LEVELS.includes(raw as LogLevel) ? (raw as LogLevel) : fallback;
 }
 
+// ---------------------------------------------------------------------------
+// JWT 密钥可用性检查（fail-fast）
+// ---------------------------------------------------------------------------
+
+/** 见过太多次的占位值 —— 它们公开在仓库里，等于没有密钥 */
+const PLACEHOLDER_SECRET_PATTERNS = [
+  /change[_-]?me/,
+  /your[_-]?(production|secret|jwt)/,
+  /placeholder/,
+  /^example/,
+  /^secret$/,
+  /^test$/,
+];
+
+/** HS256 密钥最短长度。低于这个长度的十六进制串实际熵不足 */
+const MIN_SECRET_LENGTH = 32;
+
+/**
+ * 启动即拒：占位密钥 / 过短密钥直接抛错。
+ *
+ * 为什么必须硬失败而不是 warning：
+ *   HS256 的密钥是**离线可验证**的。部署者照抄 `.env.example` 忘了替换时，
+ *   任何人拿到仓库就知道签名密钥，可以离线签发 `{sub:1, typ:'access', epo:1}`
+ *   （新装库的 token_epoch 恒为 1）→ 直接以管理员身份调用 /api/admin/*。
+ *   这条路径没有任何运行期症状，只能靠启动时拦住。
+ *
+ * 留空不算错：那是「未配置」的合法状态，走每次启动随机的临时密钥兜底
+ * （代价是重启后登录态失效，日志里有明确 WARN）。
+ */
+function assertJwtSecretUsable(secret: string): void {
+  if (!secret) return;
+  const normalized = secret.trim().toLowerCase();
+  const placeholder = PLACEHOLDER_SECRET_PATTERNS.some(re => re.test(normalized));
+  const tooShort = secret.trim().length < MIN_SECRET_LENGTH;
+  if (!placeholder && !tooShort) return;
+
+  throw new Error(
+    [
+      '',
+      '✖ SUENMUSIC_JWT_SECRET 不可用，服务端拒绝启动。',
+      '',
+      placeholder
+        ? '  当前值看起来是配置文件模板里的占位串（占位密钥公开在仓库里，等于没有密钥）。'
+        : `  当前值只有 ${secret.trim().length} 个字符，低于最低要求 ${MIN_SECRET_LENGTH}。`,
+      '',
+      '  JWT 密钥是离线可验证的：泄露即等于任何人都能伪造管理员令牌。',
+      '  生成一个强密钥并写入 server/.env：',
+      '',
+      '      openssl rand -hex 32',
+      '',
+      '  （或直接留空 SUENMUSIC_JWT_SECRET= 让服务端每次启动生成临时密钥，',
+      '    代价是重启后所有登录态失效 —— 仅适合本机临时试跑。）',
+      ''
+    ].join('\n')
+  );
+}
+
 const explicitSecret = envStr('SUENMUSIC_JWT_SECRET', '');
+assertJwtSecretUsable(explicitSecret);
+
 
 export const config: Config = {
   host: envStr('SUENMUSIC_HOST', '127.0.0.1'),
@@ -127,14 +248,14 @@ export const config: Config = {
   corsOrigins: envList('SUENMUSIC_CORS_ORIGINS', ['*']),
   loginMaxAttempts: envNum('SUENMUSIC_LOGIN_MAX_ATTEMPTS', 10),
   loginWindowMs: envNum('SUENMUSIC_LOGIN_WINDOW_MS', 5 * 60 * 1000),
-  updateUgreenBaseUrl: envStr(
-    'SUENMUSIC_UPDATE_UGREEN_BASE_URL',
-    'https://suenqi.cn35.ug.link/ugreen/v1'
-  ),
+  updateSource: envUpdateSource('SUENMUSIC_UPDATE_SOURCE'),
+  updateGithubRepo: envStr('SUENMUSIC_UPDATE_GITHUB_REPO', 'sunriseqis/suenmusic').trim(),
+  updateGithubToken: envStr('SUENMUSIC_UPDATE_GITHUB_TOKEN', '').trim(),
+  updateGithubApiBase: envStr('SUENMUSIC_UPDATE_GITHUB_API_BASE', 'https://api.github.com').trim().replace(/\/+$/, ''),
+  updateGithubProxy: envStr('SUENMUSIC_UPDATE_GITHUB_PROXY', '').trim(),
+  updateCacheDir: envStr('SUENMUSIC_UPDATE_CACHE_DIR', './data/updates'),
+  updatePollMinutes: envNum('SUENMUSIC_UPDATE_POLL_MINUTES', 30),
   // 分享 ID 本身不是凭据；默认指向官方更新目录，仍可用环境变量替换。
-  updateShareId: envStr('SUENMUSIC_UPDATE_SHARE_ID', '87870bfaf0cf4e078326b43c063afa1e'),
-  updateSharePath: envStr('SUENMUSIC_UPDATE_SHARE_PATH', '/home/suenqi/应用/SuenApp/SuenMusic'),
-  updateVersionCode: envNum('SUENMUSIC_UPDATE_VERSION_CODE', 0),
-  updateSha256: envStr('SUENMUSIC_UPDATE_SHA256', '').toLowerCase(),
   tzOffsetHours: envNumOrNull('SUENMUSIC_TZ_OFFSET'),
+  trustProxy: envTrustProxy('SUENMUSIC_TRUST_PROXY'),
 };

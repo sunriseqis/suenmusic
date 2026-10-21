@@ -40,11 +40,3 @@ export function requiredParam(raw: unknown, name: string): string {
   return value;
 }
 
-/**
- * 解析 `key=value` 形式的游标参数。
- * 用于播放历史的增量同步（`since=<playedAt>:<id>`）。
- */
-export function cursorParam(raw: unknown): string | null {
-  const value = strParam(raw);
-  return value || null;
-}

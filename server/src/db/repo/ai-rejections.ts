@@ -143,10 +143,3 @@ export function getRejectionStats(userId: number): {
   };
 }
 
-/** 清空某用户的 AI 否决记录（设置页"重置 AI 黑名单"用） */
-export function clearAiRejections(userId: number): number {
-  const res = getDatabase()
-    .prepare('DELETE FROM ai_rejections WHERE user_id = ?')
-    .run(userId);
-  return toNumber(res.changes);
-}

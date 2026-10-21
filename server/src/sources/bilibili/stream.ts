@@ -478,6 +478,13 @@ export async function resolveTrackSource(
     fallbackStream: stream.fallback,
     coverUrl: stream.pic,
     topCandidates,
+    /**
+     * 必须显式带上：这是**搜索路径**，而锚点路径（见上方 bvid 直取分支）一直都有。
+     * 漏了它，`resolveTrack()` 出来的 source 就是 undefined，调用方只能各写一处
+     * `?? 'bilibili'` 兜底 —— 2026-10-20 审计的测试红灯正是这条
+     * （`resolver-test` 的「多源解析命中有效源」）。
+     */
+    source: 'bilibili',
   };
 }
 

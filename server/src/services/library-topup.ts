@@ -252,7 +252,6 @@ export async function ensurePoolHealth(userId: number): Promise<TopUpReport[]> {
   return reports;
 }
 
-/** 把一批歌手排进建库队列（补库用；避开"本轮已用歌手"由调用方负责） */
 export function enqueueArtists(userId: number, mids: string[], origin: string): number {
   let n = 0;
   for (const mid of mids) {

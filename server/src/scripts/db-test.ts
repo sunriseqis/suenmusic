@@ -16,7 +16,6 @@ import { closeDatabase, loadMigrations, migrate, openDatabase } from '../db/inde
 import * as users from '../db/repo/users.ts';
 import * as tracks from '../db/repo/tracks.ts';
 import * as sources from '../db/repo/sources.ts';
-import * as playlists from '../db/repo/playlists.ts';
 import * as favorites from '../db/repo/favorites.ts';
 import * as history from '../db/repo/history.ts';
 import * as settings from '../db/repo/settings.ts';
@@ -119,7 +118,7 @@ function main(): number {
   openDatabase(tmpDb);
 
   // ---- 1. 迁移 ----
-  section('[1/8] 迁移');
+  section('[1/7] 迁移');
   // 断言跟着迁移文件数走，而不是写死数字 ——
   // 否则每加一个迁移都要回来改测试，而那句改动本身不验证任何东西。
   const migrationCount = loadMigrations().length;
@@ -137,13 +136,22 @@ function main(): number {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all() as Array<{ name: string }>
   ).map(r => r.name);
-  for (const t of ['users', 'tokens', 'tracks', 'play_sources', 'playlists', 'playlist_items', 'favorites', 'play_history', 'app_settings']) {
+  for (const t of ['users', 'tokens', 'tracks', 'play_sources', 'favorites', 'play_history', 'app_settings', 'playlist_pool', 'playlist_pool_items']) {
     check(`表存在：${t}`, tables.includes(t));
   }
+  // 020 迁移删掉了用户歌单功能的两张表；钉住它别回来
+  for (const t of ['playlists', 'playlist_items']) {
+    check(`表已移除：${t}`, !tables.includes(t));
+  }
+  // 020 同时删掉了恒为 0 的 last_used_at
+  const tokenCols = (
+    openDatabase().prepare('PRAGMA table_info(tokens)').all() as Array<{ name: string }>
+  ).map(c => c.name);
+  check('tokens 不再有 last_used_at', !tokenCols.includes('last_used_at'));
   check('外键已开启', (openDatabase().prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys === 1);
 
   // ---- 2. 账号 ----
-  section('[2/8] 账号');
+  section('[2/7] 账号');
   const alice = users.createUser({ username: 'alice', password: 'secret-pass-1' });
   check('创建用户返回 id', alice.id > 0);
   eq('对外信息不含口令字段', Object.keys(alice).sort(), ['createdAt', 'displayName', 'id', 'role', 'username']);
@@ -200,7 +208,7 @@ function main(): number {
   eq('不存在的用户源取纪元返回 0', users.getTokenEpoch(999_999), 0);
 
   // ---- 3. 曲目缓存 ----
-  section('[3/8] 曲目缓存');
+  section('[3/7] 曲目缓存');
   const t1 = makeTrack('001', '第一首');
   const t2 = makeTrack('002', '第二首');
   const t3 = makeTrack('003', '第三首');
@@ -218,7 +226,7 @@ function main(): number {
   eq('总数不因 upsert 增长', tracks.countTracks(), 3);
 
   // ---- 4. 音源缓存 ----
-  section('[4/8] 音源缓存');
+  section('[4/7] 音源缓存');
   const futureDeadline = Math.floor(Date.now() / 1000) + 1800;
   const okResult = {
     ok: true,
@@ -265,71 +273,8 @@ function main(): number {
   const noDeadline = sources.computeExpiry('https://example.com/a.m4s');
   check('无 deadline 时退回固定 TTL', noDeadline > Date.now() + 25 * 60 * 1000);
 
-  // ---- 5. 歌单 ----
-  section('[5/8] 歌单');
-  const pl = playlists.createPlaylist(alice.id, { name: '  我的歌单  ' });
-  eq('歌单名被 trim', pl.name, '我的歌单');
-  eq('新歌单曲目数为 0', pl.trackCount, 0);
-  throws('空歌单名被拒绝', () => playlists.createPlaylist(alice.id, { name: '   ' }));
-  throws('超长歌单名被拒绝', () => playlists.createPlaylist(alice.id, { name: 'x'.repeat(65) }));
-
-  const pl2 = playlists.createPlaylist(alice.id, { name: '第二个' });
-  eq('歌单列表按创建顺序', playlists.listPlaylists(alice.id).map(p => p.name), ['我的歌单', '第二个']);
-  eq('bob 看不到 alice 的歌单', playlists.listPlaylists(bob.id).length, 0);
-  check('跨用户取歌单返回 null', playlists.getPlaylist(bob.id, pl.id) === null);
-  check('跨用户无权写', !playlists.ownsPlaylist(bob.id, pl.id));
-
-  const added = playlists.addTracks(alice.id, pl.id, [t1.id, t2.id, t3.id]);
-  eq('追加 3 首', added.added, 3);
-  const dup = playlists.addTracks(alice.id, pl.id, [t1.id, t3.id]);
-  eq('重复曲目被跳过', [dup.added, dup.skipped], [0, 2]);
-  eq('歌单曲目数', playlists.getPlaylist(alice.id, pl.id)?.trackCount, 3);
-
-  const items = playlists.listPlaylistItems(pl.id);
-  eq('曲目顺序与加入顺序一致', items.map(i => i.track?.name), ['第一首（改名）', '第二首', '第三首']);
-  check('曲目详情已 JOIN 回来', items[0].track !== null);
-  eq('封面回落到首曲封面', playlists.getPlaylist(alice.id, pl.id)?.coverUrl.endsWith('T002R300x300M000B.jpg'), true);
-
-  const reordered = playlists.reorder(alice.id, pl.id, [items[2].id, items[0].id, items[1].id]);
-  check('重排成功', reordered);
-  eq(
-    '重排后顺序正确',
-    playlists.listPlaylistItems(pl.id).map(i => i.track?.name),
-    ['第三首', '第一首（改名）', '第二首']
-  );
-  check('重排条目数不符时拒绝', !playlists.reorder(alice.id, pl.id, [items[0].id]));
-  check('重排含未知条目时拒绝', !playlists.reorder(alice.id, pl.id, [items[0].id, items[1].id, 999_999]));
-
-  check('按 item 移除', playlists.removeItem(alice.id, pl.id, items[2].id));
-  eq('移除后剩 2 首', playlists.listPlaylistItems(pl.id).length, 2);
-  eq('按 track_id 移除', playlists.removeTrack(alice.id, pl.id, t2.id), 1);
-
-  const updated = playlists.updatePlaylist(alice.id, pl.id, { name: '改名后', description: '说明' });
-  eq('更新歌单', [updated?.name, updated?.description], ['改名后', '说明']);
-
-  eq('删除歌单', playlists.deletePlaylist(alice.id, pl2.id), true);
-  eq('删除后仅剩 1 个', playlists.countPlaylists(alice.id), 1);
-
-  // 级联删除
-  playlists.createPlaylist(alice.id, { name: '待级联' });
-  const cascadeId = playlists.listPlaylists(alice.id).find(p => p.name === '待级联')!.id;
-  playlists.addTracks(alice.id, cascadeId, [t1.id]);
-  users.createUser({ username: 'temp', password: 'temp-pass-1' });
-  const tempUser = users.findUserByUsername('temp')!;
-  const tempPl = playlists.createPlaylist(tempUser.id, { name: 'temp 的歌单' });
-  playlists.addTracks(tempUser.id, tempPl.id, [t1.id]);
-  openDatabase().prepare('DELETE FROM users WHERE id = ?').run(tempUser.id);
-  eq('删用户级联删歌单', playlists.countPlaylists(tempUser.id), 0);
-  eq(
-    '删用户级联删歌单条目',
-    openDatabase()
-      .prepare('SELECT COUNT(*) AS n FROM playlist_items WHERE playlist_id = ?')
-      .get(tempPl.id) as { n: number },
-    { n: 0 }
-  );
-
   // ---- 6. 收藏 ----
-  section('[6/8] 收藏');
+  section('[5/7] 收藏');
   eq('首次收藏返回 true', favorites.addFavorite(alice.id, t1.id), true);
   eq('重复收藏返回 false（幂等）', favorites.addFavorite(alice.id, t1.id), false);
   eq('收藏数为 1', favorites.countFavorites(alice.id), 1);
@@ -362,7 +307,7 @@ function main(): number {
   eq('取消收藏数为 5', favorites.countFavorites(alice.id), 5);
 
   // ---- 7. 播放历史 ----
-  section('[7/8] 播放历史（增量同步）');
+  section('[6/7] 播放历史（增量同步）');
   const base = Date.now() - 60_000;
   for (let i = 0; i < 7; i++) {
     history.recordPlay({
@@ -450,7 +395,7 @@ function main(): number {
   eq('清空后为 0', history.countHistory(alice.id), 0);
 
   // ---- 8. 应用设置（服务端自己持有的凭证）----
-  section('[8/8] 应用设置');
+  section('[7/7] 应用设置');
   //
   // 这张表存的是**全站共用**的配置（目前只有一个 B 站 Cookie），
   // 不属于任何用户 —— 所以这里刻意不涉及 user_id。

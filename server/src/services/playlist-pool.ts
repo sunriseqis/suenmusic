@@ -25,7 +25,6 @@ const log = createLogger('playlist-pool');
 
 const norm = (s: string): string => String(s ?? '').toLowerCase().replace(/\s+/g, '');
 
-/** 未消耗歌单低于这个数就补充 */
 export const POOL_LOW_WATER = 1;
 
 /**
@@ -85,7 +84,6 @@ export function countUnconsumed(): number {
   return Number(row?.n ?? 0);
 }
 
-/** 未消耗的歌单（按采集时间正序：先来先用，避免老池子永远压箱底） */
 export function unconsumedPlaylists(limit = 20): PoolRow[] {
   const rows = getDatabase()
     .prepare(
@@ -96,12 +94,6 @@ export function unconsumedPlaylists(limit = 20): PoolRow[] {
   return rows;
 }
 
-/**
- * 取这些歌单的曲目（供生成推荐时抽歌）。
- *
- * 返回时**带上 dissid**：抽中哪些歌单的曲目，就要把那些歌单标成已消耗
- * （用完即弃，是"歌单池"不重复的关键）。
- */
 export function playlistItemEntries(dissids: string[]): Array<{ dissid: string; track: Track }> {
   if (dissids.length === 0) return [];
   const db = getDatabase();

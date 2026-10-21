@@ -62,23 +62,6 @@ export function getDailyActiveSetting(userId: number): string | null {
   return null;
 }
 
-export function getDailyBackupSetting(userId: number): string | null {
-  const userKey = dailyBackupKey(userId);
-  const val = getSetting(userKey);
-  if (val) return val;
-
-  if (userId === 1) {
-    const legacyBackup = getSetting('ai.daily.backup');
-    if (legacyBackup) {
-      setSetting(userKey, legacyBackup);
-      deleteSetting('ai.daily.backup');
-      return legacyBackup;
-    }
-  }
-
-  return null;
-}
-
 interface UserDailyStatus {
   isGenerating: boolean;
   lastStatus: 'shortfall' | 'error' | null;

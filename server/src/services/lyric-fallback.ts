@@ -150,7 +150,6 @@ export async function getLyricForTrack(track: Track): Promise<QQLyric> {
   return { lrc: { lyric: '' }, tlyric: { lyric: '' } };
 }
 
-/** 仅供验收脚本使用（透传 QQ 层的缓存清理） */
 export function resetLyricFallbackCache(): void {
   cache.clear();
   clearLyricCache();

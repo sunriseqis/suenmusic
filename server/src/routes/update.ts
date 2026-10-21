@@ -1,27 +1,36 @@
+/**
+ * 更新通道 HTTP 面。**唯一来源是 GitHub Releases**，服务端拉回本地缓存后由客户端从这里下载。
+ *
+ *   GET /api/update/check     查是否有新版本（读本地缓存，零上游；`force=1` 才去 GitHub 核对）
+ *   GET /api/update/download  下载产物（本地文件流式发送，**支持 Range/206**）
+ *
+ * 为什么客户端不直连 GitHub：
+ *   ① 国内访问 objects.githubusercontent.com 极不稳定；
+ *   ② 鸿蒙客户端走系统浏览器/侧签工具，**发不出鉴权头**；
+ *   ③ 缓存到本地后能支持断点续传。
+ *
+ * （老的 UGREEN 分享源已于 2026-10-21 按用户要求删除。）
+ */
+
 import type { FastifyInstance } from 'fastify';
-import { Readable } from 'node:stream';
-import { requireUser } from '../http/require-auth.ts';
+import { createReadStream } from 'node:fs';
+import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
 import { badGateway, badRequest, serviceUnavailable } from '../http/errors.ts';
 import { config } from '../config.ts';
 import {
-  getLatestUpdateArtifact,
+  PLATFORM_CONTENT_TYPE,
+  compareVersionName,
   isUpdatePlatform,
-  openUpdateDownload,
   type UpdatePlatform,
-} from '../services/ugreen-update.ts';
+} from '../services/update-types.ts';
 import { signUpdateToken, verifyUpdateToken } from '../utils/update-token.ts';
-
-/**
- * 产物 MIME。
- *
- * IPA 没有注册的 MIME 类型，这里必须给 `application/octet-stream`：
- * Safari 收到它才会把文件原样落盘、交给「文件」App 或重签工具；
- * 声明成某个已知归档类型反而可能被当场解开，安装工具就拿不到 .ipa 了。
- */
-const CONTENT_TYPE: Record<UpdatePlatform, string> = {
-  android: 'application/vnd.android.package-archive',
-  ios: 'application/octet-stream',
-};
+import { cachedFilePath, readCachedArtifact, refreshPlatform } from '../services/github-update.ts';
+import {
+  getUpdateProxySettings,
+  saveUpdateProxySettings,
+  validateProxy,
+  type UpdateProxyKind,
+} from '../services/update-settings.ts';
 
 function versionName(value: unknown): string {
   const text = String(value ?? '').trim();
@@ -42,9 +51,8 @@ function platform(value: unknown): UpdatePlatform {
   return text;
 }
 
-function updateError(err: unknown): never {
+function upstreamError(err: unknown): never {
   const message = err instanceof Error ? err.message : String(err);
-  if (!config.updateShareId) throw serviceUnavailable('更新服务尚未配置', 'update_not_configured');
   throw badGateway(`更新源暂时不可用：${message}`, 'update_upstream_failed');
 }
 
@@ -54,25 +62,46 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
     const query = (req.query ?? {}) as Record<string, unknown>;
     const currentName = versionName(query.version_name);
     const currentCode = versionCode(query.version_code);
-    /**
-     * `?force=1` 跳过 5 分钟的元数据缓存。
-     *
-     * 为什么需要：刚把新 APK 放进更新目录后，缓存里还是上一版，
-     * 检查更新会回答「已是最新」—— 用户手点按钮时必须拿到真实现状。
-     * 启动时的静默检查不带这个参数，缓存继续挡上游压力（列目录要过 UGREEN 云端握手）。
-     */
     const force = ['1', 'true', 'yes'].includes(String(query.force ?? '').toLowerCase());
     const target = platform(query.platform);
-    let artifact;
-    try {
-      artifact = await getLatestUpdateArtifact(target, force);
-    } catch (err) {
-      return updateError(err);
+
+    // 来源以 Web 设置页为准（env 只作初始缺省）
+    if (getUpdateProxySettings().source === 'off' || config.updateSource === 'off') {
+      return serviceUnavailable('更新服务已关闭', 'update_not_configured');
     }
 
-    const available = artifact.versionCode > 0 && currentCode > 0
-      ? artifact.versionCode > currentCode
-      : compareVersionName(artifact.versionName, currentName) > 0;
+    /**
+     * 默认**只读本地缓存**：客户端登录/回前台/定时检查都不会给 GitHub 添压力，
+     * 也不会被它的限流牵连。只有 `force=1`（用户手点检查更新）才去上游核对。
+     */
+    let artifact;
+    try {
+      artifact = force
+        ? await refreshPlatform(target, true)
+        : readCachedArtifact(target);
+      if (!artifact) {
+        // 首次启动还没轮询到：同步拉一次，避免"刚开机查不到更新"
+        artifact = await refreshPlatform(target, true);
+      }
+    } catch (err) {
+      return upstreamError(err);
+    }
+
+    const noUpdate = {
+      available: false,
+      current: { versionName: currentName, versionCode: currentCode },
+      latest: artifact,
+      downloadPath: '/api/update/download',
+      downloadToken: signUpdateToken(target),
+    };
+    if (!artifact) return noUpdate;
+
+    // GitHub 没有 versionCode（恒 0）→ 退回按 versionName 比较
+    const available =
+      artifact.versionCode > 0 && currentCode > 0
+        ? artifact.versionCode > currentCode
+        : compareVersionName(artifact.versionName, currentName) > 0;
+
     return {
       available,
       current: { versionName: currentName, versionCode: currentCode },
@@ -81,9 +110,8 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
       /**
        * 短期下载令牌。
        *
-       * 安卓原生侧自己下载，能带 Bearer，用不上它；iOS 要把 IPA 地址交给
-       * 应用外部（重签工具 `altstore://install?url=` / Safari），那两条路
-       * 都发不出请求头 —— 只能靠这个令牌换鉴权。两端统一返回，省得客户端分叉。
+       * 鸿蒙/iOS 都把地址交给系统浏览器或侧签工具，那些调用方**发不出请求头**，
+       * 只能靠这个令牌换鉴权；安卓原生侧自己下载时仍可用 Bearer。
        */
       downloadToken: signUpdateToken(target),
     };
@@ -92,47 +120,115 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
   app.get('/api/update/download', async (req, reply) => {
     const query = (req.query ?? {}) as Record<string, unknown>;
     const target = platform(query.platform);
+
     /**
      * 两条鉴权入口，满足其一即可：
-     *   - `?token=`　check 签发的短期令牌 —— 给**发不出请求头**的调用方
-     *     （iOS 的重签工具、Safari）用；
-     *   - `Authorization: Bearer`　安卓原生侧自己下载时走这条。
-     * 令牌本身就代表"已登录用户的这次更新授权"，有效时不必再查登录态。
+     *   - `?token=`　check 签发的短期令牌 —— 给**发不出请求头**的调用方；
+     *   - `Authorization: Bearer`　原生侧自己下载时走这条。
      */
     const rawToken = typeof query.token === 'string' ? query.token : undefined;
     if (!verifyUpdateToken(target, rawToken)) requireUser(req);
 
-    let result;
-    try {
-      result = await openUpdateDownload(target);
-    } catch (err) {
-      return updateError(err);
+    if (getUpdateProxySettings().source === 'off' || config.updateSource === 'off') {
+      return serviceUnavailable('更新服务已关闭', 'update_not_configured');
     }
-    const { response, artifact } = result;
-    const stream = Readable.fromWeb(response.body as any);
-    reply.code(200);
-    reply.header('Content-Type', CONTENT_TYPE[target]);
-    reply.header('Content-Disposition', `attachment; filename="${artifact.fileName}"`);
+
+    const file = cachedFilePath(target);
+    if (!file) {
+      return serviceUnavailable('更新产物尚未就绪', 'update_not_ready');
+    }
+
+    /**
+     * Range 支持（断点续传）。HAP/IPA 有 40–150MB，移动网络断一次不能从 0 重下。
+     *
+     * 起点越界必须回 **416**，不能夹到最后一个字节 —— 夹住会让客户端把 1 字节
+     * 当"续传成功"，文件静默残缺（2026-10-21 实测踩到）。
+     */
+    const total = file.size;
+    const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : '';
+    const m = /^bytes=(\d*)-(\d*)$/.exec(rangeHeader.trim());
+    let start = 0;
+    let end = total - 1;
+    let partial = false;
+
+    if (m && total > 0) {
+      const rawStart = m[1] === '' ? null : Number(m[1]);
+      const rawEnd = m[2] === '' ? null : Number(m[2]);
+      if (rawStart === null && rawEnd !== null) {
+        // 后缀范围：最后 N 字节
+        start = Math.max(0, total - rawEnd);
+      } else if (rawStart !== null) {
+        if (rawStart >= total) {
+          reply.code(416);
+          reply.header('Content-Range', `bytes */${total}`);
+          return { error: { code: 'invalid_range', message: '请求的字节范围无效' } };
+        }
+        start = rawStart;
+        if (rawEnd !== null) end = Math.min(rawEnd, total - 1);
+      }
+      partial = true;
+      if (start > end) {
+        reply.code(416);
+        reply.header('Content-Range', `bytes */${total}`);
+        return { error: { code: 'invalid_range', message: '请求的字节范围无效' } };
+      }
+    }
+
+    reply.header('Content-Type', PLATFORM_CONTENT_TYPE[target]);
+    reply.header('Content-Disposition', `attachment; filename="${file.fileName}"`);
     reply.header('Cache-Control', 'no-store');
-    if (response.headers.get('content-length')) reply.header('Content-Length', response.headers.get('content-length'));
-    stream.on('error', () => {
+    reply.header('Accept-Ranges', 'bytes');
+    reply.header('Content-Length', String(end - start + 1));
+    if (partial) {
+      reply.code(206);
+      reply.header('Content-Range', `bytes ${start}-${end}/${total}`);
+    } else {
+      reply.code(200);
+    }
+
+    const local = createReadStream(file.path, { start, end });
+    local.on('error', () => {
       try { (reply.raw.socket ?? reply.raw).destroy(); } catch { /* client already closed */ }
     });
     reply.raw.on('close', () => {
-      if (!stream.destroyed) stream.destroy();
+      if (!local.destroyed) local.destroy();
     });
-    return stream;
+    return reply.send(local);
   });
-}
 
-function compareVersionName(a: string, b: string): number {
-  const aa = a.split('.').map(Number);
-  const bb = b.split('.').map(Number);
-  const n = Math.max(aa.length, bb.length);
-  for (let i = 0; i < n; i++) {
-    const av = aa[i] ?? 0;
-    const bv = bb[i] ?? 0;
-    if (av !== bv) return av > bv ? 1 : -1;
-  }
-  return 0;
+  // ---- 更新通道设置（Web 管理页；只认 cookie 会话，与其它管理操作同一渠道闸） ----
+
+  app.get('/api/admin/update-settings', async req => {
+    requireWebAdmin(req);
+    return getUpdateProxySettings();
+  });
+
+  app.patch('/api/admin/update-settings', async req => {
+    requireWebAdmin(req);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const current = getUpdateProxySettings();
+
+    const source = body.source === 'off' ? ('off' as const) : ('github' as const);
+
+    /**
+     * **单框语义**：调用方只传 `proxyUrl` 一个字段。
+     *   有值（http://…）→ 自动 kind=http
+     *   空串/缺省      → 自动直连
+     * 若显式传了 proxyKind 则尊重它（保留将来扩展余地），但 socks5 会被
+     * saveUpdateProxySettings 的规范化直接落为 none 并拒绝地址。
+     */
+    const proxyUrl = typeof body.proxyUrl === 'string' ? body.proxyUrl.trim() : current.proxyUrl;
+    let proxyKind: UpdateProxyKind;
+    if (typeof body.proxyKind === 'string' && (body.proxyKind === 'http' || body.proxyKind === 'none')) {
+      proxyKind = body.proxyKind;
+    } else {
+      proxyKind = proxyUrl === '' ? 'none' : 'http';
+    }
+
+    try {
+      return saveUpdateProxySettings({ source, proxyKind, proxyUrl });
+    } catch (err) {
+      throw badRequest(err instanceof Error ? err.message : String(err), 'invalid_proxy');
+    }
+  });
 }

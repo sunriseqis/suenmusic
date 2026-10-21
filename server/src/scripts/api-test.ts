@@ -802,7 +802,13 @@ async function main(): Promise<number> {
     typeof restoreRes.json?.backupPath === 'string'
       && restoreRes.json.backupPath.includes('.pre-restore-')
   );
-  const afterUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
+  /**
+   * 恢复会**换掉整个库**，备份快照里没有"备份之后才建立"的 Web 会话 ——
+   * 所以原 cookie 必然 401。这里重新登录拿新 cookie 再数账号，
+   * 否则测的就不是"数据回到基线"，而是"会话没了"。
+   */
+  const adminCookie2 = await webCookie('tester', PASSWORD);
+  const afterUsers = await req('GET', '/api/admin/users', { cookie: adminCookie2 });
   check(
     '恢复后差异账号消失、回到备份基线',
     Array.isArray(afterUsers.json?.users)

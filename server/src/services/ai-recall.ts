@@ -390,12 +390,6 @@ async function deepCutsOf(seed: { name: string; mid: string }, cap: number): Pro
   }
 }
 
-/**
- * 把"相似歌手的名字"换成 QQ 的 mid（扩库用）。
- *
- * 用现成的 `searchQQ(..., { slices: ['singer'] })` —— QQ 搜索本身就支持歌手分片，
- * 不需要另写接口。命中不到同名（可能没收录/限流）就跳过那一个。
- */
 export async function resolveArtistMids(names: string[], limit = 40): Promise<string[]> {
   const out: string[] = [];
   const seen = new Set<string>();

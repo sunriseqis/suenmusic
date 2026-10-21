@@ -193,49 +193,8 @@ async function main(): Promise<number> {
   );
 
   // 5
-  step('建歌单 → 加 3 首 → 改序 → 删 1 首');
-  const created = await req('POST', '/api/playlists', {
-    token,
-    body: { name: '  验收歌单  ', description: 'P6 组装验收' },
-  });
-  must(created.status === 201, '创建歌单返回 201', `HTTP ${created.status}`);
-  must(created.json?.playlist?.name === '验收歌单', '歌单名已 trim', JSON.stringify(created.json?.playlist?.name));
-  const playlistId: string = created.json.playlist.id;
-
-  const seed = songs.slice(0, 3);
-  must(seed.length === 3, '取到 3 首可入歌单的曲目', `实际 ${seed.length}`);
-
-  const added = await req('POST', `/api/playlists/${playlistId}/tracks`, { token, body: { tracks: seed } });
-  must(added.json?.added === 3, '加入 3 首', `added=${added.json?.added}`);
-  must(added.json?.playlist?.trackCount === 3, '歌单计数更新为 3');
-
-  const plDetail = await req('GET', `/api/playlists/${playlistId}`, { token });
-  must(plDetail.json?.items?.length === 3, '歌单详情返回 3 条');
-  must(
-    plDetail.json.items.every((i: any) => i.track !== null),
-    '每条都 JOIN 到曲目内容（客户端不必二次请求）'
-  );
-  must(plDetail.json.missing?.length === 0, '没有缺失曲目');
-
-  const itemIds: number[] = plDetail.json.items.map((i: any) => i.itemId);
-  const reversed = [...itemIds].reverse();
-
-  const ordered = await req('PUT', `/api/playlists/${playlistId}/order`, { token, body: { itemIds: reversed } });
-  must(ordered.status === 200, '重排返回 200', `HTTP ${ordered.status}`);
-  const afterOrder = await req('GET', `/api/playlists/${playlistId}`, { token });
-  must(
-    JSON.stringify(afterOrder.json.items.map((i: any) => i.itemId)) === JSON.stringify(reversed),
-    '重排结果与请求一致'
-  );
-
-  const removed = await req('DELETE', `/api/playlists/${playlistId}/tracks/${itemIds[0]}`, { token });
-  must(removed.status === 200, '按 itemId 移除返回 200', `HTTP ${removed.status}`);
-  const afterRemove = await req('GET', `/api/playlists/${playlistId}`, { token });
-  must(afterRemove.json?.items?.length === 2, '移除后剩 2 首', `实际 ${afterRemove.json?.items?.length}`);
-
-  // 6
   step('收藏与取消收藏');
-  const fav = await req('POST', '/api/favorites', { token, body: { track: seed[0] } });
+  const fav = await req('POST', '/api/favorites', { token, body: { track: songs[0] } });
   must(fav.status === 201 && fav.json?.added === true, '收藏返回 201 且 added=true', `HTTP ${fav.status}`);
 
   const favAgain = await req('POST', '/api/favorites', { token, body: { trackId } });
@@ -247,7 +206,7 @@ async function main(): Promise<number> {
   const unfav = await req('DELETE', `/api/favorites/${encodeURIComponent(trackId)}`, { token });
   must(unfav.json?.removed === true, '取消收藏成功');
 
-  // 7
+  // 6
   step('上报 3 条历史 → 用 since 增量拉回');
   const baseTime = Date.now() - 30_000;
   const reported = await req('POST', '/api/history', {
@@ -289,7 +248,7 @@ async function main(): Promise<number> {
   const progress = await req('GET', `/api/history/progress/${encodeURIComponent(trackId)}`, { token });
   must(progress.json?.playedMs === 2000, '续播进度取到最后一次（2000ms）', `实际 ${progress.json?.playedMs}`);
 
-  // 8
+  // 7
   step('解析音源（真实上游：QQ 元数据 → B 站多维打分）');
   const resolved = await req('GET', `/api/resolve/${encodeURIComponent(trackId)}`, { token });
   must(resolved.status === 200, '解析接口返回 200', `HTTP ${resolved.status}`);
@@ -313,7 +272,7 @@ async function main(): Promise<number> {
   );
   must(String(resolved.json.streamUrl).includes('?t='), 'streamUrl 带短期播放令牌');
 
-  // 9
+  // 8
   step('音频流代理：Range 拉 64KB');
   const streamUrl: string = resolved.json.streamUrl;
   const wanted = 64 * 1024;
@@ -351,13 +310,10 @@ async function main(): Promise<number> {
   const noAuth = await req('GET', streamUrl.split('?')[0]);
   must(noAuth.status === 401, '裸地址无令牌访问被拒（401）', `HTTP ${noAuth.status}`);
 
-  // 10
+  // 9
   step('清理临时数据');
   const cleared = await req('DELETE', '/api/history', { token });
   must(cleared.json?.ok === true, '清空播放历史（隐私操作）');
-
-  const deletedPl = await req('DELETE', `/api/playlists/${playlistId}`, { token });
-  must(deletedPl.status === 200 && deletedPl.json?.ok === true, '删除验收歌单', `HTTP ${deletedPl.status}`);
 
   const loggedOut = await req('POST', '/api/auth/logout', {
     body: { refreshToken: refreshed.json.refreshToken },

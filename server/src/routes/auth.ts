@@ -203,7 +203,6 @@ export function registerAuthRoutes(app: FastifyInstance): void {
       sessions: listActiveTokens(user.id).map(t => ({
         id: t.id,
         createdAt: t.createdAt,
-        lastUsedAt: t.lastUsedAt,
         expiresAt: t.expiresAt,
         userAgent: t.userAgent,
         isCurrent: currentSessionId ? t.id === currentSessionId : false,

@@ -447,96 +447,6 @@ export async function aiChat(
   return content;
 }
 
-/** 工具调用（openai 兼容） */
-export interface AiToolCall {
-  id: string;
-  name: string;
-  arguments: string;
-}
-
-export interface AiToolReply {
-  content: string;
-  toolCalls: AiToolCall[];
-}
-
-/** 支持 function calling 的一轮对话（工具结果用 role: 'tool' 回填） */
-export async function aiChatWithTools(
-  messages: Array<Record<string, unknown>>,
-  tools: unknown[],
-  opts: { maxTokens?: number; timeoutMs?: number; temperature?: number } = {}
-): Promise<AiToolReply> {
-  const cfg = readAiConfig();
-  if (!cfg) throw new AiUnavailableError('模型未配置（前端设置里填 base_url / key / model）');
-
-  const body: Record<string, unknown> = {
-    model: cfg.model,
-    messages,
-    max_tokens: opts.maxTokens ?? DEFAULT_MAX_TOKENS,
-    temperature: opts.temperature ?? 0.7,
-  };
-  if (tools.length > 0) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-  }
-
-  const started = Date.now();
-  let res: Response;
-  try {
-    res = await postChatWithRetry(
-      `${cfg.baseUrl}/chat/completions`,
-      { authorization: `Bearer ${cfg.apiKey}`, 'content-type': 'application/json' },
-      JSON.stringify(body),
-      opts.timeoutMs ?? 600_000
-    );
-  } catch (err) {
-    throw new AiUnavailableError((err as Error).message);
-  }
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new AiUnavailableError(`模型返回 ${res.status}：${text.slice(0, 200)}`);
-  }
-
-  const rawText = await res.text();
-  const jsonText = firstJsonObject(rawText);
-  if (!jsonText) throw new AiUnavailableError(`模型响应里没有 JSON：${rawText.slice(0, 200)}`);
-  const data = JSON.parse(jsonText) as {
-    choices?: Array<{
-      message?: {
-        content?: string | null;
-        /** 推理模型可能只给思考不给正文（实测收口轮常见） */
-        reasoning?: string | null;
-        tool_calls?: Array<{
-          id?: string;
-          function?: { name?: string; arguments?: string };
-        }>;
-      };
-    }>;
-    usage?: { total_tokens?: number };
-  };
-  const msg = data.choices?.[0]?.message;
-  /**
-   * ⚠️ 推理模型会"只思考不产出"：实测收口轮 content 为空、reasoning 里却写了东西。
-   * 空正文时把 reasoning 一起交出去，让调用方有机会从中抢救 JSON（总比整轮白跑强）。
-   */
-  let content = (msg?.content ?? '').trim() ? (msg?.content ?? '') : (msg?.reasoning ?? '');
-  content = content.replace(
-    /(?:\[|【)?\b(?:user\s+|content\s+|system\s+)?safety(?:\s+(?:assessment|rating|check|status|result))?\s*[:：]\s*(?:safe|pass|ok|clean|neutral|none|true|false)\b[\s,，;；、\-—]*\]?】?/gi,
-    ''
-  ).trim();
-  const toolCalls: AiToolCall[] = (msg?.tool_calls ?? []).map(c => ({
-    id: String(c.id ?? ''),
-    name: String(c.function?.name ?? ''),
-    arguments: String(c.function?.arguments ?? '{}'),
-  }));
-  log.info(
-    `模型轮次：${Date.now() - started}ms · tokens ${data.usage?.total_tokens ?? '?'} · ` +
-      `工具调用 ${toolCalls.length} 个 · 正文 ${(msg?.content ?? '').length} 字` +
-      (msg?.content ? '' : '（正文为空，已用 reasoning 兜底）')
-  );
-  return { content, toolCalls };
-}
-
-/** 从可能带尾巴的响应里抠出第一个配平的 JSON 对象 */
 function firstJsonObject(text: string): string | null {
   const start = text.indexOf('{');
   if (start < 0) return null;
@@ -559,9 +469,4 @@ function firstJsonObject(text: string): string | null {
     }
   }
   return null;
-}
-
-/** 连通性测试：前端"测试"按钮用，返回模型原文 */
-export async function aiPing(): Promise<string> {
-  return aiChat([{ role: 'user', content: '只回答两个字：收到' }], { maxTokens: 800 });
 }

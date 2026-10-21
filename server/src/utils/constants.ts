@@ -11,5 +11,4 @@ export const BILI_REFERER = 'https://www.bilibili.com';
 
 export const QQ_REFERER = 'https://y.qq.com/';
 
-/** QQ 图床，形如 T002R300x300M000{mid}.jpg，尺寸写在路径里 */
 export const QQ_PHOTO_BASE = 'https://y.gtimg.cn/music/photo_new';

@@ -14,12 +14,14 @@ import { logger, setLogLevel } from './logger.ts';
 import { buildApp, SERVER_VERSION } from './app.ts';
 import { closeDatabase, migrate, openDatabase } from './db/index.ts';
 import { pruneExpired } from './services/resolver.ts';
+import { pruneLoginThrottle } from './services/auth.ts';
 import { loadBilibiliCookieFromDb } from './services/bilibili-account.ts';
 import { loadNeteaseCookieFromDb, initNeteaseVendor } from './services/netease-account.ts';
 import { pruneTokens } from './db/repo/tokens.ts';
 import { pruneTracks } from './db/repo/tracks.ts';
 import { ensurePoolHealth, getActiveUserIds } from './services/library-topup.ts';
 import { autoTagUntagged } from './services/ai-tags.ts';
+import { refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
 import { runDailyMaintenance } from './services/daily-recommend.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
 
@@ -27,6 +29,25 @@ import { msUntilNextLocal } from './utils/dates.ts';
 const TRACK_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** 周期性清理间隔 */
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
+
+/**
+ * 兜底：未处理的 Promise 拒绝只记日志，**不终止进程**。
+ *
+ * 这个服务是单进程 + 单 SQLite：任何一个后台任务漏 catch 都会让整个家庭音乐
+ * 服务下线（每日推荐、打标、建库都是 fire-and-forget）。已知的具体触发点（R-2）
+ * 是数据库恢复期间的 DatabaseRestoringError —— 那里已逐个补 catch，这里再加一道网，
+ * 防止以后新增的后台任务重犯。
+ *
+ * 刻意**不**接管 uncaughtException：同步异常往往意味着状态已损坏，让它按 Node
+ * 默认行为退出、由外部守护（fnOS 的 __supervise / docker restart）拉起更安全。
+ */
+process.on('unhandledRejection', reason => {
+  logger.error(
+    `未处理的 Promise 拒绝（已兜住，服务继续运行）：${
+      (reason as Error)?.stack ?? String(reason)
+    }`
+  );
+});
 
 async function main(): Promise<void> {
   // 第一件事：放开 Node 内置 fetch 的 300 秒隐藏上限（详见 utils/http-agent.ts）
@@ -91,14 +112,27 @@ async function main(): Promise<void> {
     try {
       pruneExpired();
       pruneTokens();
+      // 登录节流计数也要清：每失败一次就留一条，不清理就是无界增长
+      //（伪造 IP 会把它放大成「每个请求一条」）
+      pruneLoginThrottle();
     } catch (err) {
       logger.error('周期清理失败', (err as Error)?.message ?? String(err));
     }
     checkPoolHealth();
-    void autoTagUntagged(100);
+    // ⚠️ 必须 .catch：打标链路第一件事就是 getDatabase()，而数据库恢复期间
+    // 它会抛 DatabaseRestoringError —— `void` 不带 catch 就是未处理的 Promise 拒绝，
+    // Node 默认直接终止进程。也就是说"恢复数据库"这个最需要稳定的操作，
+    // 反而会因为后台任务在最坏的时刻把服务打死（2026-10-21 重审 R-2）。
+    void autoTagUntagged(100).catch(err =>
+      logger.warn(`后台打标失败：${(err as Error)?.message ?? String(err)}`)
+    );
   }, PRUNE_INTERVAL_MS);
   // 启动 5 秒后执行未打标曲目自动补打（启发式秒级完成）
-  setTimeout(() => { void autoTagUntagged(500); }, 5_000).unref();
+  setTimeout(() => {
+    void autoTagUntagged(500).catch(err =>
+      logger.warn(`启动补打失败：${(err as Error)?.message ?? String(err)}`)
+    );
+  }, 5_000).unref();
   // 启动 60 秒后再做第一次体检（避开启动时的一堆初始化请求）
   setTimeout(checkPoolHealth, 60_000).unref();
   // unref 让定时器不阻止进程退出
@@ -129,6 +163,31 @@ async function main(): Promise<void> {
       logger.warn(`每日推荐启动补跑失败：${(err as Error)?.message ?? String(err)}`)
     );
   }, 90_000).unref();
+
+  /**
+   * 更新产物轮询（`SUENMUSIC_UPDATE_SOURCE=github` 时才生效）。
+   *
+   * 为什么由**服务端**去拉 GitHub 而不是让客户端直连：
+   *   ① 国内访问 objects.githubusercontent.com 极不稳定；
+   *   ② 客户端（鸿蒙走系统浏览器/侧签工具）发不出鉴权头；
+   *   ③ 缓存到本地后下载能支持 Range/断点续传。
+   *
+   * 启动 20 秒后先拉一次（避开启动初始化），之后每 `updatePollMinutes` 分钟一次。
+   * 间隔设 0 表示不自动轮询，只在用户手点（`force=1`）时核对。
+   */
+  if (config.updateSource === 'github' && config.updatePollMinutes > 0) {
+    const intervalMs = config.updatePollMinutes * 60 * 1000;
+    setTimeout(() => {
+      void refreshUpdateArtifacts().catch(err =>
+        logger.warn(`更新产物首次拉取失败：${(err as Error)?.message ?? String(err)}`)
+      );
+    }, 20_000).unref();
+    setInterval(() => {
+      void refreshUpdateArtifacts().catch(err =>
+        logger.warn(`更新产物轮询失败：${(err as Error)?.message ?? String(err)}`)
+      );
+    }, intervalMs).unref();
+  }
 
   await app.listen({ host: config.host, port: config.port });
 

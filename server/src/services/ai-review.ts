@@ -24,7 +24,6 @@ const log = createLogger('ai-review');
  * 现在客观规则全部归代码，审核只判三类主观问题，上限也收到 6。
  */
 const REJECT_MAX = 6;
-/** 审核上下文里的历史台账条数（原来 40，收紧到 20，减少上下文） */
 export const REVIEW_HISTORY_MAX = 20;
 
 export interface ReviewItem {

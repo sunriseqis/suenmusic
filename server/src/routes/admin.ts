@@ -22,7 +22,8 @@ import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
 
 const log = createLogger('admin');
-import { closeDatabase, getDatabase, migrate, openDatabase } from '../db/index.ts';
+import { beginRestore, closeDatabase, endRestore, getDatabase, migrate, openDatabase, currentDatabasePath} from '../db/index.ts';
+import { InvalidUsernameError, UsernameTakenError, WeakPasswordError } from '../db/repo/users.ts';
 import { config } from '../config.ts';
 import {
   copyFileSync,
@@ -35,10 +36,26 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AppError, badRequest, notFound } from '../http/errors.ts';
+import { AppError, badRequest, conflict, notFound } from '../http/errors.ts';
 
 function asRecord(body: unknown): Record<string, unknown> {
   return body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+}
+
+/**
+ * 仓储层的校验异常 → HTTP 语义。
+ *
+ * 不加这层的话，`createUser` / `updatePassword` 抛的 `UsernameTakenError`
+ * 之类会一路逃到全局错误处理器，变成 500「服务端内部错误」——
+ * 管理员看到的是"服务器挂了"，实际只是重名或口令太弱（重审 F）。
+ */
+function mapUserRepoError(err: unknown): never {
+  if (err instanceof UsernameTakenError) throw conflict('该用户名已被占用', 'username_taken');
+  if (err instanceof InvalidUsernameError) {
+    throw badRequest('用户名只能包含字母、数字、下划线和连字符，长度 3-32 位', 'invalid_username');
+  }
+  if (err instanceof WeakPasswordError) throw badRequest(err.message, 'weak_password');
+  throw err instanceof Error ? err : new Error(String(err));
 }
 
 export function registerAdminRoutes(app: FastifyInstance): void {
@@ -53,11 +70,16 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     if (typeof body.username !== 'string' || typeof body.password !== 'string') {
       throw badRequest('用户名与口令必填');
     }
-    const user = createUser({
-      username: body.username,
-      password: body.password,
-      displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
-    });
+    let user;
+    try {
+      user = createUser({
+        username: body.username,
+        password: body.password,
+        displayName: typeof body.displayName === 'string' ? body.displayName : undefined,
+      });
+    } catch (err) {
+      mapUserRepoError(err);
+    }
     reply.code(201);
     return { user };
   });
@@ -73,7 +95,11 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     let changed = false;
 
     if (typeof body.password === 'string' && body.password.length > 0) {
-      updatePassword(id, body.password);
+      try {
+        updatePassword(id, body.password);
+      } catch (err) {
+        mapUserRepoError(err);
+      }
       changed = true;
     }
 
@@ -143,7 +169,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     requireWebAdmin(req);
     let dbBytes = 0;
     try {
-      dbBytes = statSync(config.dbPath).size;
+      dbBytes = statSync(currentDatabasePath()).size;
     } catch {
       dbBytes = 0;
     }
@@ -215,7 +241,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         throw badRequest('不是 SQLite 数据库文件（文件头不符）');
       }
 
-      const dbPath = config.dbPath;
+      const dbPath = currentDatabasePath();
       const uploadPath = `${dbPath}.upload.tmp`;
       writeFileSync(uploadPath, buf);
 
@@ -277,7 +303,25 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         );
       }
 
-      // 4) 热替换：关连接 → 换文件 → 重开 → 补迁移
+      // 4) 热替换：关连接 → 换文件 → 重开 → 补迁移 → 自检
+      //
+      // `beginRestore()` 是这一段的核心：Fastify 是并发的，关连接之后有一个
+      // instance === null 的窗口，任何在飞的 handler 都会自己重开**旧文件**并把
+      // instance 填回去，随后我们 rename 覆盖路径、openDatabase() 命中短路拿到的
+      // 却是那个旧 inode —— 恢复"成功"了，但后续写入全部落进一个已被替换的文件，
+      // 重启即消失。置位后 `getDatabase()` 一律 503，窗口内不可能再建立连接。
+      try {
+        beginRestore();
+      } catch (err) {
+        // 另一个恢复正在进行：把刚写下的（可能 200MB）临时文件清掉再抛，
+        // 否则它会一直躺在数据目录里（重审 F）。
+        try {
+          rmSync(uploadPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+        throw err;
+      }
       try {
         closeDatabase();
         // WAL 附属文件：close 时已 checkpoint，防御性删除避免旧 WAL 覆盖新库
@@ -286,6 +330,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         renameSync(uploadPath, dbPath);
         const reopened = openDatabase();
         migrate(reopened);
+        // 换血后立刻自检：迁移能跑不代表库是好的（页损坏只有读全表才暴露）
+        const check = reopened.prepare('PRAGMA quick_check').get() as
+          | { quick_check?: string }
+          | undefined;
+        const verdict = check?.quick_check ?? 'unknown';
+        if (verdict !== 'ok') {
+          throw new Error(`恢复后的数据库自检未通过：${verdict}`);
+        }
       } catch (err) {
         // 5) 回滚：兜底拷回、重开、补迁移
         let rolledBack = false;
@@ -304,6 +356,13 @@ export function registerAdminRoutes(app: FastifyInstance): void {
             }`
           );
         }
+        // renameSync 之前失败时，临时文件还在原地 —— 一并清掉
+        try {
+          rmSync(uploadPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+        endRestore();
         throw new AppError(
           500,
           rolledBack ? 'restore_failed' : 'restore_failed_rollback_failed',
@@ -312,6 +371,8 @@ export function registerAdminRoutes(app: FastifyInstance): void {
             : `恢复失败且回滚失败，请手动用 ${backupPath} 覆盖 ${dbPath} 后重启服务`
         );
       }
+
+      endRestore();
 
       // 内存缓存失效（本地曲库缓存等服务级缓存）
       invalidateLocalCatalogCache();

@@ -440,19 +440,34 @@ export async function tagTracks(limit: number): Promise<TagStats> {
   return stats;
 }
 
+/** 每轮留给 AI 精细打标的配额（模型调用慢且贵，只做小批量补位） */
+const AI_TAG_SLICE = 30;
+
 /**
- * 自动打标总调度：先秒级跑完启发式规则打标，若曲库仍有未标再触发 AI 补精细标签。
+ * 自动打标总调度：先秒级跑完启发式规则打标，再让 AI 补一批精细标签。
+ *
+ * ⚠️ 这里原先有个**永远不成立的条件**：`tagTracksHeuristic(limit)` 会把未标曲目
+ * 一次打满到 limit，于是 `heuristicTagged < limit` 只有在"本来就没剩几首"时才为真
+ * —— 而那正是 AI 也没活可干的情况，AI 分支实际是死代码（重审 F）。
+ *
+ * 现在改成**预留配额**：配了 AI 就只让启发式吃掉 limit - AI_TAG_SLICE，
+ * 剩下的交给模型；没配 AI 则启发式全量跑，行为与从前一致。
  */
 export async function autoTagUntagged(limit = 500): Promise<{ heuristicTagged: number; aiTagged: number }> {
-  const heuristicTagged = tagTracksHeuristic(limit);
-  let aiTagged = 0;
   const cfg = readAiConfig();
-  if (cfg && heuristicTagged < limit) {
-    try {
-      const stats = await tagTracks(Math.min(30, limit));
-      aiTagged = stats.tagged;
-    } catch (e) {
-      log.warn(`后台 AI 标签打标异常：${(e as Error).message}`);
+  const aiSlice = cfg ? Math.min(AI_TAG_SLICE, limit) : 0;
+  const heuristicTagged = tagTracksHeuristic(Math.max(0, limit - aiSlice));
+
+  let aiTagged = 0;
+  if (cfg) {
+    const remaining = limit - heuristicTagged;
+    if (remaining > 0) {
+      try {
+        const stats = await tagTracks(Math.min(aiSlice, remaining));
+        aiTagged = stats.tagged;
+      } catch (e) {
+        log.warn(`后台 AI 标签打标异常：${(e as Error).message}`);
+      }
     }
   }
   return { heuristicTagged, aiTagged };

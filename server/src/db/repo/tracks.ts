@@ -110,7 +110,13 @@ export function getTrack(id: string): Track | null {
   return getTracks([id])[0] ?? null;
 }
 
-/** 清掉超过指定年龄的缓存条目，避免库无限增长（严格保护收藏夹与歌单引用的曲目） */
+/**
+ * 清掉超过指定年龄的缓存条目，避免库无限增长。
+ *
+ * 保护集合：收藏夹、每日推荐候选池（`playlist_pool_items`）。
+ * 这里原先引用的是 `playlist_items`（用户歌单表）—— 那张表在 020 迁移里已删除，
+ * 而真正会长期引用曲目的是候选池，改成它才是本意。
+ */
 export function pruneTracks(olderThanMs: number): number {
   const cutoff = now() - olderThanMs;
   const res = getDatabase()
@@ -118,7 +124,7 @@ export function pruneTracks(olderThanMs: number): number {
       `DELETE FROM tracks
         WHERE fetched_at < ?
           AND id NOT IN (SELECT track_id FROM favorites)
-          AND id NOT IN (SELECT track_id FROM playlist_items)`
+          AND id NOT IN (SELECT track_id FROM playlist_pool_items)`
     )
     .run(cutoff);
   return toNumber(res.changes);

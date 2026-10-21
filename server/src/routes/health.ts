@@ -20,7 +20,6 @@ import { countTracks } from '../db/repo/tracks.ts';
 import { countSources } from '../db/repo/sources.ts';
 import { countFavorites } from '../db/repo/favorites.ts';
 import { countHistory } from '../db/repo/history.ts';
-import { countPlaylists } from '../db/repo/playlists.ts';
 import { countUsers } from '../db/repo/users.ts';
 
 export function registerHealthRoutes(app: FastifyInstance, version: string): void {
@@ -58,7 +57,6 @@ export function registerHealthRoutes(app: FastifyInstance, version: string): voi
         tracks: countTracks(),
         sources: sources.total,
         sourcesPositive: sources.positive,
-        playlists: countPlaylists(user.id),
         favorites: countFavorites(user.id),
         history: countHistory(user.id),
       },

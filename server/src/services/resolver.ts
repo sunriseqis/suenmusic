@@ -277,7 +277,11 @@ export function resolveTrack(
 
       // 自动沉淀映射：匹配成功的 B 站曲目的 bvid 永久入库。
       // 之后播放只取流、不搜索（见上方锚点分支）；repo 层保证不会覆盖手动锚定。
-      if (result.ok && result.bvid && (result.source ?? 'bilibili') === 'bilibili') {
+      //
+      // 用 `=== 'bilibili'` 而不是 `?? 'bilibili' === ...`：两条上游路径现在都会
+      // 显式带 source（网易云 :217、B 站搜索路径与锚点路径各一处），
+      // 兜底已经多余 —— 而正是那处兜底把「字段漏了」掩盖成了「测试才红」。
+      if (result.ok && result.bvid && result.source === 'bilibili') {
         saveAnchor(
           key,
           {

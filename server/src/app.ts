@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { config } from './config.ts';
 import { createLogger } from './logger.ts';
 import { AppError } from './http/errors.ts';
+import { DatabaseRestoringError } from './db/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
 import { registerAiSettingsRoutes } from './routes/ai-settings.ts';
@@ -24,8 +25,6 @@ import { registerCatalogRoutes } from './routes/catalog.ts';
 import { registerFavoriteRoutes } from './routes/favorites.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerHistoryRoutes } from './routes/history.ts';
-import { registerPlaylistRoutes } from './routes/playlists.ts';
-import { registerPlazaRoutes } from './routes/plaza.ts';
 import { registerResolveRoutes } from './routes/resolve.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerUpdateRoutes } from './routes/update.ts';
@@ -35,7 +34,15 @@ const log = createLogger('http');
 export const SERVER_VERSION = '0.1.0';
 
 /** 音频代理需要客户端能读到这些响应头，否则进度条拿不到总长度 */
-const EXPOSED_HEADERS = 'Content-Range, Content-Length, Accept-Ranges, Content-Type';
+/**
+ * 跨域可读的响应头。
+ *
+ * 少一个 `X-Audio-Duration-Ms` 的后果很隐蔽：原生壳（Bearer + CORS）里
+ * `fetch` 读不到这个头，进度条只能退回 Q 音元数据时长 —— 锚定到时长不同的
+ * 视频时就会"播完不切歌"（重审 F）。同源 Web 不受 CORS 限制，所以一直没暴露。
+ */
+const EXPOSED_HEADERS =
+  'Content-Range, Content-Length, Accept-Ranges, Content-Type, X-Audio-Duration-Ms';
 
 const ALLOWED_HEADERS = 'Content-Type, Authorization, Range, X-Device-Id';
 
@@ -60,8 +67,14 @@ export function buildApp(): FastifyInstance {
   const app = Fastify({
     // 用自研 logger：结构化、无颜色，能直接被 docker logs / journalctl 读
     logger: false,
-    // 反代后面取真实客户端 IP（登录节流依赖它）
-    trustProxy: true,
+    /**
+     * 反代后面要信 X-Forwarded-For 才能取到真实客户端 IP（登录节流依赖它）。
+     *
+     * 但**不能无条件 true**：那等于采信任何客户端伪造的 XFF，而节流按 IP 分桶，
+     * 攻击者每请求换一个假 IP 就永远撞不到上限 —— 字典攻击变成无限次。
+     * 所以默认 false，只有显式配置了可信代理（`SUENMUSIC_TRUST_PROXY`）才采信。
+     */
+    trustProxy: config.trustProxy,
     // 请求体上限 256KB：这个服务没有任何大体积上传，收紧可减少攻击面
     bodyLimit: 256 * 1024,
     // AI 深度长任务（画像重构、多轮选歌）耗时较长，显式设置 900 秒连接与请求超时：
@@ -89,6 +102,12 @@ export function buildApp(): FastifyInstance {
 
   // ---- 统一错误体 ----
   app.setErrorHandler((err, req, reply) => {
+    // 数据库恢复临界区：请求路径上任何取连接的调用都会抛这个 ——
+    // 明确回 503（可重试），不要落到 500 那条「未处理异常」上去刷错误日志
+    if (err instanceof DatabaseRestoringError) {
+      reply.code(503).send({ error: { code: err.code, message: err.message } });
+      return;
+    }
     if (err instanceof AppError) {
       reply.code(err.status).send({ error: { code: err.code, message: err.message } });
       return;
@@ -184,8 +203,6 @@ export function buildApp(): FastifyInstance {
   registerDailyRoutes(app);
   registerAiSettingsRoutes(app);
   registerCatalogRoutes(app);
-  registerPlazaRoutes(app);
-  registerPlaylistRoutes(app);
   registerFavoriteRoutes(app);
   registerHistoryRoutes(app);
   registerResolveRoutes(app);

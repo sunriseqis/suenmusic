@@ -53,8 +53,20 @@ interface AttemptRecord {
 
 const attempts = new Map<string, AttemptRecord>();
 
+/**
+ * 「仅按账号」这一桶的宽限倍数。
+ *
+ * 为什么需要它：IP 桶挡不住伪造 XFF（即使配了可信代理，攻击者也可能有多个出口）。
+ * 多一个不看 IP 的桶，才能把「对某个账号的总尝试次数」也钉死上限。
+ *
+ * 为什么给 3 倍：这个桶天然带「可能被用来锁死别人账号一阵」的副作用 ——
+ * 门槛给宽一点，正常用户输错几次不至于被恶意邻居卡住，
+ * 同时把「无限次猜测」压成「每窗口最多 3×N 次」。
+ */
+const ACCOUNT_BUCKET_FACTOR = 3;
+
 /** @returns 需要等待的毫秒数；0 表示可以尝试 */
-export function loginThrottleCheck(key: string): number {
+export function loginThrottleCheck(key: string, maxAttempts = config.loginMaxAttempts): number {
   const rec = attempts.get(key);
   if (!rec) return 0;
 
@@ -63,8 +75,25 @@ export function loginThrottleCheck(key: string): number {
     return 0;
   }
 
-  if (rec.count < config.loginMaxAttempts) return 0;
+  if (rec.count < maxAttempts) return 0;
   return rec.firstAt + config.loginWindowMs - Date.now();
+}
+
+/**
+ * 清掉已过窗口的计数。
+ *
+ * 之前只有「同一个 key 再次被检查」时才会删条目，于是每条失败记录都常驻到
+ * 进程重启 —— 配合伪造 IP 就是无界内存增长。挂到 index.ts 的 10 分钟清理周期里。
+ */
+export function pruneLoginThrottle(now = Date.now()): number {
+  let removed = 0;
+  for (const [key, rec] of attempts) {
+    if (now - rec.firstAt > config.loginWindowMs) {
+      attempts.delete(key);
+      removed++;
+    }
+  }
+  return removed;
 }
 
 export function loginThrottleFail(key: string): void {
@@ -233,9 +262,16 @@ export interface LoginInput {
 export function login(input: LoginInput): AuthSession {
   // 登录只校验"字段非空"，不校验口令强度 —— 理由见 normalizeCommon 上方的注释
   const { username, password } = normalizeCommon(input);
-  const key = `${input.throttleKey}|${username.toLowerCase()}`;
+  const lower = username.toLowerCase();
+  /** 主桶：IP + 账号。挡同源攻击者 */
+  const key = `${input.throttleKey}|${lower}`;
+  /** 副桶：只看账号。挡伪造 XFF / 多出口的分布式尝试 */
+  const accountKey = `account|${lower}`;
 
-  const waitMs = loginThrottleCheck(key);
+  const waitMs = Math.max(
+    loginThrottleCheck(key),
+    loginThrottleCheck(accountKey, config.loginMaxAttempts * ACCOUNT_BUCKET_FACTOR)
+  );
   if (waitMs > 0) {
     log.warn(`登录被节流：${key}，还需等待 ${Math.ceil(waitMs / 1000)}s`);
     throw tooManyRequests(
@@ -246,11 +282,13 @@ export function login(input: LoginInput): AuthSession {
   const user = usersRepo.authenticate(username, password);
   if (!user) {
     loginThrottleFail(key);
+    loginThrottleFail(accountKey);
     // 不区分"用户不存在"与"密码错误"，避免用户枚举
     throw unauthorized('用户名或密码错误');
   }
 
   loginThrottleReset(key);
+  loginThrottleReset(accountKey);
   log.info(`登录成功：${user.username} (id=${user.id})`);
   return issueSession(user, input.userAgent);
 }

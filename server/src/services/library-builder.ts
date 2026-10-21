@@ -33,7 +33,6 @@ import { findLocalArtist, findLocalTracksForArtist } from './local-catalog.ts';
 
 const log = createLogger('library-builder');
 
-/** 每位种子的相似歌手截断数（用户拍板：top 20） */
 export const SIMI_TRUNCATE = 20;
 
 /**
@@ -67,9 +66,16 @@ let building = false;
 export function kickLibraryBuilder(userId: number): void {
   if (building) return;
   building = true;
-  void runLoop(userId).finally(() => {
-    building = false;
-  });
+  // `.finally()` 只保证收尾、**不吞拒绝** —— 少一个 catch，建库循环里任何一次
+  // DB 异常（典型：数据库恢复期间的 DatabaseRestoringError）都会变成未处理的
+  // Promise 拒绝并终止进程（2026-10-21 重审 R-2）。
+  void runLoop(userId)
+    .catch(err => {
+      log.warn(`建库循环失败：${(err as Error)?.message ?? String(err)}`);
+    })
+    .finally(() => {
+      building = false;
+    });
 }
 
 async function runLoop(triggerUserId: number): Promise<void> {
