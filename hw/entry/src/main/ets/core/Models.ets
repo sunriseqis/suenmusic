@@ -135,7 +135,18 @@ export interface SearchHasMore {
   playlist: boolean;
 }
 
-/** `GET /api/search`。playlists / mvs / degraded 本增量不展示，按不透明对象占位 */
+/**
+ * `/api/search` 的 `degraded`：QQ 上游限流（code 2001）时服务端随 HTTP 200 带回。
+ * 空结果 + degraded 是「上游限流」而非「真的没有」——客户端必须提示，不能当空结果吞掉。
+ */
+export interface SearchDegraded {
+  slices: string[];
+  code: number | null;
+  message?: string;
+  retryAfterMs?: number;
+}
+
+/** `GET /api/search`。playlists / mvs 本增量不展示，按不透明对象占位 */
 export interface SearchResult {
   query: string;
   type: string;
@@ -147,7 +158,7 @@ export interface SearchResult {
   playlists: Object[];
   mvs: Object[];
   hasMore: SearchHasMore;
-  degraded: Object | null;
+  degraded: SearchDegraded | null;
 }
 
 /** `POST /api/favorites/check` 的返回 */

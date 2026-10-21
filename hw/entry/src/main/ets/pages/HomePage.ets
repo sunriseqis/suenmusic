@@ -4,6 +4,7 @@ import { HomeData, Track, Toplist, StreamSessionToken } from '../core/Models';
 import { ApiError, APIClient } from '../core/APIClient';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
+import { Copy } from '../common/Copy';
 import { TrackItem } from './TrackItem';
 
 /** 首页：新歌/榜单（S2 只做能点播的列表，视觉在 S4 打磨） */
@@ -12,6 +13,8 @@ export struct HomePage {
   @State home: HomeData | null = null;
   @State loading: boolean = false;
   @State err: string = '';
+  /** 已收藏曲目 id（右滑手势的文案/序号染色用，失败静默） */
+  @State favIds: string[] = [];
 
   aboutToAppear(): void { this.load(); }
 
@@ -20,10 +23,64 @@ export struct HomePage {
     this.err = '';
     try {
       this.home = await AppState.shared().home();
+      if (this.home !== null) { this.refreshFavMarks(this.home.newSongs); }
     } catch (e) {
       this.err = (e as ApiError).message === undefined ? '加载失败' : (e as ApiError).message;
     } finally {
       this.loading = false;
+    }
+  }
+
+  // ---------------- 收藏标记（右滑手势的支撑，失败静默不打断浏览） ----------------
+
+  private hasFav(trackId: string): boolean {
+    return this.favIds.indexOf(trackId) >= 0;
+  }
+
+  private setFav(trackId: string, fav: boolean): void {
+    const next: string[] = [];
+    if (fav) { next.push(trackId); }
+    for (let i = 0; i < this.favIds.length; i++) {
+      if (this.favIds[i] !== trackId) { next.push(this.favIds[i]); }
+    }
+    this.favIds = next;
+  }
+
+  private async refreshFavMarks(tracks: Track[]): Promise<void> {
+    const unknown: string[] = [];
+    for (let i = 0; i < tracks.length; i++) {
+      if (!this.hasFav(tracks[i].id)) { unknown.push(tracks[i].id); }
+    }
+    if (unknown.length === 0) { return; }
+    try {
+      const fav = await APIClient.shared().favoredIds(unknown);
+      for (let i = 0; i < fav.length; i++) { this.setFav(fav[i], true); }
+    } catch (e) {
+      hilog.warn(0x0000, 'SuenMusic_Fav', '拉取收藏标记失败（静默）: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  /** 右滑过阈值：乐观翻转 + 服务端落地，失败回滚 + Copy 文案 toast */
+  private async toggleFav(track: Track): Promise<boolean> {
+    const wasFav = this.hasFav(track.id);
+    this.setFav(track.id, !wasFav);
+    try {
+      if (wasFav) {
+        await APIClient.shared().removeFavorite(track.id);
+      } else {
+        await APIClient.shared().addFavorite(track.id, track);
+      }
+      AppState.shared().bumpFavRev();
+      return true;
+    } catch (e) {
+      this.setFav(track.id, wasFav);
+      const msg = (e as ApiError).message;
+      this.getUIContext().getPromptAction().showToast({
+        message: msg === undefined ? Copy.favOpFailed : msg,
+        duration: 2000
+      });
+      hilog.warn(0x0000, 'SuenMusic_Fav', '收藏切换失败: %{public}s', JSON.stringify(e));
+      return false;
     }
   }
 
@@ -74,6 +131,9 @@ export struct HomePage {
               ListItem() {
                 TrackItem({
                   track: t,
+                  index: i + 1,
+                  isFav: this.favIds.indexOf(t.id) >= 0,
+                  onSwipeToggle: () => this.toggleFav(t),
                   onTap: () => { this.playAt(this.home === null ? [] : this.home.newSongs, i); }
                 })
               }

@@ -165,7 +165,7 @@ export class APIClient {
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: timeoutMs,
         readTimeout: timeoutMs,
-        header: this.buildHeaders(authed)
+        header: this.buildHeaders(authed, body)
       };
       if (body.length > 0) { options.extraData = body; }
       return await req.request(this.baseUrl + path, options);
@@ -174,8 +174,12 @@ export class APIClient {
     }
   }
 
-  private buildHeaders(authed: boolean): Record<string, string> {
+  private buildHeaders(authed: boolean, body: string): Record<string, string> {
     const h: Record<string, string> = { 'Accept': 'application/json' };
+    // 鸿蒙 http 栈对不带 extraData 的请求也会默认注入 `Content-Type: application/json`，
+    // Fastify 遇到「JSON Content-Type + 空 body」直接 400（FST_ERR_CTP_EMPTY_JSON_BODY，
+    // 曾让 DELETE /api/favorites/:trackId 全挂）。显式声明：有 body = JSON，没 body = text/plain
+    h['Content-Type'] = body.length > 0 ? 'application/json' : 'text/plain';
     if (authed && this.accessToken.length > 0) {
       h['Authorization'] = 'Bearer ' + this.accessToken;
     }
@@ -370,6 +374,25 @@ export class APIClient {
     const payload: IdsBody = { ids: ids };
     return this.request<FavoritesCheckReply>('/api/favorites/check', http.RequestMethod.POST,
       JSON.stringify(payload), true, false);
+  }
+
+  /**
+   * 批量查询这批 id 里**已收藏**的 id 列表（右滑手势的序号染色/文案用）。
+   * 服务端单次上限 500，这里自动分批合并；调用方失败静默即可
+   * （拉不到标记只是不染色，不值得打断浏览）。
+   */
+  async favoredIds(ids: string[]): Promise<string[]> {
+    const out: string[] = [];
+    for (let start = 0; start < ids.length; start += 500) {
+      const part = ids.slice(start, start + 500);
+      if (part.length === 0) { continue; }
+      const res = await this.checkFavorites(part);
+      const keys = Object.keys(res.favorites);
+      for (let i = 0; i < keys.length; i++) {
+        if (res.favorites[keys[i]]) { out.push(keys[i]); }
+      }
+    }
+    return out;
   }
 
   /** 每日推荐（只读，歌单由服务端每天 00:30 产出；`shortfall` 不是错误） */

@@ -15,6 +15,8 @@ const DOMAIN = 0x0000;
 
 export const K_LOGGED_IN = 'logged_in';
 export const K_USER_NAME = 'user_name';
+/** 收藏集合版本号：任何页面收藏/取消成功后 +1，收藏页监听它做跨页即时刷新 */
+export const K_FAV_REV = 'fav_rev';
 
 export class AppState {
   private static instance: AppState | null = null;
@@ -72,4 +74,10 @@ export class AppState {
   }
 
   baseUrl(): string { return this.api.getBaseUrl(); }
+
+  /** 收藏集合版本号 +1（版本号只给 UI 做刷新通知，不进播放内核） */
+  bumpFavRev(): void {
+    const rev = AppStorage.get<number>(K_FAV_REV) ?? 0;
+    AppStorage.setOrCreate<number>(K_FAV_REV, rev + 1);
+  }
 }

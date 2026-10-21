@@ -112,6 +112,9 @@ struct NativeRoot {
               .tabBar(this.tabBuilder('我的', $r('sys.symbol.person'), 4))
           }
           .onChange((i: number) => { this.currentTab = i; })
+          // 禁用 Tabs 自带的横滑切页：它会抢走列表行右滑收藏手势的横向位移
+          // （Tab 仍可通过底部 tabBar 点击切换，与 web 移动端行为一致）
+          .scrollable(false)
           .layoutWeight(1)
 
           if (this.hasTrack) { this.playerBar() }
