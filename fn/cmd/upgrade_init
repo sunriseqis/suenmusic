@@ -1,5 +1,41 @@
 #!/bin/bash
+#
+# 升级前回调。**必须在替换文件之前把旧进程停掉。**
+#
+# 不做的后果（2026-10-21 审计 P1）：
+#   1. 新版本文件被替换，但跑着的旧进程已经把代码读进内存 → 用户仍用旧版本；
+#   2. `main start` 会读到存活的 PID 文件，判为"已在运行"直接返回 0，
+#      于是整个升级过程中服务**从未真正重启**，界面上却显示成功。
+#
+# 这里只负责停；启动由 upgrade_callback 负责（那时文件已是新的）。
+# 任何失败都不阻断升级流程（exit 0）—— 升级失败比"停不掉"更严重。
 
-### This script is called before the user upgrades the application.
+# 数据目录解析（与 cmd/main 同一套反推 + 硬闸）：TRIM_PKGVAR 为空时
+# 直接把日志写到 /info.log 会污染根分区（用户实测踩过），这里退到 /dev/null。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-}"
+if [ -z "${VAR_DIR}" ]; then
+    PKG_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+    VAR_DIR="${PKG_ROOT}/var"
+fi
+case "${VAR_DIR}" in
+    ""|"/"|"/var"|"/usr"|"/tmp") LOG_FILE=/dev/null ;;
+    *) LOG_FILE="${VAR_DIR}/info.log" ;;
+esac
 
+echo "$(date '+%Y-%m-%d %H:%M:%S') - [upgrade_init] 升级前停止旧进程" >> "${LOG_FILE}" 2>/dev/null
+
+"${SCRIPT_DIR}/main" stop >> "${LOG_FILE}" 2>&1
+
+# 等端口真正释放（最多 20 秒）：新进程起来时旧进程还占着 3210 会直接 EADDRINUSE
+PORT="${SUENMUSIC_PORT:-3210}"
+for _ in $(seq 1 20); do
+    if ! (command -v timeout >/dev/null 2>&1 \
+            && timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${PORT}" 2>/dev/null); then
+        break
+    fi
+    sleep 1
+done
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - [upgrade_init] 完成" >> "${LOG_FILE}" 2>/dev/null
 exit 0

@@ -1,32 +1,223 @@
 #!/bin/bash
+#
+# SuenMusic fnOS 套件控制脚本（start / stop / status）。
+#
+# 2026-10-21 审计批次 D 重写，解决四件事：
+#   1. **密钥持久化**：以前不导出 SUENMUSIC_JWT_SECRET，服务端每次启动随机生成 ——
+#      重启/升级后访问令牌与 6 小时流令牌全废（原生端被迫重登、正在播的歌中断）。
+#      现在首次启动生成并落盘到 `${TRIM_PKGVAR}/data/jwt.secret`（600），之后复用。
+#   2. **守护**：以前 `nohup node &` 一次性拉起，进程崩溃/OOM 后不重启，
+#      而 manifest 里 `checkport = true` 会让应用中心以为服务还活着。
+#      现在由一个守护子进程（本脚本的 `__supervise` 模式）看住 node，异常退出 5 秒后重启。
+#   3. **停止可靠**：PID 文件以前只有 pid，PID 被系统复用时会误杀无关进程；
+#      现在记录「pid + 启动时间」双重校验，并对守护/子进程分别处理。
+#   4. **日志轮转**：info.log 无限增长，NAS 盘被日志吃满过；超过 8MB 自动轮转一份。
+#
+set -o pipefail
 
-APP_DIR="${TRIM_APPDEST}"
-VAR_DIR="${TRIM_PKGVAR}"
+# ---- 安装目录与数据目录 ----
+#
+# ⚠️ fnOS 正常情况下会注入 TRIM_APPDEST / TRIM_PKGVAR，但**不能假定它们一定存在**：
+# 手工执行、部分回调、老安装器都可能拿不到。没有保护时的后果是致命的 ——
+# `${VAR_DIR}/data` 在空值下退化成 `/data`、日志退化成 `/info.log`、
+# PID 文件退化成 `/app.pid`，等于**直接往根分区写文件**（用户实测踩到：
+# 安装后默认数据目录变成了 `/`）。
+#
+# 所以这里做三件事：反推、兜底、硬闸。
+SELF_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "$0")"
+CMD_DIR="$(cd "$(dirname "${SELF_PATH}")" 2>/dev/null && pwd)"
+
+APP_DIR="${TRIM_APPDEST:-}"
+VAR_DIR="${TRIM_PKGVAR:-}"
+
+# 1) 反推安装目录：cmd/ 的上一级
+if [ -z "${APP_DIR}" ]; then
+    APP_DIR="$(cd "${CMD_DIR}/.." 2>/dev/null && pwd)"
+fi
+
+# 2) 反推数据目录：fnOS 布局是 <pkg>/target（安装）与 <pkg>/var（数据），
+#    所以「安装目录的父目录/var」就是数据目录。
+if [ -z "${VAR_DIR}" ]; then
+    PKG_ROOT="$(cd "${APP_DIR}/.." 2>/dev/null && pwd)"
+    VAR_DIR="${PKG_ROOT}/var"
+fi
+
+# 3) 硬闸：绝不允许空值或根目录（宁可启动失败，也不往 / 里写东西）
+case "${VAR_DIR}" in
+    ""|"/"|"/var"|"/usr"|"/tmp")
+        echo "[FATAL] 数据目录解析异常：TRIM_PKGVAR='${TRIM_PKGVAR:-<空>}' → '${VAR_DIR}'" >&2
+        echo "        拒绝在根分区写入。请通过应用中心启动，或显式设置 TRIM_PKGVAR。" >&2
+        exit 1
+        ;;
+esac
+case "${APP_DIR}" in
+    ""|"/")
+        echo "[FATAL] 安装目录解析异常：TRIM_APPDEST='${TRIM_APPDEST:-<空>}'" >&2
+        exit 1
+        ;;
+esac
+
+DATA_DIR="${VAR_DIR}/data"
+
+# ---- 配置目录（按官方契约应在 etc → @appconf）----
+# 老版本把 .env 放在 var 里，这里两个位置都读，新位置优先。
+ETC_DIR="${TRIM_PKGETC:-}"
+if [ -z "${ETC_DIR}" ]; then
+    PKG_ROOT_ETC="$(cd "${APP_DIR}/.." 2>/dev/null && pwd)"
+    ETC_DIR="${PKG_ROOT_ETC}/etc"
+fi
+case "${ETC_DIR}" in
+    ""|"/"|"/etc") ETC_DIR="${VAR_DIR}" ;;   # 实在是异常值就退回 var，绝不写 /etc
+esac
+mkdir -p "${ETC_DIR}" 2>/dev/null || true
+
+# ---- 备份目录（config/resource 里声明的 data-share）----
+# 手册：用户要在文件管理器看到/拷走的东西必须走 data-share，
+# 路径由 TRIM_DATA_SHARE_PATHS 给出（多个用 : 分隔）。
+# 这里取第一个，拿不到就退回私有目录 —— 数据库本体始终留在 var，
+# 只有**备份文件**放进共享目录（用户误删也伤不到库）。
+BACKUP_DIR=""
+if [ -n "${TRIM_DATA_SHARE_PATHS:-}" ]; then
+    BACKUP_DIR="${TRIM_DATA_SHARE_PATHS%%:*}"
+fi
+if [ -z "${BACKUP_DIR}" ]; then
+    BACKUP_DIR="${DATA_DIR}/backups"
+fi
+mkdir -p "${BACKUP_DIR}" 2>/dev/null || BACKUP_DIR="${DATA_DIR}/backups"
 LOG_FILE="${VAR_DIR}/info.log"
 PID_FILE="${VAR_DIR}/app.pid"
+CHILD_PID_FILE="${VAR_DIR}/app.child.pid"
+STOP_FLAG="${VAR_DIR}/stop.flag"
+SECRET_FILE="${DATA_DIR}/jwt.secret"
+
+mkdir -p "${DATA_DIR}" 2>/dev/null || {
+    echo "[FATAL] 无法创建数据目录：${DATA_DIR}" >&2
+    exit 1
+}
+# ---- 用户可配置项 ----
+#
+# 以前这里硬编码导出 8 个环境变量，而 config_init/config_callback 是空脚本、
+# 包内也不带 .env —— 结果 config.ts 读的 17 项里，套件里只有 8 项能用
+#（注册开关、匹配阈值、日志级别、CORS、更新通道全都改不了），
+# 而且用户在设置页设的值会被这里的硬编码覆盖（重审 F）。
+#
+# 现在统一走 ${TRIM_PKGVAR}/.env（升级不覆盖、不在包内），
+# 下面所有导出都用 `${VAR:-默认值}`，用户值优先。
+for envf in "${ETC_DIR}/.env" "${VAR_DIR}/.env"; do
+    if [ -r "${envf}" ]; then
+        set -a
+        # shellcheck disable=SC1090
+        . "${envf}" 2>/dev/null || true
+        set +a
+        break
+    fi
+done
+
+PORT="${SUENMUSIC_PORT:-3210}"
+SELF="${SELF_PATH}"
+# 时区必须在这里定：日志时间戳、每日推荐的「今天」都依赖它。
+# 放在 start_process 里导出的问题：切换点之前写的日志是 UTC、之后是 +08（实测踩过）。
+export TZ="${TZ:-Asia/Shanghai}"
 
 log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "${LOG_FILE}"
 }
 
-check_process() {
-    local pid=$1
-    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-        return 0
-    else
-        return 1
-    fi
+# 首次启动在数据目录写一份配置模板，告诉用户可配什么、改完怎么生效。
+# 不自动创建 .env（避免用户改了模板却以为已生效）。
+#
+# ⚠️ 这个脚本是 bash，注释只能用 #。曾经在这里误写成 JS 风格的块注释，
+# bash 会把 `/**` 当通配符展开成真实路径、把 ` * xxx` 当命令执行 ——
+# 现象是启动时刷一串 "/bin: Is a directory" 和 "app: command not found"。
+ensure_env_template() {
+    local tmpl="${ETC_DIR}/env.example"
+    [ -f "${tmpl}" ] && return 0
+    cat > "${tmpl}" <<'ENV_TMPL'
+# SuenMusic（fnOS 套件）用户配置 —— 复制为 .env 后生效：
+#   cp env.example .env && vi .env && ./cmd/main stop && ./cmd/main start
+# 所有项都可留空/删除，留空即用默认值。
+#
+# 注册开关（首次建号后建议设 false，配合 Web 面板建号）
+# SUENMUSIC_ALLOW_REGISTRATION=true
+# 音源匹配熔断阈值（0-100，低于该分数拒绝播放）
+# SUENMUSIC_MATCH_THRESHOLD=60
+# 上游超时（毫秒）
+# SUENMUSIC_UPSTREAM_TIMEOUT_MS=10000
+# 日志级别 debug | info | warn | error
+# SUENMUSIC_LOG_LEVEL=info
+# 允许的跨域来源（逗号分隔，* = 不限制）
+# SUENMUSIC_CORS_ORIGINS=*
+# 监听地址/端口（一般不用改：套件必须 0.0.0.0 才能被手机访问）
+# SUENMUSIC_HOST=0.0.0.0
+# SUENMUSIC_PORT=3210
+# 数据库路径（一般不用改，默认在数据目录里，升级保留）
+# SUENMUSIC_DB=__DATA_DIR__/suenmusic.db
+# Android 自更新（可选）
+# SUENMUSIC_UPDATE_SHARE_ID=
+# SUENMUSIC_UPDATE_SHARE_PATH=
+# 音源 Cookie 兜底（推荐直接在 Web 面板扫码，优先级更高）
+# SUENMUSIC_BILIBILI_COOKIE=
+# SUENMUSIC_NETEASE_COOKIE=
+ENV_TMPL
+    sed -i "s#__DATA_DIR__#${DATA_DIR}#" "${tmpl}" 2>/dev/null || true
+    log_msg "已写出配置模板：${tmpl}（复制为 .env 后可覆盖默认值）"
 }
 
-status() {
-    if [ -f "${PID_FILE}" ]; then
-        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
-        if check_process "${pid}"; then
-            return 0
-        else
-            rm -f "${PID_FILE}"
-        fi
+# /proc/<pid>/stat 的第 22 字段（starttime，开机后的 jiffies）。
+# comm 字段可能含空格与括号，所以先砍掉到最后一个 ')'，再取第 20 列。
+proc_start_time() {
+    local pid="$1"
+    [ -r "/proc/${pid}/stat" ] || return 1
+    sed 's/^[^)]*) //' "/proc/${pid}/stat" 2>/dev/null | awk '{print $20}'
+}
+
+# 进程存在且启动时间对得上（防止 PID 复用导致的误判/误杀）
+check_process() {
+    local pid="$1" expect="${2:-}"
+    [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null || return 1
+    if [ -n "${expect}" ] && [ "${expect}" != "0" ]; then
+        local actual
+        actual="$(proc_start_time "${pid}")"
+        [ "${actual}" = "${expect}" ] || return 1
     fi
+    return 0
+}
+
+# 端口是否有人在听（status 的第二判据：PID 文件丢了也能看出"还在跑"）
+port_open() {
+    local host=127.0.0.1
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 2 bash -c "exec 3<>/dev/tcp/${host}/${PORT}" 2>/dev/null && return 0
+        return 1
+    fi
+    (exec 3<>"/dev/tcp/${host}/${PORT}") 2>/dev/null || return 1
+    exec 3<&- 2>/dev/null
+    exec 3>&- 2>/dev/null
+    return 0
+}
+
+read_pid_file() {
+    PID_REC_PID=""
+    PID_REC_START=""
+    [ -r "${PID_FILE}" ] || return 1
+    read -r PID_REC_PID PID_REC_START < "${PID_FILE}" || true
+    PID_REC_PID="$(echo "${PID_REC_PID}" | tr -d '[:space:]')"
+    PID_REC_START="$(echo "${PID_REC_START}" | tr -d '[:space:]')"
+    [ -n "${PID_REC_PID}" ] || return 1
+    return 0
+}
+
+status_process() {
+    if read_pid_file; then
+        if check_process "${PID_REC_PID}" "${PID_REC_START}"; then
+            return 0
+        fi
+        # PID 文件还在但进程已不在（或被系统复用了）→ 清掉陈旧记录
+        log_msg "清理陈旧 PID 文件（pid=${PID_REC_PID}）"
+        rm -f "${PID_FILE}" "${CHILD_PID_FILE}"
+    fi
+    # PID 文件缺失/失效，但端口有人听 → 视为在跑（可能是旧版本遗留的进程）
+    port_open && return 0
     return 1
 }
 
@@ -40,82 +231,201 @@ find_node() {
     fi
 }
 
-start_process() {
-    if status; then
-        log_msg "SuenMusic is already running"
+rotate_log() {
+    local max=$((8 * 1024 * 1024))
+    [ -f "${LOG_FILE}" ] || return 0
+    local size
+    size="$(wc -c < "${LOG_FILE}" 2>/dev/null || echo 0)"
+    [ "${size}" -gt "${max}" ] 2>/dev/null || return 0
+    mv -f "${LOG_FILE}" "${LOG_FILE}.1" 2>/dev/null
+    log_msg "日志超过 8MB，已轮转为 info.log.1"
+}
+
+# 首次启动生成并持久化 JWT 密钥；之后每次复用。
+# 不落盘的后果：重启 = 全部登录态失效 + 正在播的歌因流令牌失效而中断。
+ensure_jwt_secret() {
+    if [ -s "${SECRET_FILE}" ]; then
+        SUENMUSIC_JWT_SECRET="$(cat "${SECRET_FILE}")"
+        export SUENMUSIC_JWT_SECRET
         return 0
     fi
-
-    log_msg "Starting SuenMusic native server..."
-    mkdir -p "${VAR_DIR}/data"
-
-    NODE_BIN=$(find_node)
-    if [ -z "${NODE_BIN}" ]; then
-        log_msg "[ERROR] Node.js binary not found! Neither bundled nor system node available."
+    local secret=""
+    if command -v openssl >/dev/null 2>&1; then
+        secret="$(openssl rand -hex 32 2>/dev/null)"
+    fi
+    if [ -z "${secret}" ]; then
+        secret="$("${NODE_BIN}" -e "console.log(require('crypto').randomBytes(32).toString('hex'))" 2>/dev/null)"
+    fi
+    if [ -z "${secret}" ]; then
+        log_msg "[ERROR] 无法生成 JWT 密钥（openssl 与 node 都不可用）"
         return 1
     fi
+    mkdir -p "${DATA_DIR}"
+    ( umask 077; printf '%s' "${secret}" > "${SECRET_FILE}" )
+    chmod 600 "${SECRET_FILE}" 2>/dev/null
+    SUENMUSIC_JWT_SECRET="${secret}"
+    export SUENMUSIC_JWT_SECRET
+    log_msg "已生成持久化 JWT 密钥：${SECRET_FILE}"
+    return 0
+}
 
-    log_msg "Using Node binary: ${NODE_BIN}"
-
-    export NODE_ENV="production"
-    export SUENMUSIC_HOST="0.0.0.0"
-    export SUENMUSIC_PORT="3210"
-    export SUENMUSIC_DB="${VAR_DIR}/data/suenmusic.db"
-    export SUENMUSIC_DATA_DIR="${VAR_DIR}/data"
-    export SUENMUSIC_WEB_ROOT="${APP_DIR}/web/dist"
-    export TZ="Asia/Shanghai"
-
+# 守护模式：由 start_process 在后台拉起，看着 node 子进程，异常退出就重启。
+supervise() {
+    local child=""
+    cleanup() {
+        if [ -n "${child}" ]; then
+            log_msg "收到停止信号，正在停止服务进程 (pid=${child})..."
+            kill -TERM "${child}" 2>/dev/null
+            local n=0
+            while check_process "${child}" && [ "${n}" -lt 10 ]; do
+                sleep 1
+                n=$((n + 1))
+            done
+            check_process "${child}" && kill -KILL "${child}" 2>/dev/null
+        fi
+        rm -f "${PID_FILE}" "${CHILD_PID_FILE}"
+        log_msg "守护进程退出"
+        exit 0
+    }
+    trap cleanup TERM INT
     cd "${APP_DIR}/server" || exit 1
 
-    nohup "${NODE_BIN}" --experimental-strip-types --disable-warning=ExperimentalWarning src/index.ts >> "${LOG_FILE}" 2>&1 &
-    local new_pid=$!
-
-    printf "%s" "$new_pid" > "${PID_FILE}"
-    log_msg "SuenMusic started with PID: ${new_pid}"
-
-    sleep 1
-    if check_process "$new_pid"; then
-        log_msg "Process is alive and listening."
-        return 0
-    else
-        log_msg "Process failed to stay alive! Check logs above."
+    # NODE_BIN 不会跨进程继承（nohup 起的是新的 bash），这里必须自己再解析一次。
+    # 否则守护循环里那行会变成空命令 → 127、无限重启（实测踩过）。
+    NODE_BIN="$(find_node)"
+    if [ -z "${NODE_BIN}" ]; then
+        log_msg "[ERROR] 守护模式找不到 Node.js，放弃启动"
         rm -f "${PID_FILE}"
+        exit 1
+    fi
+
+    while :; do
+        [ -f "${STOP_FLAG}" ] && break
+        rotate_log
+        "${NODE_BIN}" --experimental-strip-types --disable-warning=ExperimentalWarning \
+            src/index.ts >> "${LOG_FILE}" 2>&1 &
+        child=$!
+        printf '%s' "${child}" > "${CHILD_PID_FILE}"
+        log_msg "服务进程已启动 (pid=${child})"
+        wait "${child}"
+        local rc=$?
+        child=""
+        rm -f "${CHILD_PID_FILE}"
+        [ -f "${STOP_FLAG}" ] && break
+        log_msg "服务进程退出 (code=${rc})，5 秒后自动重启"
+        sleep 5
+    done
+    rm -f "${PID_FILE}"
+    log_msg "守护循环结束"
+    exit 0
+}
+
+start_process() {
+    if status_process; then
+        log_msg "SuenMusic 已在运行，忽略本次启动"
+        return 0
+    fi
+
+    log_msg "正在启动 SuenMusic..."
+    log_msg "安装目录=${APP_DIR}  数据目录=${DATA_DIR}  配置目录=${ETC_DIR}  备份目录=${BACKUP_DIR}"
+    mkdir -p "${DATA_DIR}"
+    rm -f "${STOP_FLAG}"
+
+    NODE_BIN="$(find_node)"
+    if [ -z "${NODE_BIN}" ]; then
+        log_msg "[ERROR] 找不到 Node.js：既没有包内 ${APP_DIR}/bin/node，也没有系统 node"
         return 1
     fi
+    export NODE_BIN
+    log_msg "Node 运行时：${NODE_BIN}"
+
+    ensure_env_template
+
+    if ! ensure_jwt_secret; then
+        return 1
+    fi
+
+    # 服务端默认只绑 127.0.0.1（安全默认），套件里必须改成 0.0.0.0，
+    # 否则 NAS 以外的设备（手机端）连不上 —— 而 checkport 探测 localhost 仍然通，很难发现。
+    #
+    # 全部用 `${VAR:-默认}`：.env 里写了的以用户为准（重审 F）。
+    export NODE_ENV="${NODE_ENV:-production}"
+    export SUENMUSIC_HOST="${SUENMUSIC_HOST:-0.0.0.0}"
+    export SUENMUSIC_PORT="${PORT}"
+    export SUENMUSIC_DB="${SUENMUSIC_DB:-${DATA_DIR}/suenmusic.db}"
+    export SUENMUSIC_WEB_ROOT="${SUENMUSIC_WEB_ROOT:-${APP_DIR}/web/dist}"
+    # 套件前面没有反代：直连形态下不能采信 X-Forwarded-For（否则登录节流可被绕过）。
+    # 用户在 .env 里显式设了就以用户为准（例如自己在前面加了 nginx）。
+    export SUENMUSIC_TRUST_PROXY="${SUENMUSIC_TRUST_PROXY:-false}"
+    # 备份输出到共享目录（文件管理器可见、可拷走）；db-backup 脚本读这个变量
+    export SUENMUSIC_BACKUP_DIR="${SUENMUSIC_BACKUP_DIR:-${BACKUP_DIR}}"
+    SUENMUSIC_BACKUP_KEEP="${SUENMUSIC_BACKUP_KEEP:-14}"
+    export SUENMUSIC_BACKUP_KEEP
+
+    nohup "${SELF}" __supervise >> "${LOG_FILE}" 2>&1 &
+    local supervisor=$!
+    local started
+    started="$(proc_start_time "${supervisor}")"
+    printf '%s %s' "${supervisor}" "${started:-0}" > "${PID_FILE}"
+    log_msg "守护进程已拉起 (pid=${supervisor})"
+
+    sleep 2
+    if check_process "${supervisor}" "${started:-0}" || port_open; then
+        log_msg "启动成功，端口 ${PORT} 可用"
+        return 0
+    fi
+    log_msg "[ERROR] 启动失败：守护进程未能存活，请查看 ${LOG_FILE}"
+    rm -f "${PID_FILE}"
+    return 1
 }
 
 stop_process() {
-    log_msg "Stopping SuenMusic native server..."
+    log_msg "正在停止 SuenMusic..."
+    # 先置停止标志：守护循环看到它就不再重启子进程
+    : > "${STOP_FLAG}"
 
-    if [ -r "${PID_FILE}" ]; then
-        pid=$(head -n 1 "${PID_FILE}" | tr -d '[:space:]')
-        if ! check_process "${pid}"; then
-            rm -f "${PID_FILE}"
-            log_msg "Process not found; cleaned stale PID file."
-            return 0
-        fi
-
-        log_msg "Sending TERM signal to PID ${pid}..."
-        kill -TERM "${pid}" >> "${LOG_FILE}" 2>&1
-
-        local count=0
-        while check_process "${pid}" && [ $count -lt 10 ]; do
-            sleep 1
-            count=$((count + 1))
-            log_msg "Waiting process to terminate... (${count}s/10s)"
-        done
-
-        if check_process "${pid}"; then
-            log_msg "Force killing PID ${pid}..."
-            kill -KILL "${pid}" 2>/dev/null
-            sleep 1
-            rm -f "${PID_FILE}"
+    local stopped=0
+    if read_pid_file; then
+        if check_process "${PID_REC_PID}" "${PID_REC_START}"; then
+            log_msg "向守护进程 ${PID_REC_PID} 发送 TERM"
+            kill -TERM "${PID_REC_PID}" 2>/dev/null
+            local n=0
+            while check_process "${PID_REC_PID}" "${PID_REC_START}" && [ "${n}" -lt 15 ]; do
+                sleep 1
+                n=$((n + 1))
+            done
+            if check_process "${PID_REC_PID}" "${PID_REC_START}"; then
+                log_msg "守护进程未响应 TERM，改为 KILL ${PID_REC_PID}"
+                kill -KILL "${PID_REC_PID}" 2>/dev/null
+            fi
+            stopped=1
         else
-            log_msg "Process terminated gracefully."
-            rm -f "${PID_FILE}"
+            log_msg "PID 文件记录的进程已不存在（pid=${PID_REC_PID}），跳过"
         fi
     fi
 
+    # 兜底：守护进程被 KILL 时子进程会滞留
+    if [ -r "${CHILD_PID_FILE}" ]; then
+        local child
+        child="$(head -n 1 "${CHILD_PID_FILE}" | tr -d '[:space:]')"
+        if check_process "${child}"; then
+            log_msg "补收子进程 (pid=${child})"
+            kill -TERM "${child}" 2>/dev/null
+            sleep 2
+            check_process "${child}" && kill -KILL "${child}" 2>/dev/null
+        fi
+    fi
+
+    rm -f "${PID_FILE}" "${CHILD_PID_FILE}"
+
+    if port_open; then
+        # 端口还在 = 没停干净。**保留 stop.flag**：守护循环看到它就不会再拉起
+        # 子进程；而删掉它的后果是"以为停了、其实守护又把服务拉起来"（重审 R-4）。
+        log_msg "[WARN] 端口 ${PORT} 仍在监听 —— 保留 stop.flag 以免自动重启；请手动确认残留进程"
+        return 1
+    fi
+    rm -f "${STOP_FLAG}"
+    [ "${stopped}" = "1" ] && log_msg "已停止"
     return 0
 }
 
@@ -129,11 +439,16 @@ stop)
     exit $?
     ;;
 status)
-    if status; then
+    if status_process; then
         exit 0
     else
         exit 3
     fi
+    ;;
+# 内部入口：由 start_process 以 nohup 拉起，不要手动调用
+__supervise)
+    supervise
+    exit $?
     ;;
 *)
     echo "Usage: $0 {start|stop|status}"

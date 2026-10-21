@@ -1,5 +1,40 @@
 #!/bin/bash
+#
+# 设置页的配置变更回调。
+#
+# fnOS 在用户在应用设置页改完环境变量后调用它。以前这里是裸 `exit 0`
+# —— 改完什么都不发生，用户以为生效了，实际服务仍在用旧环境（重审 F）。
+#
+# 这里做两件事：
+#   1. 让服务重新读一次配置（stop + start；纯 bash 无法热重载 node 进程）；
+#   2. 把结果写进 info.log，事后能查"这次改动到底有没有生效"。
 
-### This script is called after the user change environment variables in application setting page.
+# 数据目录解析（与 cmd/main 同一套反推 + 硬闸）：TRIM_PKGVAR 为空时
+# 直接把日志写到 /info.log 会污染根分区（用户实测踩过），这里退到 /dev/null。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-}"
+if [ -z "${VAR_DIR}" ]; then
+    PKG_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+    VAR_DIR="${PKG_ROOT}/var"
+fi
+case "${VAR_DIR}" in
+    ""|"/"|"/var"|"/usr"|"/tmp") LOG_FILE=/dev/null ;;
+    *) LOG_FILE="${VAR_DIR}/info.log" ;;
+esac
 
+log_msg() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [config_callback] $1" >> "${LOG_FILE}" 2>/dev/null
+}
+
+log_msg "配置变更，重启服务以生效"
+"${SCRIPT_DIR}/main" stop >> "${LOG_FILE}" 2>&1
+"${SCRIPT_DIR}/main" start >> "${LOG_FILE}" 2>&1
+RC=$?
+if [ "${RC}" = "0" ]; then
+    log_msg "已按新配置重启"
+else
+    log_msg "[WARN] 重启失败（rc=${RC}），请查看 ${LOG_FILE}"
+fi
+
+# 不返回非零：配置回调失败会被应用中心显示成"设置保存失败"，而服务其实可能正常
 exit 0

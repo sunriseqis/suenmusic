@@ -1,5 +1,40 @@
 #!/bin/bash
+#
+# 卸载前回调：**必须先把服务停掉**。
+#
+# 以前这里（和 uninstall_callback）都是裸 `exit 0`，而 main 的守护进程是 nohup 常驻的
+# —— 卸载后 node 仍在跑、仍占着 3210；用户再装一次时 `main start` 会被端口判据
+# 判成"已在运行"直接返回 0，于是**新装版本永远不生效**，界面还一切正常
+#（2026-10-21 重审 F）。
+#
+# 只停进程、**不删数据**：TRIM_PKGVAR/data 里是数据库与 JWT 密钥，
+# 重装/升级后应当能接着用。要清空请用户自己删目录。
 
-### This script is called after the user uninstalls the application.
+# 数据目录解析（与 cmd/main 同一套反推 + 硬闸）：TRIM_PKGVAR 为空时
+# 直接把日志写到 /info.log 会污染根分区（用户实测踩过），这里退到 /dev/null。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-}"
+if [ -z "${VAR_DIR}" ]; then
+    PKG_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+    VAR_DIR="${PKG_ROOT}/var"
+fi
+case "${VAR_DIR}" in
+    ""|"/"|"/var"|"/usr"|"/tmp") LOG_FILE=/dev/null ;;
+    *) LOG_FILE="${VAR_DIR}/info.log" ;;
+esac
 
+echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall_init] 卸载前停止服务" >> "${LOG_FILE}" 2>/dev/null
+"${SCRIPT_DIR}/main" stop >> "${LOG_FILE}" 2>&1
+
+# 等端口真正释放（与 upgrade_init 同样的理由：残留进程会让重装后的 start 误判）
+PORT="${SUENMUSIC_PORT:-3210}"
+for _ in $(seq 1 20); do
+    if ! (command -v timeout >/dev/null 2>&1 \
+            && timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${PORT}" 2>/dev/null); then
+        break
+    fi
+    sleep 1
+done
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall_init] 完成" >> "${LOG_FILE}" 2>/dev/null
 exit 0

@@ -1,5 +1,27 @@
 #!/bin/bash
+#
+# 卸载完成回调。这里再兜一次停服务：uninstall_init 可能没跑到（异常中断、
+# 旧版本升级上来的包），而**残留进程比多停一次危险得多**（它会让重装后的
+# main start 直接返回"已在运行"）。stop 是幂等的。
 
-### This script is called after the user uninstalls the application.
+# 数据目录解析（与 cmd/main 同一套反推 + 硬闸）：TRIM_PKGVAR 为空时
+# 直接把日志写到 /info.log 会污染根分区（用户实测踩过），这里退到 /dev/null。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VAR_DIR="${TRIM_PKGVAR:-}"
+if [ -z "${VAR_DIR}" ]; then
+    PKG_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+    VAR_DIR="${PKG_ROOT}/var"
+fi
+case "${VAR_DIR}" in
+    ""|"/"|"/var"|"/usr"|"/tmp") LOG_FILE=/dev/null ;;
+    *) LOG_FILE="${VAR_DIR}/info.log" ;;
+esac
 
+echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall_callback] 确认服务已停止" >> "${LOG_FILE}" 2>/dev/null
+"${SCRIPT_DIR}/main" stop >> "${LOG_FILE}" 2>&1
+
+if (command -v timeout >/dev/null 2>&1 \
+        && timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${SUENMUSIC_PORT:-3210}" 2>/dev/null); then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall_callback] [WARN] 端口仍被占用，可能有残留进程" >> "${LOG_FILE}" 2>/dev/null
+fi
 exit 0
