@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "20cfbd66-ac85-4d9f-ab68-7ffc61229ab6",
+    "createdAt": "2026-10-21T08:23:34.667Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/screenshot_1.jpeg",
+      "sha256": "0c73cdb1b152f0661e4bef2a4c96006acb87a0cf60fadb4a6fb8bff5a29c121e"
+    },
+    "requirements": {
+      "text": "这是一个鸿蒙音乐应用搜索页截图。请描述：1) 顶部是否有搜索输入框（Search 组件，带占位文本\"搜索歌曲、歌手、专辑\"和搜索按钮）；2) 是否有分片切换胶囊按钮（单曲/专辑/歌手）；3) 中间显示的是\"最近搜索\"列表还是\"搜索你想听的歌\"空提示；4) 底部导航栏的 Tab 数量与名称；5) 有无布局异常（组件重叠、错位、空白异常）。",
+      "sha256": "be6deba8b2527737f00c1411f79bc07b7e3ba3cb3a7e91bb0c13929d1ab86e5e"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 853,
+      "height": 1888
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "搜索输入框",
+        "visual_evidence": "顶部深色背景输入框内显示占位文本“搜索歌曲、歌手、专辑”，右侧有蓝色“搜索”按钮",
+        "component_candidates": [
+          {
+            "name": "Search",
+            "confidence": 0.9,
+            "reason": "符合搜索框+占位符+搜索按钮的标准组合，ArkUI 中 Search 组件支持此类布局"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "分片切换胶囊按钮",
+        "visual_evidence": "输入框下方横向排列三个标签：“单曲”、“专辑”、“歌手”，其中“单曲”为选中态（橙色背景）",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.85,
+            "reason": "用于切换内容分类的胶囊式标签组，ArkUI Tabs 组件支持此类视觉样式和交互"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "空状态提示文本",
+        "visual_evidence": "页面中央显示灰色文字“搜索你想听的歌”，无列表项",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.9,
+            "reason": "纯文本提示，无交互，适合用 Text 组件展示空状态引导语"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "底部导航栏",
+        "visual_evidence": "底部横向排列五个图标+文字标签：首页、搜索、收藏、专属、我的，当前“搜索”为选中态",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.8,
+            "reason": "底部导航栏通常由 Tabs 组件实现，支持图标+文字+选中态样式"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

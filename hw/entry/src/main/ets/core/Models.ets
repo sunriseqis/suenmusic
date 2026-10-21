@@ -109,6 +109,79 @@ export interface LyricResult {
   tlyric: LyricPayload;
 }
 
+/** 搜索的歌手条目（`/api/search` 分片，QQ 适配字段） */
+export interface Artist {
+  id: string;
+  mid: string;
+  name: string;
+  picUrl: string;
+  img1v1Url: string;
+  alias: string[];
+  albumSize: number;
+  musicSize: number;
+  mvSize: number;
+  briefDesc: string;
+}
+
+/**
+ * `hasMore` 是**分片级"还有下一页"**，不是总数 ——
+ * QQ 搜索响应没有总数字段；搜歌手时 `hasMore.song` 恒 false 属正常，
+ * 判断当前分片只能看对应的键。
+ */
+export interface SearchHasMore {
+  song: boolean;
+  album: boolean;
+  artist: boolean;
+  playlist: boolean;
+}
+
+/** `GET /api/search`。playlists / mvs / degraded 本增量不展示，按不透明对象占位 */
+export interface SearchResult {
+  query: string;
+  type: string;
+  page: number;
+  limit: number;
+  songs: Track[];
+  albums: Album[];
+  artists: Artist[];
+  playlists: Object[];
+  mvs: Object[];
+  hasMore: SearchHasMore;
+  degraded: Object | null;
+}
+
+/** `POST /api/favorites/check` 的返回 */
+export interface FavoritesCheckReply {
+  favorites: Record<string, boolean>;
+}
+
+/** `POST /api/favorites` 的返回（重复收藏 200 且 added=false） */
+export interface FavoriteUpsertReply {
+  ok: boolean;
+  added: boolean;
+  trackId: string;
+}
+
+/** `DELETE /api/favorites/:trackId` 的返回（幂等：不存在也 200） */
+export interface FavoriteRemoveReply {
+  ok: boolean;
+  removed: boolean;
+}
+
+/**
+ * `GET /api/recommend/daily`。
+ * `status`：ready / generating / shortfall / error。
+ * **`shortfall` 不是错误** —— 曲库不足是正常业务结果，界面要说人话。
+ */
+export interface DailyRecommend {
+  status: string;
+  date: string;
+  greeting?: string;
+  welcomePhrase?: string;
+  tracks: Track[];
+  message?: string;
+}
+
 export interface ApiErrorInner {
   code: string;
   message: string;

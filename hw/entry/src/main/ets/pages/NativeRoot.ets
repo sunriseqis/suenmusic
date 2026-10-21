@@ -3,10 +3,14 @@
  *
  * **这里没有 ArkWeb、没有 WebView** —— 全原生迭代的前提。
  * 旧 `pages/Index.ets`（WebView 壳）保留在原处作为回退路径，S2/S3 验收通过后删除。
+ * S3 增量 2 起 Tab 扩为 5 个：首页 / 搜索 / 收藏 / 每日 / 我的（顺序与名称固定）。
  */
 
 import { LoginPage } from './LoginPage';
 import { HomePage } from './HomePage';
+import { SearchPage } from './SearchPage';
+import { FavoritesPage } from './FavoritesPage';
+import { DailyPage } from './DailyPage';
 import { SettingsPage } from './SettingsPage';
 import { PlayerPage } from './PlayerPage';
 import { AppState, K_LOGGED_IN } from '../viewmodel/AppState';
@@ -27,8 +31,17 @@ struct NativeRoot {
   @State showPlayer: boolean = false;
   // ⚠️ 不能叫 `tabIndex`：ArkUI 的 Tabs 有同名属性修饰符，重名会报类型冲突
   @State currentTab: number = 0;
+  // 窗口全屏布局（EntryAbility setWindowLayoutFullScreen）后系统避让区实时值：
+  // 刘海/状态栏高度、底部手势条高度因机型而异，由 avoidAreaChange 动态推送，禁止硬编码
+  @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
+  @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
 
   private avSession: HarmonyAVSessionManager | null = null;
+
+  /** 避让区 px → vp（走 UIContext 实例方法，全局 px2vp 已弃用） */
+  private avoidVp(px: number): number {
+    return this.getUIContext().px2vp(px);
+  }
 
   aboutToAppear(): void {
     // `getContext(this)` 已弃用；从 UIContext 取宿主 Context
@@ -42,6 +55,20 @@ struct NativeRoot {
 
   aboutToDisappear(): void {
     this.avSession?.destroy();
+  }
+
+  /** 底部导航按钮：系统 Symbol 图标 + 文字，选中态 accent */
+  @Builder
+  tabBuilder(title: string, icon: Resource, idx: number) {
+    Column({ space: 2 }) {
+      SymbolGlyph(icon)
+        .fontSize(22)
+        .fontColor(this.currentTab === idx ? [Tokens.accent] : [Tokens.text2])
+      Text(title)
+        .fontSize(10)
+        .fontColor(this.currentTab === idx ? Tokens.accent : Tokens.text2)
+    }
+    .justifyContent(FlexAlign.Center)
   }
 
   @Builder
@@ -73,8 +100,16 @@ struct NativeRoot {
       } else {
         Column() {
           Tabs({ index: this.currentTab, barPosition: BarPosition.End }) {
-            TabContent() { HomePage() }.tabBar('首页')
-            TabContent() { SettingsPage() }.tabBar('我的')
+            TabContent() { HomePage() }
+              .tabBar(this.tabBuilder('首页', $r('sys.symbol.house'), 0))
+            TabContent() { SearchPage() }
+              .tabBar(this.tabBuilder('搜索', $r('sys.symbol.magnifyingglass'), 1))
+            TabContent() { FavoritesPage() }
+              .tabBar(this.tabBuilder('收藏', $r('sys.symbol.heart'), 2))
+            TabContent() { DailyPage() }
+              .tabBar(this.tabBuilder('专属', $r('sys.symbol.calendar'), 3))
+            TabContent() { SettingsPage() }
+              .tabBar(this.tabBuilder('我的', $r('sys.symbol.person'), 4))
           }
           .onChange((i: number) => { this.currentTab = i; })
           .layoutWeight(1)
@@ -82,6 +117,10 @@ struct NativeRoot {
           if (this.hasTrack) { this.playerBar() }
         }
         .width('100%').height('100%')
+        .padding({
+          top: this.avoidVp(this.topAvoidHeight),
+          bottom: this.avoidVp(this.bottomAvoidHeight)
+        })
       }
 
       if (this.showPlayer) {

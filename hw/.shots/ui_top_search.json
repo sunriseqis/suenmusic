@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "7ccf8d5c-fb88-47ed-8c75-be8bdfb09ab7",
+    "createdAt": "2026-10-21T08:48:36.819Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/top_shot_search.png",
+      "sha256": "bf8c8098e8011a3295b8462eaa9d334ac1396a52c93f8e7a0160aaf55ca05922"
+    },
+    "requirements": {
+      "text": "这是鸿蒙应用截图的最顶部 400 像素高的横条（原图 1280 宽，截取 y=0~400 区域，裁剪图被横向拉伸显示为 400x400 无需在意比例）。请精确描述：1) 状态栏元素（时间、信号、电量）在什么位置？2) 有没有挖孔摄像头/刘海（黑色圆形或缺口）？3) 应用的搜索框从哪个 y 位置开始？4) 应用内容（搜索框/文字）与状态栏或摄像头是否有重叠？请给出各元素大致 y 坐标。",
+      "sha256": "4e08e7f44e582c8b3784d7e254fa210ae63948d6b52fb55ac2e155d324584c9c"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 1280,
+      "height": 400
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "搜索框",
+        "visual_evidence": "深色背景的圆角矩形输入框，内含放大镜图标、文字“周深”、清除按钮“X”和蓝色“搜索”按钮",
+        "component_candidates": [
+          {
+            "name": "Search",
+            "confidence": 0.9,
+            "reason": "标准搜索输入框，包含输入区域、清除按钮和搜索动作按钮，符合 ArkUI Search 组件特征"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "标签导航栏",
+        "visual_evidence": "三个横向排列的标签：“单曲”、“专辑”、“歌手”，其中“单曲”为选中状态（高亮）",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.85,
+            "reason": "横向标签切换组件，用于内容分类导航，符合 ArkUI Tabs 组件的典型用法"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "状态栏时间",
+        "visual_evidence": "左上角显示“04:28”",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.7,
+            "reason": "纯文本显示，可能是状态栏系统时间，ArkUI 中可用 Text 组件渲染"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "状态栏信号与电量",
+        "visual_evidence": "右上角显示信号强度图标和“100%”电量文字",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.65,
+            "reason": "状态栏系统信息，通常由系统渲染，若需自定义可用 Text 组件模拟"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

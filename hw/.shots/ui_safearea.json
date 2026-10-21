@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "30cde07b-f5bb-415a-8039-10276fcc25f9",
+    "createdAt": "2026-10-21T09:14:22.428Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/shot_safearea.jpeg",
+      "sha256": "9a7b705ebbfd138d6a2d0b3bb65c2ffa8e36d465cbb72e8e32278f04bb1a5890"
+    },
+    "requirements": {
+      "text": "这是鸿蒙音乐应用的截图（当前应为全屏播放页/歌词视图，或收藏页）。请确认安全区适配：1) 顶部状态栏（时间05:11/电量100）与屏幕中央顶部有没有刘海/挖孔摄像头？2) 应用内容（如「收起」按钮、标题、歌词文字）是否与状态栏文字或摄像头重叠？应用内容顶部大约从哪个 y 位置开始？3) 底部按钮（上一首/暂停/下一首）是否与屏幕最底部的手势指示条重叠？请具体说明。",
+      "sha256": "41f0c087d2327d4df0e139d37348756f89a2c7bd6cd1ba5abf56f194adeb4848"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 1280,
+      "height": 2832
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "收起按钮",
+        "visual_evidence": "左上角显示文字“收起”",
+        "component_candidates": [
+          {
+            "name": "Button",
+            "confidence": 0.9,
+            "reason": "标准文本按钮，用于收起当前视图"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "歌词标签页",
+        "visual_evidence": "顶部导航栏中“歌词”标签高亮显示",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.85,
+            "reason": "用于切换“封面”“歌词”“队列”等视图的标签页组件"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "制作人等制作信息",
+        "visual_evidence": "歌词上方显示多行制作人员信息，如“制作人：宿羽阳@潮汐引力”",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.9,
+            "reason": "纯文本展示，无交互，适合使用Text组件"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "当前歌词行",
+        "visual_evidence": "“今夜的风悄悄月悄悄”以橙色高亮显示",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.95,
+            "reason": "高亮歌词行，需独立样式控制，适合用Text组件并设置颜色"
+          }
+        ]
+      },
+      {
+        "id": "component-5",
+        "name": "歌词列表",
+        "visual_evidence": "多行灰色歌词文本，如“吻你的眉梢”“且把酒满倒人醉倒”等",
+        "component_candidates": [
+          {
+            "name": "List",
+            "confidence": 0.8,
+            "reason": "歌词逐行排列，适合用List组件实现滚动和布局"
+          }
+        ]
+      },
+      {
+        "id": "component-6",
+        "name": "播放进度条",
+        "visual_evidence": "底部左侧有圆形滑块和时间“0:05”，右侧“3:26”",
+        "component_candidates": [
+          {
+            "name": "Slider",
+            "confidence": 0.85,
+            "reason": "带滑块的进度条，适合用Slider组件实现"
+          }
+        ]
+      },
+      {
+        "id": "component-7",
+        "name": "暂停按钮",
+        "visual_evidence": "底部中央橙色圆角矩形按钮，文字“暂停”",
+        "component_candidates": [
+          {
+            "name": "Button",
+            "confidence": 0.95,
+            "reason": "主操作按钮，颜色突出，适合用Button组件并设置背景色"
+          }
+        ]
+      },
+      {
+        "id": "component-8",
+        "name": "上一首按钮",
+        "visual_evidence": "底部左侧黑色圆角按钮，文字“上一首”",
+        "component_candidates": [
+          {
+            "name": "Button",
+            "confidence": 0.9,
+            "reason": "标准功能按钮，适合用Button组件"
+          }
+        ]
+      },
+      {
+        "id": "component-9",
+        "name": "下一首按钮",
+        "visual_evidence": "底部右侧黑色圆角按钮，文字“下一首”",
+        "component_candidates": [
+          {
+            "name": "Button",
+            "confidence": 0.9,
+            "reason": "标准功能按钮，适合用Button组件"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

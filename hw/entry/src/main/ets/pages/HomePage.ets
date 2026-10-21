@@ -1,9 +1,10 @@
 import { AppState } from '../viewmodel/AppState';
-import { MediaPlayerCore, K_TRACKID, K_HAS_TRACK } from '../core/MediaPlayerCore';
-import { HomeData, Track, Toplist, StreamSessionToken, artistLine } from '../core/Models';
+import { MediaPlayerCore } from '../core/MediaPlayerCore';
+import { HomeData, Track, Toplist, StreamSessionToken } from '../core/Models';
 import { ApiError, APIClient } from '../core/APIClient';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
+import { TrackItem } from './TrackItem';
 
 /** 首页：新歌/榜单（S2 只做能点播的列表，视觉在 S4 打磨） */
 @Component
@@ -11,8 +12,6 @@ export struct HomePage {
   @State home: HomeData | null = null;
   @State loading: boolean = false;
   @State err: string = '';
-  @StorageLink(K_TRACKID) currentTrackId: string = '';
-  @StorageLink(K_HAS_TRACK) hasTrack: boolean = false;
 
   aboutToAppear(): void { this.load(); }
 
@@ -49,30 +48,6 @@ export struct HomePage {
     }
   }
 
-  @Builder
-  trackRow(track: Track, list: Track[], index: number) {
-    Row({ space: 10 }) {
-      Image(track.al.picUrl.length > 0 ? track.al.picUrl : $r('app.media.app_icon'))
-        .width(44).height(44).borderRadius(6).objectFit(ImageFit.Cover)
-      Column({ space: 2 }) {
-        Text(track.name)
-          .fontSize(15)
-          .fontColor(this.currentTrackId === track.id ? Tokens.accent : Tokens.text1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(artistLine(track))
-          .fontSize(11)
-          .fontColor(Tokens.text2)
-          .maxLines(1)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-    }
-    .width('100%')
-    .padding({ left: 16, right: 16, top: 8, bottom: 8 })
-    .onClick(() => { this.playAt(list, index); })
-  }
-
   build() {
     Column() {
       if (this.loading && this.home === null) {
@@ -96,7 +71,12 @@ export struct HomePage {
                 .width('100%').padding({ left: 16, top: 12, bottom: 4 })
             }
             ForEach(this.home.newSongs, (t: Track, i: number) => {
-              ListItem() { this.trackRow(t, this.home === null ? [] : this.home.newSongs, i) }
+              ListItem() {
+                TrackItem({
+                  track: t,
+                  onTap: () => { this.playAt(this.home === null ? [] : this.home.newSongs, i); }
+                })
+              }
             }, (t: Track) => t.id)
           }
           if (this.home.toplists.length > 0) {

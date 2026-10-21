@@ -12,6 +12,15 @@ export struct LoginPage {
   @State busy: boolean = false;
   @State err: string = '';
 
+  // 窗口全屏布局下的系统避让区实时值（刘海/状态栏、底部手势条，随机型动态变化）
+  @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
+  @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
+
+  /** 避让区 px → vp（走 UIContext 实例方法，全局 px2vp 已弃用） */
+  private avoidVp(px: number): number {
+    return this.getUIContext().px2vp(px);
+  }
+
   aboutToAppear(): void {
     // 首次启动没有服务端地址时给个占位提示，用户自己填
     this.address = AppState.shared().baseUrl();
@@ -69,7 +78,12 @@ export struct LoginPage {
     }
     .width('100%')
     .height('100%')
-    .padding(24)
+    .padding({
+      left: 24,
+      right: 24,
+      top: this.avoidVp(this.topAvoidHeight) + 24,
+      bottom: this.avoidVp(this.bottomAvoidHeight) + 24
+    })
     .justifyContent(FlexAlign.Center)
     .backgroundColor(Tokens.bg)
   }

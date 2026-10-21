@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "4861870b-fb4f-4a58-81bc-4da1b7f511ab",
+    "createdAt": "2026-10-21T08:29:25.359Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/shot_search.jpeg",
+      "sha256": "a1678ac43f2d9da5db8e11a7cbc0a1593d1bf6bfc0a9acb16080e9887f30e253"
+    },
+    "requirements": {
+      "text": "这是鸿蒙音乐应用搜索页搜索「周深」后的截图。请确认：1) 搜索框内文字是否为「周深」；2) 分片胶囊（单曲/专辑/歌手）当前选中哪个；3) 单曲分片是否显示了歌曲结果列表，大约多少条，每条是否有封面图+歌名+歌手名；4) 列表底部是否显示「加载更多」或「没有更多了」或「正在加载」；5) 有无错误提示文字（如\"加载失败\"/红色文字）。",
+      "sha256": "418ad5d552339fca425c5086076c8dc1fa4a40e9bd61ee850a141dbec902c8aa"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 1280,
+      "height": 2832
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "搜索框",
+        "visual_evidence": "顶部搜索栏内显示文字“周深”，右侧有蓝色“搜索”按钮",
+        "component_candidates": [
+          {
+            "name": "TextInput",
+            "confidence": 0.9,
+            "reason": "用于输入搜索关键词，支持文本显示和清除功能"
+          },
+          {
+            "name": "Button",
+            "confidence": 0.85,
+            "reason": "右侧蓝色“搜索”按钮用于触发搜索操作"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "分片胶囊导航",
+        "visual_evidence": "“单曲”“专辑”“歌手”三个标签，其中“单曲”为高亮选中状态",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.9,
+            "reason": "用于切换不同内容分类，当前选中“单曲”"
+          },
+          {
+            "name": "TabBar",
+            "confidence": 0.8,
+            "reason": "也可用于实现分片导航，但Tabs更常用于内容区切换"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "歌曲结果列表",
+        "visual_evidence": "显示10条歌曲结果，每条包含封面图、歌名、歌手名",
+        "component_candidates": [
+          {
+            "name": "List",
+            "confidence": 0.95,
+            "reason": "用于展示垂直滚动的歌曲列表"
+          },
+          {
+            "name": "ListItem",
+            "confidence": 0.9,
+            "reason": "每条歌曲项包含封面、标题、副标题，符合ListItem结构"
+          },
+          {
+            "name": "Image",
+            "confidence": 0.85,
+            "reason": "每项左侧显示专辑封面图"
+          },
+          {
+            "name": "Text",
+            "confidence": 0.85,
+            "reason": "用于显示歌名和歌手名"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "底部导航栏",
+        "visual_evidence": "底部有“首页”“搜索”“收藏”“专属”“我的”五个图标+文字标签",
+        "component_candidates": [
+          {
+            "name": "BottomTabBar",
+            "confidence": 0.95,
+            "reason": "标准底部导航栏，当前“搜索”项高亮"
+          },
+          {
+            "name": "Button",
+            "confidence": 0.8,
+            "reason": "每个导航项可视为带图标的按钮"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

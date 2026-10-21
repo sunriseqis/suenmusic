@@ -23,6 +23,15 @@ export struct PlayerPage {
   @StorageLink(K_INDEX) index: number = -1;
   @StorageLink('np_error') err: string = '';
 
+  // 窗口全屏布局下的系统避让区实时值（顶部「收起」与底部进度条需避开刘海/手势条）
+  @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
+  @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
+
+  /** 避让区 px → vp（走 UIContext 实例方法，全局 px2vp 已弃用） */
+  private avoidVp(px: number): number {
+    return this.getUIContext().px2vp(px);
+  }
+
   /** 0 = 封面 / 1 = 歌词 / 2 = 队列 */
   @State mode: number = 0;
   /**
@@ -174,7 +183,12 @@ export struct PlayerPage {
     }
     .width('100%')
     .height('100%')
-    .padding({ left: 20, right: 20, top: 12, bottom: 16 })
+    .padding({
+      left: 20,
+      right: 20,
+      top: this.avoidVp(this.topAvoidHeight) + 12,
+      bottom: this.avoidVp(this.bottomAvoidHeight) + 16
+    })
     .backgroundColor(Tokens.bg)
   }
 }

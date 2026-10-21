@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "63aed7a0-55d3-4de7-83c6-7d1b802c1c1a",
+    "createdAt": "2026-10-21T08:40:07.550Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/shot_favorites.jpeg",
+      "sha256": "183fa9ae029046cd63f097809be0152ade8857c1a16b62fc801d375a92343358"
+    },
+    "requirements": {
+      "text": "这是鸿蒙音乐应用的收藏页截图（无收藏数据时的空态）。请确认：1) 页面顶部是否有标题栏「我的收藏」和右侧「共 0 首」字样；2) 页面中部是否显示空态提示「还没有收藏」；3) 是否有任何错误文字（如 Cannot read property...）；4) 底部导航五个 Tab 及选中态（当前应选中「收藏」）。",
+      "sha256": "788d791ad588d8c5b52508d15756db9bde357ec099043d57ac47e7c347ca5c78"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 1280,
+      "height": 2832
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "标题栏「我的收藏」",
+        "visual_evidence": "页面左上角显示文字「我的收藏」",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.9,
+            "reason": "用于显示静态标题文本"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "右侧统计文字「共0首」",
+        "visual_evidence": "页面右上角显示文字「共0首」",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.9,
+            "reason": "用于显示动态或静态统计数字文本"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "空态提示「还没有收藏」",
+        "visual_evidence": "页面中部显示文字「还没有收藏」",
+        "component_candidates": [
+          {
+            "name": "Text",
+            "confidence": 0.95,
+            "reason": "用于展示空状态引导文案"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "底部导航栏",
+        "visual_evidence": "页面底部横向排列五个 Tab，包含「首页」「搜索」「收藏」「专属」「我的」，其中「收藏」图标和文字呈高亮选中态",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.85,
+            "reason": "用于实现底部导航切换，支持选中态样式"
+          },
+          {
+            "name": "Button",
+            "confidence": 0.7,
+            "reason": "每个 Tab 项可视为带图标的按钮"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 2,
+  "status": "ok",
+  "producer": {
+    "tool": "recognize_ui_components",
+    "model": "Qwen3_VL_235B_A22B_Instruct",
+    "invocationId": "efb219ad-c0ad-4d25-83c1-4d580260af7e",
+    "createdAt": "2026-10-21T08:44:36.456Z"
+  },
+  "inputs": {
+    "image": {
+      "path": ".shots/shot_search.jpeg",
+      "sha256": "a1678ac43f2d9da5db8e11a7cbc0a1593d1bf6bfc0a9acb16080e9887f30e253"
+    },
+    "requirements": {
+      "text": "请重点分析这张鸿蒙应用截图的最顶部区域（y 0~350 像素）：1) 状态栏（左侧时间、右侧电量/信号）大概占哪个 y 范围？2) 屏幕顶部中央有没有刘海/挖孔摄像头（黑色圆点或缺口），它在什么位置？3) 应用的搜索框从哪个 y 位置开始渲染？4) 应用内容是否与状态栏文字或刘海发生重叠/遮挡？请具体描述重叠情况。",
+      "sha256": "155e7789ea7f1da4bfdc12a383acc2ea8e780ff42b40b8e4d3553e5e4516a643"
+    }
+  },
+  "analysis": {
+    "canvas": {
+      "width": 1280,
+      "height": 2832
+    },
+    "visible_components": [
+      {
+        "id": "component-1",
+        "name": "搜索框",
+        "visual_evidence": "顶部深色背景中包含放大镜图标、输入文字“周深”、清除按钮“×”和蓝色“搜索”按钮",
+        "component_candidates": [
+          {
+            "name": "Search",
+            "confidence": 0.9,
+            "reason": "包含搜索图标、输入区域、清除按钮和搜索动作按钮，符合搜索框标准交互"
+          }
+        ]
+      },
+      {
+        "id": "component-2",
+        "name": "标签页导航",
+        "visual_evidence": "“单曲”“专辑”“歌手”三个标签，其中“单曲”为高亮选中状态",
+        "component_candidates": [
+          {
+            "name": "Tabs",
+            "confidence": 0.85,
+            "reason": "提供多个分类切换，当前选中项有视觉区分，符合标签页导航组件特征"
+          }
+        ]
+      },
+      {
+        "id": "component-3",
+        "name": "歌曲列表项",
+        "visual_evidence": "每项包含专辑封面、歌曲名、歌手名，如“万里长风 周深”",
+        "component_candidates": [
+          {
+            "name": "ListItem",
+            "confidence": 0.8,
+            "reason": "结构化展示单条内容，含图片与多行文本，适合列表项组件"
+          }
+        ]
+      },
+      {
+        "id": "component-4",
+        "name": "底部导航栏",
+        "visual_evidence": "底部包含“首页”“搜索”“收藏”“专属”“我的”五个带图标的导航项，当前“搜索”高亮",
+        "component_candidates": [
+          {
+            "name": "BottomNavigation",
+            "confidence": 0.9,
+            "reason": "固定底部，多图标+文字导航，当前选中项有视觉反馈，符合底部导航组件特征"
+          }
+        ]
+      }
+    ],
+    "global_observations": [],
+    "uncertainties": []
+  }
+}

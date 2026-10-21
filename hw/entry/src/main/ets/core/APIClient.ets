@@ -16,7 +16,8 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import {
   AuthConfig, AuthSession, FavoritePage, HomeData, PublicUser,
-  ResolveResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult
+  ResolveResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
+  SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply, Track
 } from './Models';
 
 const TAG = 'SuenMusic_API';
@@ -41,6 +42,17 @@ interface RefreshBody {
 interface LoginBody {
   username: string;
   password: string;
+}
+
+/** 收藏请求体（带 track 顺带写快照，省后续补全） */
+interface FavoritePostBody {
+  trackId: string;
+  track: Track | null;
+}
+
+/** 批量查询收藏状态请求体（ids ≤ 500） */
+interface IdsBody {
+  ids: string[];
 }
 
 export class ApiError extends Error {
@@ -327,5 +339,41 @@ export class APIClient {
     let path = '/api/favorites?limit=' + limit;
     if (cursor.length > 0) { path += '&cursor=' + encodeURIComponent(cursor); }
     return this.request<FavoritePage>(path, http.RequestMethod.GET, '', true, false);
+  }
+
+  /**
+   * 搜索。`type`：all / song / album / artist / playlist / mv。
+   * 单类型只发一次上游请求，比综合搜索省配额。
+   */
+  async search(query: string, type: string, page: number, limit: number): Promise<SearchResult> {
+    const path = '/api/search?q=' + encodeURIComponent(query)
+      + '&type=' + encodeURIComponent(type)
+      + '&page=' + page + '&limit=' + limit;
+    return this.request<SearchResult>(path, http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 收藏（幂等：重复收藏返回 200 且 added=false） */
+  async addFavorite(trackId: string, track: Track | null): Promise<FavoriteUpsertReply> {
+    const payload: FavoritePostBody = { trackId: trackId, track: track };
+    return this.request<FavoriteUpsertReply>('/api/favorites', http.RequestMethod.POST,
+      JSON.stringify(payload), true, false);
+  }
+
+  /** 取消收藏（幂等：取消不存在的也 200） */
+  async removeFavorite(trackId: string): Promise<FavoriteRemoveReply> {
+    return this.request<FavoriteRemoveReply>('/api/favorites/' + encodeURIComponent(trackId),
+      http.RequestMethod.DELETE, '', true, false);
+  }
+
+  /** 批量查询是否已收藏（渲染列表时用，ids ≤ 500） */
+  async checkFavorites(ids: string[]): Promise<FavoritesCheckReply> {
+    const payload: IdsBody = { ids: ids };
+    return this.request<FavoritesCheckReply>('/api/favorites/check', http.RequestMethod.POST,
+      JSON.stringify(payload), true, false);
+  }
+
+  /** 每日推荐（只读，歌单由服务端每天 00:30 产出；`shortfall` 不是错误） */
+  async dailyRecommend(): Promise<DailyRecommend> {
+    return this.request<DailyRecommend>('/api/recommend/daily', http.RequestMethod.GET, '', true, false);
   }
 }
