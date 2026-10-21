@@ -52,10 +52,13 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Keystore files —— 签名私钥绝不入库。
+# 私钥一旦进了版本库，任何拿到仓库（含 fork、CI 缓存、备份）的人都能签出
+# 本应用会当作合法更新接受的 APK。口令也不要写进 build.gradle，
+# 放在 keystore.properties（本文件已忽略）或环境变量里。
+*.jks
+*.keystore
+keystore.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

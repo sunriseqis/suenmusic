@@ -37,10 +37,12 @@
             android:src="@drawable/ic_w_note" />
     </FrameLayout>
 
-    <View
+    <!-- 竖向发丝线：同 2x2 的理由，裸 View 在 RemoteViews 里会被拒，改用 ImageView -->
+    <ImageView
         android:layout_width="1dp"
         android:layout_height="match_parent"
         android:layout_gravity="center_vertical"
+        android:importantForAccessibility="no"
         android:layout_marginStart="10dp"
         android:layout_marginEnd="10dp"
         android:background="@drawable/widget_divider_v" />
@@ -159,10 +161,12 @@
         </LinearLayout>
     </LinearLayout>
 
-    <View
+    <!-- 竖向发丝线：同 2x2 的理由，裸 View 在 RemoteViews 里会被拒，改用 ImageView -->
+    <ImageView
         android:layout_width="1dp"
         android:layout_height="match_parent"
         android:layout_gravity="center_vertical"
+        android:importantForAccessibility="no"
         android:layout_marginStart="10dp"
         android:background="@drawable/widget_divider_v" />
 

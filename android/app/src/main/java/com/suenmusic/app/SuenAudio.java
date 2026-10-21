@@ -33,15 +33,6 @@ public final class SuenAudio {
     sessionToken = token;
   }
 
-  /** 兼容旧接口桩函数（服务端单一真相源下不再使用客户端直连） */
-  public static void setDirectUrl(String trackId, String url) {}
-
-  public static void clearDirectUrls() {}
-
-  public static boolean hasDirectUrl(String trackId) {
-    return false;
-  }
-
   public static String getBaseUrl() {
     return baseUrl;
   }

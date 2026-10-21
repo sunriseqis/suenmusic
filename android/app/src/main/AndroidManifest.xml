@@ -70,6 +70,10 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 网络状态：SuenAudioPlugin.registerNetworkCallback 用它做切网自愈。
+         缺这条权限时 registerNetworkCallback 抛 SecurityException 被 catch 吞掉，
+         表现为"切网/多路径静默失效"（重审 F）。 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

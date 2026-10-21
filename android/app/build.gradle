@@ -3,6 +3,14 @@ apply plugin: 'com.android.application'
 def appVersionCode = Integer.parseInt(project.findProperty('versionCode') ?: System.getenv('VERSION_CODE') ?: "1")
 def appVersionName = (project.findProperty('versionName') ?: System.getenv('VERSION_NAME') ?: "1.0").toString()
 
+/**
+ * 签名凭据是否完整可用。只有它为 true 时才把 signingConfig 挂到 buildTypes ——
+ * 挂上一个没有 storeFile 的 signingConfig，AGP 会直接报
+ * "Keystore file not set for signing config release"，连 assembleDebug 都跑不了
+ *（2026-10-21 重审 R-3：批次 B-4 只置了 warn，但 buildTypes 仍然无条件引用它）。
+ */
+def signingReady = false
+
 android {
     namespace = "com.suenmusic.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -22,17 +30,59 @@ android {
     }
     signingConfigs {
         release {
-            def defaultKeystore = file('suenmusic.keystore')
+            /**
+             * 签名凭据来源（按优先级），**不再硬编码口令**：
+             *   1. Android Studio / CI 注入的 -Pandroid.injected.signing.*
+             *   2. 环境变量 SUENMUSIC_KEYSTORE_FILE / _PASSWORD / _ALIAS / _KEY_PASSWORD
+             *   3. android/keystore.properties（本地开发用，已 gitignore）
+             *
+             * 私钥与口令都不进版本库：私钥入库等于把「谁能发版」的边界交给
+             * 仓库读权限，而 SuenUpdatePlugin 只校验包名 + versionCode + 可选 sha256，
+             * 同密钥签名是挡不住顶替的。
+             */
+            def ksFile = null
+            def ksPassword = null
+            def ksAlias = null
+            def ksKeyPassword = null
+
             if (project.hasProperty('android.injected.signing.store.file')) {
-                storeFile file(project.property('android.injected.signing.store.file'))
-                storePassword project.property('android.injected.signing.store.password')
-                keyAlias project.property('android.injected.signing.key.alias')
-                keyPassword project.property('android.injected.signing.key.password')
-            } else if (defaultKeystore.exists()) {
-                storeFile defaultKeystore
-                storePassword 'suenmusic'
-                keyAlias 'suenmusic'
-                keyPassword 'suenmusic'
+                ksFile = project.property('android.injected.signing.store.file')
+                ksPassword = project.property('android.injected.signing.store.password')
+                ksAlias = project.property('android.injected.signing.key.alias')
+                ksKeyPassword = project.property('android.injected.signing.key.password')
+            } else {
+                def props = new Properties()
+                def propsFile = rootProject.file('keystore.properties')
+                if (propsFile.exists()) {
+                    propsFile.withInputStream { props.load(it) }
+                }
+                ksFile = System.getenv('SUENMUSIC_KEYSTORE_FILE') ?: props.getProperty('storeFile')
+                ksPassword = System.getenv('SUENMUSIC_KEYSTORE_PASSWORD') ?: props.getProperty('storePassword')
+                ksAlias = System.getenv('SUENMUSIC_KEYSTORE_ALIAS') ?: props.getProperty('keyAlias')
+                ksKeyPassword = System.getenv('SUENMUSIC_KEYSTORE_KEY_PASSWORD') ?: props.getProperty('keyPassword')
+            }
+
+            if (ksFile) {
+                def ksPath = rootProject.file(ksFile)
+                if (!ksPath.exists()) {
+                    throw new GradleException(
+                        "找不到签名文件：${ksPath}\n" +
+                        "请把私钥放到 android/ 下（已 gitignore），并在 android/keystore.properties " +
+                        "里用 storeFile 指过去。"
+                    )
+                }
+                storeFile ksPath
+                storePassword ksPassword
+                keyAlias ksAlias
+                keyPassword ksKeyPassword
+                signingReady = true
+            } else {
+                logger.warn(
+                    '[SuenMusic] 未配置签名凭据 —— 本次构建不签名（release 产物装不上、也走不了自更新；' +
+                    'debug 会退回 Android 默认 debug 签名，可正常装到测试机）。\n' +
+                    '  本地：在 android/keystore.properties 写 storeFile/storePassword/keyAlias/keyPassword；\n' +
+                    '  CI  ：注入 SUENMUSIC_KEYSTORE_FILE / _PASSWORD / _ALIAS / _KEY_PASSWORD。'
+                )
             }
             v1SigningEnabled true
             v2SigningEnabled true
@@ -40,12 +90,19 @@ android {
     }
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            // 没有凭据就不挂 —— 空 signingConfig 会让 AGP 直接失败（见 signingReady 注释）
+            if (signingReady) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
         debug {
-            signingConfig signingConfigs.release
+            // 有凭据时 debug 也用同一把钥匙（自更新链路要包名+签名一致才认）；
+            // 没凭据时退回 Android 默认 debug key，保证新克隆能直接 assembleDebug
+            if (signingReady) {
+                signingConfig signingConfigs.release
+            }
         }
     }
     lint {

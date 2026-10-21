@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    AppCompat 主题必备的三个颜色资源。
+
+    2026-10-21 前这里缺失：styles.xml 里 <item name="colorPrimary">@color/colorPrimary</item>
+    引用了不存在的资源，aapt2 link 阶段会直接报 resource color/colorPrimary not found
+    （能否出包取决于依赖 AAR 是否恰好定义了同名颜色，属于撞运气）。
+    取值来自哑光硬件调色板：#E8A33D 琥珀（状态色）/ #17181B 墨黑。
+-->
+<resources>
+    <color name="colorPrimary">#E8A33D</color>
+    <color name="colorPrimaryDark">#17181B</color>
+    <color name="colorAccent">#E8A33D</color>
+</resources>

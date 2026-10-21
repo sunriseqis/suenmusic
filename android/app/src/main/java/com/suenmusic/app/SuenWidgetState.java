@@ -91,7 +91,14 @@ public final class SuenWidgetState {
 
     SharedPreferences.Editor ed = prefs(ctx).edit();
     ed.putBoolean(K_ALIVE, true);
-    ed.putString(K_TRACK_ID, trackId == null ? "" : trackId);
+    // 切歌即重置红心：这个快照不带收藏态，而 web 只在"用户手动切收藏"时推
+    // setFavorite —— 不重置的话新歌会沿用上一首的红心（重审 F）。
+    // 之后 web 若已加载收藏集合，会在下一次元数据上报时推正确值。
+    String nextTrackId = trackId == null ? "" : trackId;
+    if (!nextTrackId.equals(prefs(ctx).getString(K_TRACK_ID, ""))) {
+      ed.putBoolean(K_FAVORITE, false);
+    }
+    ed.putString(K_TRACK_ID, nextTrackId);
     ed.putString(K_TITLE, title == null ? "" : title);
     ed.putString(K_ARTIST, artist == null ? "" : artist);
     ed.putString(K_ALBUM, album == null ? "" : album);

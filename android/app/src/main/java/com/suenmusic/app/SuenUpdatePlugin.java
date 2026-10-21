@@ -84,10 +84,37 @@ public class SuenUpdatePlugin extends Plugin {
     });
   }
 
+  /**
+   * 私网/本机地址判定（与 web 端 isPrivateIpUrl 同一口径）。
+   *
+   * 用途：自托管场景下局域网 http 是现实约束（没有证书），但**公网域名没有理由用 http** ——
+   * 明文可被中间人替换成任意同签名 APK。所以只对私网放行 http，公网强制 https。
+   */
+  private static boolean isPrivateHost(String host) {
+    if (host == null || host.isEmpty()) return false;
+    String h = host.toLowerCase(Locale.ROOT);
+    if (h.equals("localhost") || h.equals("127.0.0.1") || h.equals("::1")) return true;
+    if (h.matches("^192\\.168\\.\\d{1,3}\\.\\d{1,3}$")) return true;
+    if (h.matches("^10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}$")) return true;
+    if (h.matches("^172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3}$")) return true;
+    // Tailscale / CGNAT 100.64.0.0/10
+    if (h.matches("^100\\.(6[4-9]|[7-9]\\d|1[01]\\d|12[0-7])\\.\\d{1,3}\\.\\d{1,3}$")) return true;
+    // 局域网域名：mDNS(.local)、路由器默认后缀(.lan/.home/.localdomain)、自建内网 DNS(.internal)。
+    // 只认 IP 字面量的话，http://nas.local:3210 这类部署会被自家更新链路拒绝（重审 F）。
+    if (h.endsWith(".local") || h.endsWith(".lan") || h.endsWith(".home")
+        || h.endsWith(".internal") || h.endsWith(".localdomain")) return true;
+    // 单标签主机名（nas / fnos 之类，只在局域网内有意义）
+    if (!h.contains(".")) return true;
+    return false;
+  }
+
   private File download(String rawUrl, String accessToken, String fileName) throws Exception {
     URL url = new URL(rawUrl);
     if (!("http".equalsIgnoreCase(url.getProtocol()) || "https".equalsIgnoreCase(url.getProtocol()))) {
       throw new Exception("更新地址协议不安全");
+    }
+    if ("http".equalsIgnoreCase(url.getProtocol()) && !isPrivateHost(url.getHost())) {
+      throw new Exception("更新地址不安全：公网地址必须使用 https");
     }
     if (url.getPath() == null || !url.getPath().endsWith("/api/update/download")) {
       throw new Exception("更新地址不是 SuenMusic 更新接口");

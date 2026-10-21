@@ -94,12 +94,15 @@
         android:max="1000"
         android:progressDrawable="@drawable/widget_progress" />
 
-    <!-- 发丝线 -->
-    <View
+    <!-- 发丝线：RemoteViews 只放行 @RemoteView 标注的类，android.view.View 会被
+         LayoutInflater 的过滤器拒掉（真机报 "Class not allowed to be inflated"），
+         所以这里用 ImageView 承载 background -->
+    <ImageView
         android:layout_width="match_parent"
         android:layout_height="1dp"
         android:layout_marginTop="6dp"
-        android:background="@drawable/widget_divider" />
+        android:background="@drawable/widget_divider"
+        android:importantForAccessibility="no" />
 
     <!-- 运输三键 -->
     <LinearLayout

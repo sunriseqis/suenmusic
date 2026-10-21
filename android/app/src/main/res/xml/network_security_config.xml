@@ -6,6 +6,16 @@
   Tailscale 的 100.x/域名（http）——这些都没有证书，安卓 9+ 默认全拦。
   因此 base 放行明文；走公网 https 域名（Lucky 反代）时不受影响，
   系统仍按正常 TLS 校验。若未来要上架，这里需要收紧为域名白名单。
+
+  【2026-10-21 审计结论：为什么没有改成 domain-config 白名单】
+  Network Security Config **不支持 CIDR 网段**，只能逐个列举主机名或 IP 字面量。
+  而用户填的服务端地址是任意的（192.168.x.x / 10.x.x.x / 100.64.x.x / 自定义端口），
+  一旦把 base 关成 false，绝大多数自托管部署会**直接连不上** —— 这是比明文更大的风险。
+  所以本文件保持放行，改从三个可验证的方向收口：
+    1. 更新包下载强制 https（公网地址一律拒绝明文）：SuenUpdatePlugin.download()；
+    2. 登录页对「公网 + http」的地址给出明文风险告警：web/src/views/Login.vue；
+    3. 公网部署一律走反代 https（README / nginx 模板口径）。
+  真正的风险是「自建服务放在公网还用 http」，那条路现在有明确阻拦与提示。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />

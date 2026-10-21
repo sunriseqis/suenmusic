@@ -56,7 +56,23 @@ public class SuenAudioPlugin extends Plugin {
   private final Handler main = new Handler(Looper.getMainLooper());
   private MediaController controller;
   private ListenableFuture<MediaController> controllerFuture;
-  private final List<Runnable> pendingControllerCallbacks = new ArrayList<>();
+  /**
+   * 连接中的排队回调。
+   *
+   * 必须把 `PluginCall` 一起存下来：只存 Runnable 的话，连接失败时只能 reject
+   * 第一个调用方，其余 Promise 永久悬挂（Web 侧 await 永不返回，播放条一直"切歌中"）。
+   */
+  private static final class PendingCallback {
+    final Runnable run;
+    final PluginCall call;
+
+    PendingCallback(Runnable run, PluginCall call) {
+      this.run = run;
+      this.call = call;
+    }
+  }
+
+  private final List<PendingCallback> pendingControllerCallbacks = new ArrayList<>();
   private boolean tickerRunning;
   private ConnectivityManager.NetworkCallback networkCallback;
 
@@ -180,22 +196,59 @@ public class SuenAudioPlugin extends Plugin {
     }
   };
 
+  /**
+   * 释放当前 controller 与 future，好让下一次 ensureController 重新建连。
+   *
+   * 什么时候需要：服务被系统回收/OOM 之后 `controller.isConnected()` 为 false，
+   * 但对象还在 —— 不释放就会一直复用死连接（重审 F）。
+   * **必须**同时清 controllerFuture，否则 `controllerFuture != null` 分支会把
+   * 新回调排进队里，而那个 future 永远不会完成。
+   */
+  private void releaseController() {
+    stopTicker();
+    if (controller != null) {
+      try {
+        controller.removeListener(playerListener);
+        controller.release();
+      } catch (Throwable t) {
+        Log.w(TAG, "释放 controller 失败", t);
+      }
+      controller = null;
+    }
+    if (controllerFuture != null) {
+      try {
+        MediaController.releaseFuture(controllerFuture);
+      } catch (Throwable ignored) {
+        // already released
+      }
+      controllerFuture = null;
+    }
+  }
+
   /** 连接 MediaController（单例 Future 保护，全生命周期复用），就绪后在主线程回调 */
   private void ensureController(Runnable onReady, PluginCall call) {
     main.post(() -> {
       if (controller != null) {
-        try {
-          onReady.run();
-          if (controller != null && controller.isPlaying()) startTicker();
-        } catch (Throwable t) {
-          Log.e(TAG, "Controller action error", t);
-          if (call != null && !call.isReleased()) call.reject("播放控制器执行失败: " + t.getMessage());
+        // 连接可能已被断开（前台服务被系统回收、进程被 OOM 杀掉后重连失败）：
+        // 旧实现只要 controller 非 null 就当"就绪"，于是后续命令全部打到死连接上，
+        // 表现为"播放永久失效、状态还显示已连接"（重审 F）。断开就重建。
+        if (!controller.isConnected()) {
+          Log.w(TAG, "MediaController 已断开，重建连接");
+          releaseController();
+        } else {
+          try {
+            onReady.run();
+            if (controller != null && controller.isPlaying()) startTicker();
+          } catch (Throwable t) {
+            Log.e(TAG, "Controller action error", t);
+            if (call != null && !call.isReleased()) call.reject("播放控制器执行失败: " + t.getMessage());
+          }
+          return;
         }
-        return;
       }
       if (controllerFuture != null) {
         synchronized (pendingControllerCallbacks) {
-          pendingControllerCallbacks.add(onReady);
+          pendingControllerCallbacks.add(new PendingCallback(onReady, call));
         }
         return;
       }
@@ -228,16 +281,19 @@ public class SuenAudioPlugin extends Plugin {
               Log.e(TAG, "Initial controller callback error", t);
               if (call != null && !call.isReleased()) call.reject("播放执行失败: " + t.getMessage());
             }
-            List<Runnable> pending;
+            List<PendingCallback> pending;
             synchronized (pendingControllerCallbacks) {
               pending = new ArrayList<>(pendingControllerCallbacks);
               pendingControllerCallbacks.clear();
             }
-            for (Runnable cb : pending) {
+            for (PendingCallback cb : pending) {
               try {
-                cb.run();
+                cb.run.run();
               } catch (Throwable t) {
                 Log.e(TAG, "Pending controller callback error", t);
+                if (cb.call != null && !cb.call.isReleased()) {
+                  cb.call.reject("播放执行失败: " + t.getMessage());
+                }
               }
             }
           } catch (Throwable e) {
@@ -246,10 +302,18 @@ public class SuenAudioPlugin extends Plugin {
               MediaController.releaseFuture(controllerFuture);
               controllerFuture = null;
             }
+            List<PendingCallback> dropped;
             synchronized (pendingControllerCallbacks) {
+              dropped = new ArrayList<>(pendingControllerCallbacks);
               pendingControllerCallbacks.clear();
             }
             final String msg = e.getCause() != null ? e.getCause().getMessage() : e.getMessage();
+            // 排队中的调用方必须全部 reject —— 否则它们的 Promise 永远不会 settle
+            for (PendingCallback cb : dropped) {
+              if (cb.call != null && !cb.call.isReleased()) {
+                cb.call.reject("连接播放服务失败: " + msg);
+              }
+            }
             if (call != null && !call.isReleased()) call.reject("连接播放服务失败: " + msg);
           }
         });
@@ -351,7 +415,15 @@ public class SuenAudioPlugin extends Plugin {
 
     ensureController(() -> {
       if (tailOnly) {
-        final int from = Math.max(0, safeStartIndex);
+        // ⚠️ 必须用**绝对** startIndex，不能用下面那个被钳制过的 safeStartIndex。
+        //
+        // items 只含 [startIndex, 队尾) 这一段（见 web/src/native/bridge.ts 的
+        // `tracks.slice(startIndex)`），所以 mediaItems.size() = 总长 - startIndex，
+        // 而 startIndex 通常 >= size —— 钳制后 from 会被压到 items.size()-1，
+        // replaceMediaItems 从那一位开始替换 count 个，覆盖范围会包含**正在播的那首**：
+        // 用户切随机/切列表时歌突然跳走、队列错位。而下面的 sameFirstId 读回校验
+        // 读的正是替换后的内容，必然为真 → 静默生效、连日志都没有。
+        final int from = Math.max(0, startIndex);
         final int count = controller.getMediaItemCount();
         if (from < count && !mediaItems.isEmpty()) {
           controller.replaceMediaItems(from, count, mediaItems);
@@ -381,12 +453,6 @@ public class SuenAudioPlugin extends Plugin {
     if (index < 0 || index >= c.getMediaItemCount()) return false;
     MediaItem current = c.getMediaItemAt(index);
     return current != null && items.get(0).mediaId.equals(current.mediaId);
-  }
-
-  /** 兼容旧接口桩方法（服务端单一真相源下无需前端登记直连地址） */
-  @PluginMethod
-  public void setDirectUrl(PluginCall call) {
-    call.resolve();
   }
 
   @PluginMethod
