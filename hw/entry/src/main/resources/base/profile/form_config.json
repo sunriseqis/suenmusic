@@ -13,7 +13,7 @@
       "colorMode": "auto",
       "isDefault": true,
       "updateEnabled": true,
-      "updateDuration": 30,
+      "updateDuration": 1,
       "defaultDimension": "2*2",
       "supportDimensions": [
         "2*2",

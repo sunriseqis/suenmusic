@@ -18,6 +18,7 @@
  */
 import { webview } from '@kit.ArkWeb';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { MediaPlayerCore } from '../core/MediaPlayerCore';
 
 const TAG = 'SuenMusic_CardControl';
 const DOMAIN = 0x0000;
@@ -70,6 +71,24 @@ export function markWebPageReady(): void {
 export function dispatchCardControl(control: string): void {
   if (VALID_CONTROLS.indexOf(control) < 0) {
     hilog.warn(DOMAIN, TAG, '忽略未知控制指令：%{public}s', control);
+    return;
+  }
+  /**
+   * **原生模式**（客户端已全原生化，没有 WebView 可反控）：直接驱动播放内核。
+   *
+   * 判定条件是"没有挂接 webviewController"。原生化之前这里一定非空，
+   * 所以这条分支不影响回退壳；原生化之后它就是唯一路径 ——
+   * 否则卡片上的播放/暂停/上一首/下一首会变成**点了没反应**。
+   */
+  if (controllerRef === null) {
+    hilog.info(DOMAIN, TAG, '原生模式，转发控制指令：%{public}s', control);
+    const core = MediaPlayerCore.shared();
+    if (control === 'play') { core.play(); }
+    else if (control === 'pause') { core.pause(); }
+    else if (control === 'toggle') { core.toggle(); }
+    else if (control === 'next') { core.next(); }
+    else if (control === 'prev') { core.prev(); }
+    else { hilog.info(DOMAIN, TAG, '收藏指令待 S3 接收藏 API：%{public}s', control); }
     return;
   }
   hilog.info(DOMAIN, TAG, '收到控制指令：%{public}s（网页就绪=%{public}s）',

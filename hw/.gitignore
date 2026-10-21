@@ -13,6 +13,11 @@ node_modules/
 
 # Local configuration
 local.properties
+
+# IDE（DevEco）产物：属于本机状态，不入库
+.idea/
+*.iml
+.deveco/
 hvigorw.bat
 
 # Synchronized Web Assets (managed by npm run hw:sync)

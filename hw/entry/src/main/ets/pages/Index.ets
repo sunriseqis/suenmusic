@@ -1,5 +1,5 @@
 import { webview } from '@kit.ArkWeb';
-import { bundleManager, common, Want, wantAgent } from '@kit.AbilityKit';
+import { common, Want, wantAgent } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
@@ -29,6 +29,15 @@ const CARD_COVER_PATH = '/card_cover.img';
  * 全部停在旧状态。留 128KB 余量防边界抖动。
  */
 const MAX_CARD_COVER_BYTES = 2 * 1024 * 1024 - 128 * 1024;
+
+/**
+ * ArkWeb 远程调试开关。
+ *
+ * **release 包里必须保持 false**：开着它任何人只要 adb 连上就能挂 DevTools，
+ * 而 localStorage 里存着刷新令牌 —— 等于把登录凭据交出去（重审 F）。
+ * 本地排查时改成 true 再编，别提交这行改动。
+ */
+const WebDebugEnabled: boolean = false;
 
 /**
  * web 侧送来的曲目信息。**两条消息共用同一个形状**：
@@ -102,6 +111,8 @@ class HarmonyAVSessionManager {
   private cachedCoverBuffer: ArrayBuffer | undefined = undefined;
   /** 卡片上次推送时的歌词活跃行（-2 = 尚未算过；行变化才推卡片） */
   private lastCardLyricIndex: number = -2;
+  /** 上次"无歌词时推卡片进度"的时间戳（毫秒） */
+  private lastCardProgressPushAt: number = 0;
   /** LRC 解析缓存：currentLyric 变了才重 parse */
   private lyricCacheSource: string = '';
   private lyricCacheLines: LyricLine[] = [];
@@ -383,7 +394,10 @@ class HarmonyAVSessionManager {
    *
    * 为什么不靠卡片自己来取：卡片进程是**独立进程**，且 SDK 禁止在那里引用
    * multimedia.media 等模块 —— 它只能被动接收。这里写快照 + updateForm，
-   * 才是卡片更新的主动来源（否则只能等 updateDuration 到点的 30 分钟定时刷新）。
+   * 才是卡片更新的主动来源。注意 `form_config.json` 的 `updateDuration` **单位是 30 分钟**
+   * 而不是分钟（官方定义），且系统对定时刷新另有硬配额（每卡每天 50 次）——
+   * 所以"靠 updateDuration 兜底"最多算 30 分钟一次，真正的高频更新只能靠这里主动推。
+   * （此前配的是 30，等于 15 小时，卡片一天只自刷一次多。）
    *
    * 封面走官方 formImages 机制（卡片 Image 不能加载网络 URL）：
    * 字节先落盘 cacheDir/card_cover.img → 每次推送前开 fd →
@@ -803,9 +817,20 @@ class HarmonyAVSessionManager {
       // 只在活跃行变化时才推卡片：卡片刷新走 IPC，逐秒推既浪费也不平滑。
       this.currentPositionMs = elapsed;
       const activeIdx = this.currentLyricActiveIndex(elapsed);
-      if (activeIdx !== this.lastCardLyricIndex) {
-        this.lastCardLyricIndex = activeIdx;
-        this.syncCard();
+      if (activeIdx >= 0) {
+        // 有歌词：只在活跃行变化时推 —— 卡片刷新走 IPC，逐秒推既浪费也不平滑
+        if (activeIdx !== this.lastCardLyricIndex) {
+          this.lastCardLyricIndex = activeIdx;
+          this.syncCard();
+        }
+      } else {
+        // 没歌词（纯音乐 / 尚未拉到歌词）：卡片上的进度条只能靠定时推，
+        // 否则整首都停在切歌那一刻的位置（重审 F）。5 秒一次折中。
+        const nowMs = Date.now();
+        if (nowMs - this.lastCardProgressPushAt >= 5000) {
+          this.lastCardProgressPushAt = nowMs;
+          this.syncCard();
+        }
       }
 
       // 播放/暂停状态一变，卡片上的"播放中/已暂停"就该跟着变
@@ -917,50 +942,6 @@ class HarmonyBridge {
     this.avSessionManager = avSessionManager;
   }
 
-  // 获取当前原生应用版本号
-  getAppVersion(): string {
-    try {
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      return JSON.stringify({
-        versionName: bundleInfo.versionName,
-        versionCode: bundleInfo.versionCode,
-        platform: 'harmony_next'
-      });
-    } catch (err) {
-      hilog.error(DOMAIN, TAG, 'Failed to get bundle info: %{public}s', JSON.stringify(err));
-      return JSON.stringify({
-        versionName: '1.5',
-        versionCode: 20150,
-        platform: 'harmony_next'
-      });
-    }
-  }
-
-  // 唤起外部默认浏览器打开链接（用于自更新下载或外部查看）
-  openInBrowser(url: string): boolean {
-    try {
-      const want: Want = {
-        action: 'ohos.want.action.viewData',
-        entities: ['entity.system.browsable'],
-        uri: url
-      };
-      this.context.startAbility(want);
-      return true;
-    } catch (err) {
-      hilog.error(DOMAIN, TAG, 'Failed to open browser: %{public}s', JSON.stringify(err));
-      return false;
-    }
-  }
-
-  // 平台标识
-  isNativePlatform(): boolean {
-    return true;
-  }
-
-  getPlatform(): string {
-    return 'harmony_next';
-  }
-
   /**
    * 元数据消息与歌词消息**形状相同**，解析逻辑共用。
    * 歌词消息也带完整元数据 —— 这样任何一条先到都能把播控中心建立起来。
@@ -975,7 +956,10 @@ class HarmonyBridge {
       coverUrl: String(data.coverUrl || ''),
       durationMs: Number(data.durationMs || 0),
       lyric: String(data.lyric || ''),
-      favorite: data.favorite === true
+      // ⚠️ 不能写成 `data.favorite === true`：那把"没这个键"变成 false，
+      // 于是每次元数据上报都会把卡片红心清掉（updateMetadata 里 `!== undefined`
+      // 的判断形同虚设）。缺键就保持 undefined，让调用方决定是否覆盖（重审 F）。
+      favorite: typeof data.favorite === 'boolean' ? data.favorite : undefined
     };
   }
 
@@ -1045,8 +1029,13 @@ struct Index {
 
   aboutToAppear(): void {
     try {
-      // 开启 ArkWeb 调试模式（支持通过 Chrome DevTools inspect 调试）
-      webview.WebviewController.setWebDebuggingAccess(true);
+      // ArkWeb 调试默认**关闭**：它会让 DevTools 挂到 WebView 上，
+      // 而 localStorage 里有刷新令牌 —— release 包常开等于把登录凭据暴露给
+      // 任何能连 adb 的人（重审 F）。本地排查时把常量改成 true 再编。
+      if (WebDebugEnabled) {
+        webview.WebviewController.setWebDebuggingAccess(true);
+        hilog.warn(DOMAIN, TAG, 'ArkWeb 调试已开启（仅调试包可开）');
+      }
     } catch (err) {
       hilog.warn(DOMAIN, TAG, 'Failed to set web debugging: %{public}s', JSON.stringify(err));
     }
@@ -1059,13 +1048,42 @@ struct Index {
     this.avSessionManager.destroy();
   }
 
-  // 拦截系统返回手势/返回键：优先让网页后退
+  /**
+   * 拦截系统返回手势/返回键。
+   *
+   * 顺序与安卓 MainActivity 保持一致（同一份 `web/src/native/back.ts` 契约）：
+   *   1. 网页层 `window.__suenBack()`：退出筛选态 / 关浮层 / 收键盘，返回 true 表示已消费；
+   *   2. 还有 Web 历史 → backward()，交给前端路由的 popstate；
+   *   3. 都没有 → terminateSelf()（鸿蒙没有 moveTaskToBack，退出应用是唯一终态）。
+   *
+   * ⚠️ runJavaScript 是异步的，而 onBackPress 必须同步返回：
+   * 所以这里**同步先吃掉**这次返回，再由回调决定后续 —— 否则浮层打开时
+   * accessBackward() 为 false 会直接 return false，系统立刻退出应用
+   * （真机现象："搜索框里按返回，App 直接没了"）。
+   */
   onBackPress(): boolean {
-    if (this.webviewController.accessBackward()) {
-      this.webviewController.backward();
-      return true;
-    }
-    return false;
+    const controller = this.webviewController;
+    controller
+      .runJavaScript('(typeof window.__suenBack === "function") && window.__suenBack() === true')
+      .then((handled: string) => {
+        if (handled === 'true') return; // 网页层已消费（浮层/筛选/键盘）
+        if (controller.accessBackward()) {
+          controller.backward();
+          return;
+        }
+        // 历史到底：退出应用（与安卓 moveTaskToBack 的语义对齐到本平台能力）
+        try {
+          (getContext(this) as common.UIAbilityContext).terminateSelf();
+        } catch (err) {
+          hilog.warn(DOMAIN, TAG, 'terminateSelf failed: %{public}s', JSON.stringify(err));
+        }
+      })
+      .catch((err: Error) => {
+        hilog.warn(DOMAIN, TAG, 'back dispatch failed: %{public}s', JSON.stringify(err));
+        if (controller.accessBackward()) controller.backward();
+      });
+    // 同步吃掉：等回调决定"再后退一次 / 退出"
+    return true;
   }
 
   // 辅助函数：根据文件后缀匹配 MIME 类型
@@ -1103,6 +1121,10 @@ struct Index {
       response.setResponseIsReady(true);
       return response;
     } catch (err) {
+      // 留痕：rawfile 只在 build-hw.mjs / npm run hw:sync 同步后才存在。
+      // 直接拿 DevEco Run（没同步）时这里会一路返回 null，页面白屏却没有任何线索。
+      hilog.error(DOMAIN, TAG, 'rawfile 读取失败: %{public}s（先跑 npm run hw:sync？）',
+        rawPath);
       return null;
     }
   }
@@ -1124,10 +1146,6 @@ struct Index {
           object: this.bridge,
           name: 'SuenHarmony',
           methodList: [
-            'getAppVersion',
-            'openInBrowser',
-            'isNativePlatform',
-            'getPlatform',
             'updateMediaMetadata',
             'updatePlaybackState',
             'updateLyric',
@@ -1147,6 +1165,15 @@ struct Index {
           let relativePath = reqUrl.substring(LOCAL_ORIGIN.length);
           if (relativePath.startsWith('/')) {
             relativePath = relativePath.substring(1);
+          }
+
+          // API 请求一律放行给网络栈，绝不走本地资源/SPA 回退。
+          // 否则未配置服务端地址时 `/api/auth/me` 会被下面第 2 步当成前端路由，
+          // 返回 index.html —— 客户端 JSON.parse 直接抛错，日志里只剩一句
+          // "Unexpected token '<'"，看不出是"没配地址"。
+          if (relativePath === 'api' || relativePath.startsWith('api/') ||
+              relativePath.startsWith('api?')) {
+            return null;
           }
           relativePath = relativePath.split('?')[0].split('#')[0];
 
@@ -1205,7 +1232,6 @@ struct Index {
           const injectScript = `
             document.documentElement.style.setProperty('--safe-top', '${topPx}px');
             document.documentElement.style.setProperty('--safe-bottom', '${bottomPx}px');
-            window.__HARMONY_NEXT__ = true;
           `;
           try {
             this.webviewController.runJavaScript(injectScript);

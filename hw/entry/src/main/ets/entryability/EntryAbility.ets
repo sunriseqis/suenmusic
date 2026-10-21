@@ -221,7 +221,10 @@ export default class EntryAbility extends UIAbility {
       hilog.error(DOMAIN, TAG, 'Failed to configure window: %{public}s', JSON.stringify(err));
     }
 
-    windowStage.loadContent('pages/Index', (err) => {
+    // ⚠️ 入口页在这里**硬编码**，必须与 `resources/base/profile/main_pages.json` 保持一致。
+    // 改 main_pages 却忘了这里 → err.code = 401（加载了未注册的页面路径），
+    // 现象是白屏 + 日志只有一行 "Failed to load content"。
+    windowStage.loadContent('pages/NativeRoot', (err) => {
       if (err.code) {
         hilog.error(DOMAIN, TAG, 'Failed to load content: %{public}s', JSON.stringify(err));
         return;

@@ -26,7 +26,9 @@ struct SuenFormCard {
   @LocalStorageProp('suen_favorite') favorite: string = 'false';
   @LocalStorageProp('suen_lyric') lyric: string = '';
   @LocalStorageProp('suen_lyric_active') lyricActive: string = '-1';
-  @LocalStorageProp('suen_position') position: string = '0';
+  // ⚠️ 不能叫 `position`：那是 CustomComponent 的内置属性（用于设位置），
+  // 同名在 ArkTS 里会报「Property 'position' is not assignable to base type」。
+  @LocalStorageProp('suen_position') posText: string = '0';
   @LocalStorageProp('suen_duration') duration: string = '0';
   @LocalStorageProp('suen_alive') alive: string = 'false';
   @LocalStorageProp('suen_dimension') dimension: string = '2';
@@ -63,7 +65,7 @@ struct SuenFormCard {
 
   private progressPct(): number {
     const d = this.num(this.duration);
-    const p = this.num(this.position);
+    const p = this.num(this.posText);
     if (d <= 0) {
       return 0;
     }
@@ -86,7 +88,7 @@ struct SuenFormCard {
   }
 
   private elapsedText(): string {
-    const p = this.num(this.position);
+    const p = this.num(this.posText);
     return p > 0 ? this.fmt(p) : '0:00';
   }
 
