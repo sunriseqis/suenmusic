@@ -13,6 +13,8 @@ import { FavoritesPage } from './FavoritesPage';
 import { DailyPage } from './DailyPage';
 import { SettingsPage } from './SettingsPage';
 import { PlayerPage } from './PlayerPage';
+import { ServerListPage } from './ServerListPage';
+import { CachePage } from './CachePage';
 import { AppState, K_LOGGED_IN } from '../viewmodel/AppState';
 import { MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_HAS_TRACK, K_POS, K_DUR } from '../core/MediaPlayerCore';
 import { HarmonyAVSessionManager } from '../common/AVSessionManager';
@@ -29,6 +31,8 @@ struct NativeRoot {
   @StorageLink(K_COVER) cover: string = '';
   @StorageLink(K_PLAYING) playing: boolean = false;
   @State showPlayer: boolean = false;
+  @State showServers: boolean = false;
+  @State showCache: boolean = false;
   // ⚠️ 不能叫 `tabIndex`：ArkUI 的 Tabs 有同名属性修饰符，重名会报类型冲突
   @State currentTab: number = 0;
   // 窗口全屏布局（EntryAbility setWindowLayoutFullScreen）后系统避让区实时值：
@@ -55,6 +59,23 @@ struct NativeRoot {
 
   aboutToDisappear(): void {
     this.avSession?.destroy();
+  }
+
+  /** 返回手势/返回键：先关最上层浮层，全关了才交给系统 */
+  onBackPress(): boolean {
+    if (this.showPlayer) {
+      this.showPlayer = false;
+      return true;
+    }
+    if (this.showServers) {
+      this.showServers = false;
+      return true;
+    }
+    if (this.showCache) {
+      this.showCache = false;
+      return true;
+    }
+    return false;
   }
 
   /** 底部导航按钮：系统 Symbol 图标 + 文字，选中态 accent */
@@ -108,7 +129,12 @@ struct NativeRoot {
               .tabBar(this.tabBuilder('收藏', $r('sys.symbol.heart'), 2))
             TabContent() { DailyPage() }
               .tabBar(this.tabBuilder('专属', $r('sys.symbol.calendar'), 3))
-            TabContent() { SettingsPage() }
+            TabContent() {
+              SettingsPage({
+                onOpenServers: (): void => { this.showServers = true; },
+                onOpenCache: (): void => { this.showCache = true; }
+              })
+            }
               .tabBar(this.tabBuilder('我的', $r('sys.symbol.person'), 4))
           }
           .onChange((i: number) => { this.currentTab = i; })
@@ -128,6 +154,14 @@ struct NativeRoot {
 
       if (this.showPlayer) {
         PlayerPage({ onClose: () => { this.showPlayer = false; } })
+      }
+
+      if (this.showServers) {
+        ServerListPage({ onClose: () => { this.showServers = false; } })
+      }
+
+      if (this.showCache) {
+        CachePage({ onClose: () => { this.showCache = false; } })
       }
     }
     .width('100%')

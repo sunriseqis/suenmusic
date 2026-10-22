@@ -17,6 +17,8 @@ export const K_LOGGED_IN = 'logged_in';
 export const K_USER_NAME = 'user_name';
 /** 收藏集合版本号：任何页面收藏/取消成功后 +1，收藏页监听它做跨页即时刷新 */
 export const K_FAV_REV = 'fav_rev';
+/** 当前服务端地址（AppStorage 通道）：设置页/服务端管理页跨组件即时显示 */
+export const K_BASE_URL = 'base_url';
 
 export class AppState {
   private static instance: AppState | null = null;
@@ -31,6 +33,7 @@ export class AppState {
   /** UIAbility 启动时调一次：读偏好 → 有刷新令牌就恢复登录 */
   async bootstrap(context: common.Context): Promise<void> {
     await this.api.init(context);
+    AppStorage.setOrCreate<string>(K_BASE_URL, this.api.getBaseUrl());
     if (!this.api.isLoggedIn()) {
       AppStorage.setOrCreate<boolean>(K_LOGGED_IN, false);
       return;
@@ -55,6 +58,7 @@ export class AppState {
     while (addr.endsWith('/')) { addr = addr.substring(0, addr.length - 1); }
     const list: ServerCandidate[] = [{ url: addr, name: '默认' }];
     await this.api.setServers(list, addr);
+    AppStorage.setOrCreate<string>(K_BASE_URL, this.api.getBaseUrl());
     const session = await this.api.login(username, password);
     this.api.adopt(session);
     this.user = session.user;

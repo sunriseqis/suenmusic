@@ -61,6 +61,8 @@ export class MediaPlayerCore {
   private pendingFile: fileIo.File | null = null;
   /** 本次装载期望自动起播（prepared 之后才真正 play） */
   private pendingAutoplay: boolean = false;
+  /** 换服重建队列时要恢复到的位置（-1 = 无需恢复）；prepared 后 seek 一次即清 */
+  private pendingSeekMs: number = -1;
   /** 当前流地址（仅用于日志排查） */
   private currentUrl: string = '';
   /** 连续装载失败次数（成功起播即清零）。对齐 Web 端 networkFailStreak 的语义 */
@@ -192,6 +194,33 @@ export class MediaPlayerCore {
 
   get isPlaying(): boolean { return this.wantPlay; }
 
+  /** 当前播放位置（毫秒）。给 rebindServer 与 UI 用（取的是推给 AppStorage 的实时值） */
+  get positionMs(): number {
+    return AppStorage.get<number>(K_POS) ?? 0;
+  }
+
+  /**
+   * 换服后重建播放队列：保住「当前曲目 + 播放位置 + 播放意图」。
+   *
+   * ⚠️ 不能只改 `APIClient.baseUrl` 就完事：队列里存的是绝对 URL
+   * （`http://<base>/api/stream/...`），base 一变全部失效，必须走 loadCurrent 重建。
+   * 位置恢复走 `pendingSeekMs`：`seek` 只在 prepared 之后有效，
+   * 提前记下来、`stateChange('prepared')` 里补一次。
+   */
+  async rebindServer(token: string): Promise<void> {
+    this.token = token;
+    if (this.queue.length === 0 || this.index < 0) { return; }
+    const pos = this.positionMs;
+    const wasPlaying = this.wantPlay;
+    // 重建是新服务器的账：上一台服务器的失败计数不能带过来
+    this.failStreak = 0;
+    this.failHandled = false;
+    this.pendingSeekMs = pos;
+    AppStorage.setOrCreate<number>(K_POS, pos);
+    this.bumpQueue();
+    await this.loadCurrent(wasPlaying);
+  }
+
   /** 装载整条队列并从 startIndex 起播 */
   async setQueue(tracks: Track[], startIndex: number, token: string): Promise<void> {
     this.queue = tracks;
@@ -265,6 +294,8 @@ export class MediaPlayerCore {
 
   async stop(): Promise<void> {
     this.wantPlay = false;
+    // 停播后不再占用缓存文件：解除删除保护
+    OfflineCache.shared().setProtected('');
     const p = this.player;
     if (p !== null) {
       // 顺序要紧：先让播放器停下（它还在用这个 fd），再归还句柄
@@ -317,6 +348,8 @@ export class MediaPlayerCore {
     const mySeq = ++this.seq;
     this.failHandled = false;
     this.pendingAutoplay = autoplay || this.wantPlay;
+    // 登记删除保护：缓存面板删文件必须跳过正在播的这一首（fd:// 占用中删了直接断播）
+    OfflineCache.shared().setProtected(track.id);
     const url = this.buildUrl(track);
 
     // 先落 UI 元数据：切歌瞬间界面就该变，别等 prepare
@@ -442,6 +475,14 @@ export class MediaPlayerCore {
 
       if (state === 'prepared') {
         AppStorage.setOrCreate<number>(K_DUR, Math.max(0, player.duration));
+        // 换服重建队列：恢复到切服前的位置（seek 只在 prepared 之后有效）
+        if (this.pendingSeekMs >= 0) {
+          const target = this.pendingSeekMs;
+          this.pendingSeekMs = -1;
+          AppStorage.setOrCreate<number>(K_POS, target);
+          // AVPlayer.seek 返回 void（完成与否听 'seekDone'），不能当 Promise 用
+          player.seek(Math.max(0, target));
+        }
         if (this.pendingAutoplay) {
           this.wantPlay = true;
           player.play().catch((e: Object) => {
@@ -465,7 +506,8 @@ export class MediaPlayerCore {
         const track = this.current;
         if (track !== null && this.currentUrl.startsWith('http')
           && !OfflineCache.shared().isCached(track.id)) {
-          OfflineCache.shared().ensureDownload(track.id, this.currentUrl);
+          OfflineCache.shared().ensureDownload(track.id, this.currentUrl,
+            track.name, artistLine(track));
         }
         this.av?.startContinuousTask();
         return;

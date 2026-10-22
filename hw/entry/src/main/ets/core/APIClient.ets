@@ -227,7 +227,10 @@ export class APIClient {
         method: http.RequestMethod.GET,
         expectDataType: http.HttpDataType.STRING,
         connectTimeout: timeoutMs,
-        readTimeout: timeoutMs
+        readTimeout: timeoutMs,
+        // GET 空 body 也必须显式 text/plain：鸿蒙栈默认注入 json 头，
+        // Fastify 遇「json Content-Type + 空 body」直接 400，探测会永远失败
+        header: { 'Accept': 'application/json', 'Content-Type': 'text/plain' }
       });
       if (res.responseCode !== 200) { return false; }
       const health = JSON.parse(res.result as string) as HealthReply;
@@ -300,6 +303,78 @@ export class APIClient {
     } catch (e) {
       throw new ApiError(res.responseCode, 'decode', '响应解析失败');
     }
+  }
+
+  // ---------------- 多服务端管理（S3 增量 3） ----------------
+
+  /** 探测单个服务端：健康检查 + 校验返回体 ok 字段（门户劫持也会回 200）。空串/非 http(s) 一律不可达 */
+  async probeServer(url: string): Promise<boolean> {
+    const target = APIClient.normalize(url);
+    if (target.length === 0) { return false; }
+    if (!target.startsWith('http://') && !target.startsWith('https://')) { return false; }
+    return this.probe(target, 2000);
+  }
+
+  /** 并行探测全部候选，返回 url → 可达 */
+  async probeAll(): Promise<Record<string, boolean>> {
+    const out: Record<string, boolean> = {};
+    const tasks: Promise<boolean>[] = [];
+    for (let i = 0; i < this.servers.length; i++) {
+      tasks.push(this.probeServer(this.servers[i].url));
+    }
+    const results: boolean[] = await Promise.all(tasks);
+    for (let i = 0; i < this.servers.length; i++) {
+      out[this.servers[i].url] = results[i];
+    }
+    return out;
+  }
+
+  /**
+   * 切换当前服务端。
+   * 顺序：探测 → 临时切过去 → `me()` 验证鉴权 → 成功则持久化；失败则**回滚**到原地址并抛出原因。
+   * 返回 true = 已切换（调用方随后需要 `MediaPlayerCore.rebindServer` 重建播放队列）。
+   */
+  async switchServer(url: string): Promise<boolean> {
+    const target = APIClient.normalize(url);
+    if (target.length === 0) {
+      throw new ApiError(0, 'invalid', '服务器地址不能为空');
+    }
+    if (target === this.baseUrl) { return true; }
+
+    if (!await this.probeServer(target)) {
+      throw new ApiError(0, 'unreachable', '连不上该服务器，请检查地址或网络');
+    }
+
+    const originalBase = this.baseUrl;
+    const oldAccess = this.accessToken;
+    const oldRefresh = this.refreshToken;
+    // 临时切过去；清空访问令牌（新服务器不接受旧令牌），保留 refreshToken
+    // 让 request 管线走「401 → 单飞刷新 → 重试」验证账号是否存在
+    this.baseUrl = target;
+    this.accessToken = '';
+
+    try {
+      await this.me();
+    } catch (e) {
+      // 任何一步失败都回滚：地址恢复原值、令牌状态不变
+      this.baseUrl = originalBase;
+      this.accessToken = oldAccess;
+      this.refreshToken = oldRefresh;
+      const err = e as ApiError;
+      hilog.warn(DOMAIN, TAG, '切换服务端失败，已回滚到 %{public}s: %{public}s',
+        originalBase, err.message);
+      if (err.isUnauthorized) {
+        throw new ApiError(401, 'unauthorized', '该服务器上你的账号需要重新登录');
+      }
+      throw new ApiError(0, 'network', '切换失败：' + err.message);
+    }
+
+    if (this.pref !== null) {
+      this.pref.putSync(KEY_BASE, target);
+      await this.pref.flush();
+    }
+    hilog.info(DOMAIN, TAG, '已切换服务端: %{public}s', target);
+    return true;
   }
 
   // ---------------- 业务接口 ----------------

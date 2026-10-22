@@ -29,6 +29,26 @@ interface CacheEntry {
   mtimeMs: number;
 }
 
+/**
+ * 缓存面板展示用的单条信息（S3 增量 3）。
+ * `name`/`artist` 来自下载时落盘的旁挂 `.meta` 文件；旧缓存没有则由 UI 回退显示 trackId。
+ */
+export interface CacheEntryInfo {
+  trackId: string;
+  path: string;
+  bytes: number;
+  /** 毫秒时间戳（文件 mtime） */
+  savedAt: number;
+  name?: string;
+  artist?: string;
+}
+
+/** 曲名旁挂文件（`<id>.bin.meta`）的形状：缓存面板要显示曲名/歌手，而文件名只有 id */
+interface CacheMeta {
+  name: string;
+  artist: string;
+}
+
 export class OfflineCache {
   private static instance: OfflineCache | null = null;
   static shared(): OfflineCache {
@@ -43,6 +63,8 @@ export class OfflineCache {
   private downloading: Set<string> = new Set<string>();
   /** 已完整落盘的 trackId → 路径 */
   private complete: Map<string, string> = new Map<string, string>();
+  /** 当前正在播放的 trackId：remove/clearAll 必须跳过它（`fd://` 播放期间删文件会直接打断播放） */
+  private protectedId: string = '';
 
   /** 必须在 UIAbility 启动时调一次（需要 context 拿 filesDir） */
   init(context: common.Context): void {
@@ -106,11 +128,180 @@ export class OfflineCache {
     return this.isCached(trackId) ? (this.complete.get(trackId) as string) : '';
   }
 
+  // ---------------- 缓存面板管理 API（S3 增量 3） ----------------
+
+  /** 播放内核登记"正在播这首"：删除操作必须跳过它 */
+  setProtected(trackId: string): void {
+    this.protectedId = trackId;
+  }
+
+  /** 当前正在播放（受删除保护）的 trackId；空串 = 没有在播 */
+  getProtected(): string {
+    return this.protectedId;
+  }
+
+  /** 配额（2GB 常量，UI 显示用） */
+  quotaBytes(): number {
+    return QUOTA_BYTES;
+  }
+
+  /** 重新扫盘刷新索引（外部改了文件后调用） */
+  rescan(): void {
+    this.scan();
+  }
+
+  /** 已完整缓存的单条信息（含旁挂曲名）。未命中返回 null */
+  private entryOf(trackId: string): CacheEntryInfo | null {
+    const p = this.cachedPath(trackId);
+    if (p.length === 0) { return null; }
+    try {
+      const stat = fileIo.statSync(p);
+      const meta = this.readMeta(trackId);
+      const info: CacheEntryInfo = {
+        trackId: trackId,
+        path: p,
+        bytes: stat.size,
+        savedAt: stat.mtime * 1000
+      };
+      if (meta !== null) {
+        info.name = meta.name;
+        info.artist = meta.artist;
+      }
+      return info;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** 列出全部已完整缓存的曲目（按 savedAt 倒序，最新的在前） */
+  listEntries(): CacheEntryInfo[] {
+    const out: CacheEntryInfo[] = [];
+    if (!this.ready) { return out; }
+    const ids: string[] = [];
+    this.complete.forEach((path: string, id: string) => { ids.push(id); });
+    for (let i = 0; i < ids.length; i++) {
+      const info = this.entryOf(ids[i]);
+      if (info !== null) { out.push(info); }
+    }
+    out.sort((a: CacheEntryInfo, b: CacheEntryInfo) => b.savedAt - a.savedAt);
+    return out;
+  }
+
+  /** 已用字节数（只统计 `.bin` 音频文件，不含旁挂 meta） */
+  usedBytes(): number {
+    if (!this.ready) { return 0; }
+    let total = 0;
+    try {
+      const names: string[] = fileIo.listFileSync(this.dir);
+      for (let i = 0; i < names.length; i++) {
+        if (!names[i].endsWith('.bin')) { continue; }
+        try {
+          total += fileIo.statSync(this.dir + '/' + names[i]).size;
+        } catch (e) {
+          // 单文件 stat 失败不影响总量统计
+        }
+      }
+    } catch (e) {
+      return 0;
+    }
+    return total;
+  }
+
+  /**
+   * 删除单条缓存。返回 false = 正在被播放占用或删除失败。
+   * 删除后同步刷新 `complete` 索引，避免 `isCached` 仍返回 true。
+   */
+  remove(trackId: string): boolean {
+    if (!this.ready) { return false; }
+    if (trackId.length === 0) { return false; }
+    if (trackId === this.protectedId) {
+      hilog.info(DOMAIN, TAG, '缓存删除被跳过（正在播放）: %{public}s', trackId);
+      return false;
+    }
+    const p = this.cachedPath(trackId);
+    if (p.length === 0) { return false; }
+    try {
+      fileIo.unlinkSync(p);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '缓存删除失败 %{public}s: %{public}s', trackId, JSON.stringify(e));
+      return false;
+    }
+    this.complete.delete(trackId);
+    this.deleteMeta(trackId);
+    hilog.info(DOMAIN, TAG, '已删除缓存 %{public}s', trackId);
+    return true;
+  }
+
+  /** 清空全部缓存（跳过正在播放那首）。返回实际删除条数 */
+  clearAll(): number {
+    if (!this.ready) { return 0; }
+    const ids: string[] = [];
+    this.complete.forEach((path: string, id: string) => { ids.push(id); });
+    let count = 0;
+    for (let i = 0; i < ids.length; i++) {
+      if (this.remove(ids[i])) { count += 1; }
+    }
+    hilog.info(DOMAIN, TAG, '清空缓存完成，删除 %{public}d 条', count);
+    return count;
+  }
+
+  // ---------------- 旁挂曲名文件 ----------------
+
+  private metaPathOf(trackId: string): string {
+    return this.pathOf(trackId) + '.meta';
+  }
+
+  private writeMeta(trackId: string, name: string, artist: string): void {
+    // fs 模块没有写文本的快捷函数：开 fd → writeSync → 关 fd
+    let file: fileIo.File | null = null;
+    try {
+      const m: CacheMeta = { name: name, artist: artist };
+      file = fileIo.openSync(this.metaPathOf(trackId),
+        fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+      fileIo.writeSync(file.fd, JSON.stringify(m));
+    } catch (e) {
+      // 旁挂写失败只降级为"面板显示 trackId"，不影响缓存本身
+      hilog.warn(DOMAIN, TAG, '旁挂曲名写入失败 %{public}s: %{public}s', trackId, JSON.stringify(e));
+    } finally {
+      if (file !== null) {
+        try {
+          fileIo.closeSync(file);
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }
+
+  private readMeta(trackId: string): CacheMeta | null {
+    try {
+      const p = this.metaPathOf(trackId);
+      if (!fileIo.accessSync(p)) { return null; }
+      const text = fileIo.readTextSync(p);
+      if (text.length === 0) { return null; }
+      return JSON.parse(text) as CacheMeta;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  private deleteMeta(trackId: string): void {
+    try {
+      const p = this.metaPathOf(trackId);
+      if (fileIo.accessSync(p)) {
+        fileIo.unlinkSync(p);
+      }
+    } catch (e) {
+      // 旁挂清理失败无须处理
+    }
+  }
+
   /**
    * 确保这首歌在缓存里。**不阻塞播放**：起个下载任务就返回，
    * 播放在线流的同时把字节落到 filesDir，下完登记为可离线。
+   * `name`/`artist` 供缓存面板显示（下载完成时落旁挂 `.meta`）。
    */
-  ensureDownload(trackId: string, streamUrl: string): void {
+  ensureDownload(trackId: string, streamUrl: string, name: string, artist: string): void {
     if (!this.ready || this.isCached(trackId) || this.downloading.has(trackId)) { return; }
     this.downloading.add(trackId);
     const target = this.pathOf(trackId);
@@ -128,6 +319,7 @@ export class OfflineCache {
         task.on('completed', () => {
           this.downloading.delete(trackId);
           this.complete.set(trackId, target);
+          this.writeMeta(trackId, name, artist);
           hilog.info(DOMAIN, TAG, '缓存完成 %{public}s', trackId);
           this.enforceQuota();
         });
@@ -166,6 +358,7 @@ export class OfflineCache {
         try {
           fileIo.unlinkSync(e.path);
           this.complete.delete(e.trackId);
+          this.deleteMeta(e.trackId);
           total -= e.bytes;
           hilog.info(DOMAIN, TAG, '淘汰缓存 %{public}s', e.trackId);
         } catch (err) {
