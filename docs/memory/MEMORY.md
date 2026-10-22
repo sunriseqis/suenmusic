@@ -2,6 +2,9 @@
 
 唯一记忆索引（约定见 `docs/README.md`）。新记忆先落 `YYYY-MM-DD-<主题>.md`，再在这里加一行。
 
+- [2026-10-22 用户裁定：首页播放按钮与 T10 关注项](2026-10-22-用户裁定-首页播放按钮与T10关注项.md) —— **首页播放类按钮不回补**（「播放全部」T5.5 用户裁定移除；web TrackRow 本无行内播放钮，T10 §2.1「补行内播放钮」作废）+ T10 两个补充关注：**迷你播放控件**（PlayerBar compact：neu-raised 凸面+内嵌进度条+滑动切歌不误展开）、**Tab 栏整体风格**（对齐 web .tabbar 形态质感，动效口径不变）；**规则**：用户验收中的「移除/不加」裁定当场进记忆，防 web-parity 机械回补
+- [2026-10-22 T5.5 验收回执](2026-10-22-T5.5-验收回执.md) —— **首页与列表视觉重建交付（commit 3bf8bab）**：定性=移动版 web ≤767px 为全端标准；首页重建（欢迎区两行单行定稿/新碟 Swiper displayCount(2) 一屏 2 张方卡+日期角标+渐变遮罩+圆点/新歌 8 行/巅峰榜两列 Row 行分组）；三轮用户反馈落地（删播放全部、昵称 displayName、DailyPage 移除 welcomePhrase 混渲染、greeting 按 web parseAiHeader 拆主副题）；令牌链 5 新色跨端同步（本机无 Python 手工同步生成物）；2 处规格偏离有据；给后端结论=字段分工本就正确无需改
+
 - [2026-10-22 T6 冻结定稿回执](2026-10-22-T6-冻结定稿回执.md) —— **S5 全落地，v1.6.0 定稿（tag `hw-v1.6.0`）**：删 `pages/Index.ets`（1160 行）及全部 WebView 依赖（PlayerControlHub 纯化为直驱内核、EntryAbility 删 heal/justColdStarted、AVSessionManager 删 runPageScript/dispatchWebControl）；Android 封库核对+keystore 补注；设置页无检查更新（T7 做）；文档四件定稿（README/hw-native-client/MEMORY/路线图 H1–H5 全 ✅）；产物 `output/SuenMusic-v1.6.0-unsigned.hap`（1.01MB，versionCode 20163）装机 Smoke PASS；**Windows 构建口径**：hvigorw 是 bash 脚本跑不了，版本注入用 build-hw.mjs、编译用 devecocli、产物手动落 output；遗留真机项：桌面卡片按钮/锁屏/帧率
 - [2026-10-22 T5 验收回执](2026-10-22-T5-验收回执.md) —— **Lead 复审通过：T5 ✅、T6 放行**。S4 打磨单 18 文件交付（Dim/Motion 尺寸与动效令牌、骨架屏、统一空态五场景、LazyForEach 四处、无障碍热区 44vp、下拉刷新、冷启动延后）；首轮验收发现并修复**搜索静默失败**（骨架屏分支排在 `!searched` 后永不触发 + `lastQuery` 只在成功时记导致失败后重试空操作）；**Tab 动效规格偏离**：用户 4 轮实测定稿「页面零动效 + 仅 tab 按钮 1.15x/accent 变色」，S4 §二原规格作废，后续沿用该口径
 - [2026-10-22 S3 增量4 验收回执](2026-10-22-S3-增量4-验收回执.md) —— **Lead 复审通过：T4 ✅、T5 放行**。8 项全交付：首页离线快照（乐观登录：非 401 失败先 `K_LOGGED_IN=true`）、歌词翻译双指针对齐、自动选路开关、`Copy.ets` 错误文案六页接线、WARN 清零（clean build 追出 15 条隐藏——增量构建只 lint 重编文件，**WARN 清单以 clean build 为准**成后续门禁）、播放失败可重试、权限最小化核对、令牌提前 60s 续期；两处回归修复：飞行模式冷启动踢登录（乐观登录）、热启动转离线无横幅（`bumpHomeRefresh` + catch 挂横幅）
