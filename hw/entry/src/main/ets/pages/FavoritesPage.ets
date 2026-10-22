@@ -51,7 +51,7 @@ export struct FavoritesPage {
       this.nextCursor = page.nextCursor ?? '';
       this.reachedEnd = this.nextCursor.length === 0;
     } catch (e) {
-      this.err = (e as ApiError).message === undefined ? '加载失败' : (e as ApiError).message;
+      this.err = Copy.describeError(e);
     } finally {
       this.loading = false;
     }
@@ -74,7 +74,7 @@ export struct FavoritesPage {
       this.nextCursor = page.nextCursor ?? '';
       this.reachedEnd = this.nextCursor.length === 0;
     } catch (e) {
-      this.err = (e as ApiError).message === undefined ? '加载失败' : (e as ApiError).message;
+      this.err = Copy.describeError(e);
     } finally {
       this.loadingMore = false;
     }
@@ -101,10 +101,14 @@ export struct FavoritesPage {
       return true;
     } catch (e) {
       const msg = (e as ApiError).message;
-      this.getUIContext().getPromptAction().showToast({
-        message: msg === undefined ? Copy.favOpFailed : msg,
-        duration: 2000
-      });
+      try {
+        this.getUIContext().getPromptAction().showToast({
+          message: msg === undefined ? Copy.favOpFailed : msg,
+          duration: 2000
+        });
+      } catch (toastErr) {
+        hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
+      }
       hilog.warn(0x0000, TAG, '取消收藏失败: %{public}s', JSON.stringify(e));
       return false;
     }
@@ -138,7 +142,7 @@ export struct FavoritesPage {
     try {
       await MediaPlayerCore.shared().setQueue(list, pos, token);
     } catch (e) {
-      this.err = '无法装载音源：' + ((e as ApiError).message ?? '');
+      this.err = Copy.describeError(e);
       hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
     }
   }

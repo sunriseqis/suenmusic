@@ -59,7 +59,12 @@ export struct SearchPage {
   private async ensurePref(): Promise<void> {
     if (this.pref !== null) { return; }
     const ctx = this.getUIContext().getHostContext() as common.Context;
-    this.pref = await preferences.getPreferences(ctx, PREF_NAME);
+    try {
+      this.pref = await preferences.getPreferences(ctx, PREF_NAME);
+    } catch (e) {
+      // 打不开偏好：最近搜索功能整体退化为内存态，不拦搜索
+      hilog.warn(0x0000, TAG, '打开偏好存储失败: %{public}s', JSON.stringify(e));
+    }
   }
 
   private async loadRecent(): Promise<void> {
@@ -97,17 +102,25 @@ export struct SearchPage {
       if (i !== index) { list.push(this.recent[i]); }
     }
     this.recent = list;
-    if (this.pref !== null) {
-      this.pref.putSync(KEY_RECENT, JSON.stringify(list));
-      await this.pref.flush();
+    try {
+      if (this.pref !== null) {
+        this.pref.putSync(KEY_RECENT, JSON.stringify(list));
+        await this.pref.flush();
+      }
+    } catch (e) {
+      hilog.warn(0x0000, TAG, '删除最近搜索失败: %{public}s', JSON.stringify(e));
     }
   }
 
   private async clearRecent(): Promise<void> {
     this.recent = [];
-    if (this.pref !== null) {
-      this.pref.deleteSync(KEY_RECENT);
-      await this.pref.flush();
+    try {
+      if (this.pref !== null) {
+        this.pref.deleteSync(KEY_RECENT);
+        await this.pref.flush();
+      }
+    } catch (e) {
+      hilog.warn(0x0000, TAG, '清空最近搜索失败: %{public}s', JSON.stringify(e));
     }
   }
 
@@ -183,7 +196,7 @@ export struct SearchPage {
       if (first) { this.saveRecent(q); }
     } catch (e) {
       if (mySeq !== this.reqSeq) { return; }
-      this.err = (e as ApiError).message === undefined ? '搜索失败' : (e as ApiError).message;
+      this.err = Copy.describeError(e);
     } finally {
       if (mySeq === this.reqSeq) {
         this.searching = false;
@@ -279,10 +292,14 @@ export struct SearchPage {
     } catch (e) {
       this.setFav(track.id, wasFav);
       const msg = (e as ApiError).message;
-      this.getUIContext().getPromptAction().showToast({
-        message: msg === undefined ? Copy.favOpFailed : msg,
-        duration: 2000
-      });
+      try {
+        this.getUIContext().getPromptAction().showToast({
+          message: msg === undefined ? Copy.favOpFailed : msg,
+          duration: 2000
+        });
+      } catch (toastErr) {
+        hilog.warn(0x0000, 'SuenMusic_Fav', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
+      }
       hilog.warn(0x0000, 'SuenMusic_Fav', '收藏切换失败: %{public}s', JSON.stringify(e));
       return false;
     }
@@ -306,7 +323,7 @@ export struct SearchPage {
     try {
       await MediaPlayerCore.shared().setQueue(this.songs, index, token);
     } catch (e) {
-      this.err = '无法装载音源：' + ((e as ApiError).message ?? '');
+      this.err = Copy.describeError(e);
       hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
     }
   }

@@ -26,6 +26,8 @@ const PREF_NAME = 'suenmusic';
 const KEY_TOKEN = 'refreshToken';
 const KEY_SERVERS = 'servers';
 const KEY_BASE = 'baseUrl';
+/** 自动选路开关（默认开）：关掉后网络失败不再探测/切换备用服务端 */
+const KEY_AUTO_FAILOVER = 'auto_failover';
 
 /** 统一错误：`status = 0` 表示网络层失败 */
 /** `/api/health` 的返回体（探测选路要校验它，门户劫持也会回 200） */
@@ -83,35 +85,71 @@ export class APIClient {
   private pref: preferences.Preferences | null = null;
   private refreshing: Promise<void> | null = null;
   private lastFailoverAt: number = 0;
+  /** 访问令牌过期时刻（epoch ms）：请求前提前续期用（T4 第 8 项） */
+  private accessExpiresAt: number = 0;
+  /** 自动选路开关（持久化，默认开）：设置页可关 */
+  private autoFailover: boolean = true;
 
   /** `context` 由调用方传入 —— ArkTS 已弃用 `getContext(this)`，普通类里也拿不到组件上下文 */
   async init(context: common.Context): Promise<void> {
     if (this.pref === null) {
-      this.pref = await preferences.getPreferences(context, PREF_NAME);
-    }
-    const savedServers = this.pref.getSync(KEY_SERVERS, '') as string;
-    if (savedServers.length > 0) {
       try {
-        this.servers = JSON.parse(savedServers) as ServerCandidate[];
+        this.pref = await preferences.getPreferences(context, PREF_NAME);
       } catch (e) {
-        this.servers = [];
+        // 偏好存储打不开（极端情况）：全部配置退化为内存态默认值，不拦启动
+        hilog.warn(DOMAIN, TAG, '打开偏好存储失败: %{public}s', JSON.stringify(e));
+        return;
       }
     }
-    this.baseUrl = this.pref.getSync(KEY_BASE, '') as string;
-    this.refreshToken = this.pref.getSync(KEY_TOKEN, '') as string;
+    try {
+      const savedServers = this.pref.getSync(KEY_SERVERS, '') as string;
+      if (savedServers.length > 0) {
+        this.servers = JSON.parse(savedServers) as ServerCandidate[];
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '读取服务端列表失败: %{public}s', JSON.stringify(e));
+      this.servers = [];
+    }
+    try {
+      this.baseUrl = this.pref.getSync(KEY_BASE, '') as string;
+      this.refreshToken = this.pref.getSync(KEY_TOKEN, '') as string;
+      this.autoFailover = this.pref.getSync(KEY_AUTO_FAILOVER, true) as boolean;
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '读取偏好失败（按默认值继续）: %{public}s', JSON.stringify(e));
+    }
   }
 
   getBaseUrl(): string { return this.baseUrl; }
   getServers(): ServerCandidate[] { return this.servers; }
   isLoggedIn(): boolean { return this.accessToken.length > 0 || this.refreshToken.length > 0; }
 
+  /** 自动选路是否开启（设置页开关显示用） */
+  isAutoFailover(): boolean { return this.autoFailover; }
+
+  /** 开/关自动选路（持久化）。关闭后网络失败不再探测备用服务端 */
+  setAutoFailover(enabled: boolean): void {
+    this.autoFailover = enabled;
+    if (this.pref !== null) {
+      try {
+        this.pref.putSync(KEY_AUTO_FAILOVER, enabled);
+        this.pref.flush();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, '持久化自动选路开关失败: %{public}s', JSON.stringify(e));
+      }
+    }
+  }
+
   async setServers(list: ServerCandidate[], current: string): Promise<void> {
     this.servers = list;
     this.baseUrl = APIClient.normalize(current);
     if (this.pref !== null) {
-      this.pref.putSync(KEY_SERVERS, JSON.stringify(list));
-      this.pref.putSync(KEY_BASE, this.baseUrl);
-      await this.pref.flush();
+      try {
+        this.pref.putSync(KEY_SERVERS, JSON.stringify(list));
+        this.pref.putSync(KEY_BASE, this.baseUrl);
+        await this.pref.flush();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, '持久化服务端列表失败: %{public}s', JSON.stringify(e));
+      }
     }
   }
 
@@ -137,9 +175,14 @@ export class APIClient {
   adopt(session: AuthSession): void {
     this.accessToken = session.accessToken;
     this.refreshToken = session.refreshToken;
+    this.accessExpiresAt = session.accessExpiresAt;
     if (this.pref !== null) {
-      this.pref.putSync(KEY_TOKEN, session.refreshToken);
-      this.pref.flush();
+      try {
+        this.pref.putSync(KEY_TOKEN, session.refreshToken);
+        this.pref.flush();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, '持久化刷新令牌失败: %{public}s', JSON.stringify(e));
+      }
     }
   }
 
@@ -147,8 +190,12 @@ export class APIClient {
     this.accessToken = '';
     this.refreshToken = '';
     if (this.pref !== null) {
-      this.pref.deleteSync(KEY_TOKEN);
-      this.pref.flush();
+      try {
+        this.pref.deleteSync(KEY_TOKEN);
+        this.pref.flush();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, '清除刷新令牌失败: %{public}s', JSON.stringify(e));
+      }
     }
   }
 
@@ -168,7 +215,16 @@ export class APIClient {
         header: this.buildHeaders(authed, body)
       };
       if (body.length > 0) { options.extraData = body; }
-      return await req.request(this.baseUrl + path, options);
+      try {
+        return await req.request(this.baseUrl + path, options);
+      } catch (e) {
+        // 网络层失败在这里就统一降级成 ApiError(network)：
+        // request<T> 的 catch 捕获一切异常做选路重试，不区分类型，
+        // 提前规整能让上层（含 refresh 路径）拿到的都是同一个网络错误类型
+        const be = e as BusinessError;
+        throw new ApiError(0, 'network',
+          be.message !== undefined && be.message.length > 0 ? be.message : '连不上服务端，请检查网络或服务器地址');
+      }
     } finally {
       req.destroy();
     }
@@ -206,6 +262,7 @@ export class APIClient {
       const session = JSON.parse(res.result as string) as AuthSession;
       this.accessToken = session.accessToken;
       this.refreshToken = session.refreshToken;
+      this.accessExpiresAt = session.accessExpiresAt;
       if (this.pref !== null) {
         this.pref.putSync(KEY_TOKEN, session.refreshToken);
         this.pref.flush();
@@ -243,6 +300,8 @@ export class APIClient {
   }
 
   private async failoverIfNeeded(): Promise<boolean> {
+    // 设置页关掉了自动选路：网络失败也不探测、不切换（用户自己管路由）
+    if (!this.autoFailover) { return false; }
     if (this.servers.length < 2) { return false; }
     const now = Date.now();
     if (now - this.lastFailoverAt < 5000) { return false; }
@@ -266,6 +325,17 @@ export class APIClient {
     path: string, method: http.RequestMethod, body: string,
     authed: boolean, retried: boolean
   ): Promise<T> {
+    // 令牌提前续期（T4 第 8 项）：离过期不足 60 秒就先刷新再发请求，
+    // 省掉"必 401 → 刷新 → 重放"一个来回。续期失败（如离线）不拦请求，
+    // 继续用旧令牌 —— 真过期了还有 401 单飞刷新这条兜底路径。
+    if (authed && !retried && this.refreshToken.length > 0 && this.accessExpiresAt > 0
+      && Date.now() > this.accessExpiresAt - 60000) {
+      try {
+        await this.refresh();
+      } catch (e) {
+        hilog.warn(DOMAIN, TAG, '令牌提前续期失败（继续用旧令牌）: %{public}s', JSON.stringify(e));
+      }
+    }
     const timeout = APIClient.isPrivate(this.baseUrl) ? 4000 : 20000;
     let res: http.HttpResponse;
     try {
@@ -370,8 +440,13 @@ export class APIClient {
     }
 
     if (this.pref !== null) {
-      this.pref.putSync(KEY_BASE, target);
-      await this.pref.flush();
+      try {
+        this.pref.putSync(KEY_BASE, target);
+        await this.pref.flush();
+      } catch (e) {
+        // 持久化失败不回滚切换：内存态已生效，代价只是下次启动回旧地址
+        hilog.warn(DOMAIN, TAG, '持久化当前服务端失败: %{public}s', JSON.stringify(e));
+      }
     }
     hilog.info(DOMAIN, TAG, '已切换服务端: %{public}s', target);
     return true;

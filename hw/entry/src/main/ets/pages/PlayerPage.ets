@@ -147,6 +147,16 @@ export struct PlayerPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
           .textAlign(TextAlign.Center)
+        // 播放失败可重试（T4）：重装当前曲，清错误横幅
+        Button('重试')
+          .height(28)
+          .fontSize(12)
+          .backgroundColor(Tokens.panel2)
+          .fontColor(Tokens.text1)
+          .onClick(() => {
+            this.err = '';
+            MediaPlayerCore.shared().retryCurrent();
+          })
       }
     }
     .width('100%')

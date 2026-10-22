@@ -8,6 +8,9 @@
  *
  * 断点续传（`FileSpec.begins/ends` → HTTP Range）留在 S2.1：那需要精确的 API 形状，
  * 这一版先保证"完整下载过的歌能离线播"这条命脉，不做半成品续传。
+ *
+ * SysCap 提示（build 的 request WARN，源自 `request.agent.create`）：
+ * deviceTypes 仅 phone/tablet，SystemCapability.Request.FileDownloadAgent 在这些设备上必然具备，不做降级。
  */
 
 import { request } from '@kit.BasicServicesKit';

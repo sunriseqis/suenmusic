@@ -265,35 +265,40 @@ class HarmonyAVSessionManager {
   private registerSessionListeners(): void {
     if (!this.session) return;
 
-    this.session.on('play', () => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: play');
-      this.dispatchControl('play');
-    });
+    // 六个控制指令一次性注册：任何一步抛错只损失后续按钮，不打崩会话建立
+    try {
+      this.session.on('play', () => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: play');
+        this.dispatchControl('play');
+      });
 
-    this.session.on('pause', () => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: pause');
-      this.dispatchControl('pause');
-    });
+      this.session.on('pause', () => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: pause');
+        this.dispatchControl('pause');
+      });
 
-    this.session.on('stop', () => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: stop');
-      this.dispatchControl('stop');
-    });
+      this.session.on('stop', () => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: stop');
+        this.dispatchControl('stop');
+      });
 
-    this.session.on('playNext', () => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: playNext');
-      this.dispatchControl('next');
-    });
+      this.session.on('playNext', () => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: playNext');
+        this.dispatchControl('next');
+      });
 
-    this.session.on('playPrevious', () => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: playPrevious');
-      this.dispatchControl('prev');
-    });
+      this.session.on('playPrevious', () => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: playPrevious');
+        this.dispatchControl('prev');
+      });
 
-    this.session.on('seek', (timeMs: number) => {
-      hilog.info(DOMAIN, TAG, 'AVSession received: seek %{public}d', timeMs);
-      this.dispatchControl('seek', timeMs);
-    });
+      this.session.on('seek', (timeMs: number) => {
+        hilog.info(DOMAIN, TAG, 'AVSession received: seek %{public}d', timeMs);
+        this.dispatchControl('seek', timeMs);
+      });
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '注册 AVSession 控制监听失败: %{public}s', JSON.stringify(e));
+    }
   }
 
   /**
@@ -679,10 +684,9 @@ class HarmonyAVSessionManager {
       };
       const pixelMap = await source.createPixelMap(decodingOptions);
       await source.release();
-      const packed = await packer.packing(pixelMap, {
-        format: 'image/jpeg',
-        quality: 85
-      });
+      // packing 自 API 13 起废弃，改用 packToData（同一签名语义）
+      const packOpts: image.PackingOption = { format: 'image/jpeg', quality: 85 };
+      const packed = await packer.packToData(pixelMap, packOpts);
       await pixelMap.release();
       return packed;
     } catch (err) {
@@ -787,7 +791,14 @@ class HarmonyAVSessionManager {
       requestCode: 0,
       actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     };
-    return await wantAgent.getWantAgent(wantAgentInfo);
+    try {
+      return await wantAgent.getWantAgent(wantAgentInfo);
+    } catch (e) {
+      // 长时任务 wantAgent 拿不到：返回 undefined，startBackgroundRunning 会因
+      // 缺 agent 走自己的 catch，不至于把调用方打崩
+      hilog.warn(0x0000, 'SuenMusic_AVSession', 'getWantAgent 失败: %{public}s', JSON.stringify(e));
+      return undefined;
+    }
   }
 
   async startContinuousTask(): Promise<void> {

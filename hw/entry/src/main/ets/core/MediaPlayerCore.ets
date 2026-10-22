@@ -9,6 +9,9 @@
  *
  * 官方硬约束：`STREAM_USAGE_MUSIC` 必须接 AVSession + AUDIO_PLAYBACK 长时任务；
  * 「申请了但没有有效音频播放」会被系统挂起 —— 所以暂停/停止时主动取消（官方建议 on('pause') 后取消）。
+ *
+ * SysCap 提示（build 的 media/audio WARN）：`module.json5` 的 deviceTypes 仅 phone/tablet，
+ * SystemCapability.Multimedia.Media.Core / Audio.Core 在这些设备上必然具备，不做降级。
  */
 
 import { media } from '@kit.MediaKit';
@@ -281,6 +284,19 @@ export class MediaPlayerCore {
   async next(): Promise<void> {
     if (this.index + 1 >= this.queue.length) { return; }
     this.index += 1;
+    this.bumpQueue();
+    await this.loadCurrent(this.wantPlay);
+  }
+
+  /**
+   * 用户点「重试」（T4 第 6 项）：清掉失败计数后按当前意图重装这首。
+   * 连续失败停播后 `wantPlay` 已是 false —— 重试只负责重装，是否起播
+   * 跟随用户意图（想播就按播放键），不做隐式自动起播。
+   */
+  async retryCurrent(): Promise<void> {
+    if (this.current === null) { return; }
+    this.failStreak = 0;
+    this.failHandled = false;
     this.bumpQueue();
     await this.loadCurrent(this.wantPlay);
   }

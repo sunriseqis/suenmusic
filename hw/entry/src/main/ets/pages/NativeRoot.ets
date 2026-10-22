@@ -41,6 +41,8 @@ struct NativeRoot {
   @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
 
   private avSession: HarmonyAVSessionManager | null = null;
+  /** onPageShow 首次触发（应用首亮）不算热启动，避免与 aboutToAppear 的 load 重复 */
+  private uiShown: boolean = false;
 
   /** 避让区 px → vp（走 UIContext 实例方法，全局 px2vp 已弃用） */
   private avoidVp(px: number): number {
@@ -59,6 +61,15 @@ struct NativeRoot {
 
   aboutToDisappear(): void {
     this.avSession?.destroy();
+  }
+
+  /** 热启动（后台 → 前台）：发一次首页刷新信号。离线时 HomePage 重拉失败会挂离线提示行 */
+  onPageShow(): void {
+    if (this.uiShown) {
+      AppState.shared().bumpHomeRefresh();
+    } else {
+      this.uiShown = true;
+    }
   }
 
   /** 返回手势/返回键：先关最上层浮层，全关了才交给系统 */

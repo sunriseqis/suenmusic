@@ -24,7 +24,11 @@ const DOMAIN = 0x0000;
  */
 class CardControlResult implements rpc.Parcelable {
   marshalling(sequence: rpc.MessageSequence): boolean {
-    sequence.writeInt(0);
+    try {
+      sequence.writeInt(0);
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'CardControlResult.marshalling 失败: %{public}s', JSON.stringify(e));
+    }
     return true;
   }
 

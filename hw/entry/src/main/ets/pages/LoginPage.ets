@@ -1,7 +1,7 @@
 import { AppState } from '../viewmodel/AppState';
-import { APIClient, ApiError } from '../core/APIClient';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
+import { Copy } from '../common/Copy';
 
 /** 登录页（S2：地址 + 账号 + 口令；多服务端编辑放 S3） */
 @Component
@@ -33,8 +33,9 @@ export struct LoginPage {
     try {
       await AppState.shared().login(this.address, this.username, this.password);
     } catch (e) {
-      const apiErr = e as ApiError;
-      this.err = apiErr.message === undefined ? '登录失败' : apiErr.message;
+      // 登录页要服务端的原始 message（「用户名或密码错误」这类），
+      // 不能被「登录已失效」的会话过期话术覆盖（describeError 第 2 参）
+      this.err = Copy.describeError(e, true);
       hilog.warn(0x0000, 'LoginPage', '登录失败: %{public}s', this.err);
     } finally {
       this.busy = false;
