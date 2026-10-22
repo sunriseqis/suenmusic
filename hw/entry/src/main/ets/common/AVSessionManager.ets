@@ -67,8 +67,6 @@ interface PlaybackStateJsonData {
 class HarmonyAVSessionManager {
   private session: avSession.AVSession | null = null;
   private context: common.UIAbilityContext;
-  /** 页面就绪后的"回灌脚本"钩子。原生化后没有 WebView 可反控，默认空实现（保留接口便于将来接回）。 */
-  private runPageScript: ((script: string) => void) | null;
   private currentPixelMap: image.PixelMap | null = null;
   private currentCoverUrl: string = '';
   private currentMetadata: avSession.AVMetadata | null = null;
@@ -135,9 +133,8 @@ class HarmonyAVSessionManager {
   private lyricCacheSource: string = '';
   private lyricCacheLines: LyricLine[] = [];
 
-  constructor(context: common.UIAbilityContext, runPageScript: ((script: string) => void) | null = null) {
+  constructor(context: common.UIAbilityContext) {
     this.context = context;
-    this.runPageScript = runPageScript;
   }
 
   async init(): Promise<void> {
@@ -304,15 +301,9 @@ class HarmonyAVSessionManager {
   /**
    * 会话指令统一出口（锁屏 / 播控中心 / 车机按钮都走这里）。
    *
-   * 原生化之前指令被回灌进 WebView（window.__suenAudioControl）；现在
-   * 没有网页可反控，必须直连播放内核 —— 否则锁屏按钮会"点了没反应"。
-   * runPageScript 非 null 时仍走网页回灌（保留给 WebView 回退壳的将来用途）。
+   * 直连播放内核。WebView 壳已删（T6 / S5 §三），没有网页可反控。
    */
   private dispatchControl(action: string, param?: number): void {
-    if (this.runPageScript !== null) {
-      this.dispatchWebControl(action, param);
-      return;
-    }
     const core = MediaPlayerCore.shared();
     if (action === 'play') { core.play(); }
     else if (action === 'pause') { core.pause(); }
@@ -320,20 +311,6 @@ class HarmonyAVSessionManager {
     else if (action === 'next') { core.next(); }
     else if (action === 'prev') { core.prev(); }
     else if (action === 'seek' && typeof param === 'number') { core.seek(param); }
-  }
-
-  private dispatchWebControl(action: string, param?: number): void {
-    try {
-      let script = '';
-      if (action === 'seek' && typeof param === 'number') {
-        script = `if (window.__suenAudioControl) { window.__suenAudioControl.seek(${param}); }`;
-      } else {
-        script = `if (window.__suenAudioControl) { window.__suenAudioControl.${action}(); }`;
-      }
-      if (this.runPageScript !== null) { this.runPageScript(script); }
-    } catch (e) {
-      hilog.error(DOMAIN, TAG, 'Failed to run web control script: %{public}s', JSON.stringify(e));
-    }
   }
 
   /**

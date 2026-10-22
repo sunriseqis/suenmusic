@@ -2,7 +2,7 @@
  * 鸿蒙原生客户端入口（S2；S4 打磨：Tab 切换动效/浮层转场/冷启动延后）。
  *
  * **这里没有 ArkWeb、没有 WebView** —— 全原生迭代的前提。
- * 旧 `pages/Index.ets`（WebView 壳）保留在原处作为回退路径，S2/S3 验收通过后删除。
+ * 旧 `pages/Index.ets`（WebView 壳）已于 T6（S5 §三，2026-10-22）删除，无回退路径。
  * S3 增量 2 起 Tab 扩为 5 个：首页 / 搜索 / 收藏 / 每日 / 我的（顺序与名称固定）。
  */
 
@@ -56,7 +56,7 @@ struct NativeRoot {
     setTimeout(() => {
       // `getContext(this)` 已弃用；从 UIContext 取宿主 Context
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
-      this.avSession = new HarmonyAVSessionManager(ctx, null);
+      this.avSession = new HarmonyAVSessionManager(ctx);
       this.avSession.init();
       // 播放内核需要 context 拿 filesDir（缓存）与 AVSession（锁屏/长时任务）
       MediaPlayerCore.shared().init(ctx, this.avSession);
