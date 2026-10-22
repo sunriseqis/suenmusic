@@ -13,6 +13,7 @@ import { ServerCandidate } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Dim } from '../common/Dimension';
 import { K_BASE_URL } from '../viewmodel/AppState';
+import { NeuInput } from './NeuInput';
 
 /** 探测四态 */
 const ST_UNKNOWN: number = 0;
@@ -22,8 +23,6 @@ const ST_BAD: number = 3;
 
 @Component
 export struct ServerListPage {
-  @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
-  @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
   @State serverList: ServerCandidate[] = [];
   /** 与 serverList 平行的探测状态数组（整组替换触发刷新） */
   @State status: number[] = [];
@@ -38,11 +37,6 @@ export struct ServerListPage {
   @State notice: string = '';
 
   onClose: () => void = () => {};
-
-  /** 避让区 px → vp（走 UIContext 实例方法，全局 px2vp 已弃用） */
-  private avoidVp(px: number): number {
-    return this.getUIContext().px2vp(px);
-  }
 
   aboutToAppear(): void {
     const api = APIClient.shared();
@@ -104,6 +98,16 @@ export struct ServerListPage {
     if (v === ST_OK) { return Tokens.accent; }
     if (v === ST_BAD) { return '#E5484D'; }
     return Tokens.text2;
+  }
+
+  /** 当前在用服务端的显示名（列表只显名称不显地址；找不到回退地址本身） */
+  private currentName(): string {
+    for (let i = 0; i < this.serverList.length; i++) {
+      if (this.serverList[i].url === this.currentBase) {
+        return this.serverList[i].name;
+      }
+    }
+    return this.currentBase.length > 0 ? this.currentBase : '未设置';
   }
 
   private normalizeUrl(raw: string): string {
@@ -349,91 +353,93 @@ export struct ServerListPage {
     Column({ space: Dim.s2 }) {
       Row({ space: Dim.s2 }) {
         Circle({ width: Dim.s2, height: Dim.s2 }).fill(this.statusColor(i))
-        Text(s.name).fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
+        Text(s.name).fontSize(Dim.fsBody).fontColor(Tokens.text1).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
         if (s.url === this.currentBase) {
           Text('当前')
             .fontSize(Dim.fsCaption)
-            .fontColor(Tokens.accent)
-            .padding({ left: Dim.s1, right: Dim.s1, top: Dim.s0, bottom: Dim.s0 })
-            .borderRadius(Dim.radiusRow)
+            .fontColor(Tokens.accentText)
+            .padding({ left: Dim.s2, right: Dim.s2, top: Dim.s0, bottom: Dim.s0 })
+            .borderRadius(Dim.radiusPill)
             .backgroundColor(Tokens.panel2)
         }
-        Blank()
         Text(this.statusText(i)).fontSize(Dim.fsCaption).fontColor(this.statusColor(i))
       }
       .width('100%')
 
-      Text(s.url)
-        .fontSize(Dim.fsMinor)
-        .fontColor(Tokens.text2)
-        .maxLines(1)
-        .textOverflow({ overflow: TextOverflow.Ellipsis })
-
-      // 行内操作键：可点区域统一 44vp（S4 §三）
+      // 行内操作键：ghost pill（透明底 + 发丝边，web 同款）；删除独立红色
       Row({ space: Dim.s2 }) {
         if (s.url !== this.currentBase) {
           Button('切换')
-            .height(Dim.touchMin)
+            .height(Dim.btnMd)
             .fontSize(Dim.fsMinor)
-            .backgroundColor(Tokens.panel2)
-            .fontColor(Tokens.accent)
+            .backgroundColor(Color.Transparent)
+            .fontColor(Tokens.accentText)
+            .border({ width: Dim.hairline, color: Tokens.line })
+            .borderRadius(Dim.radiusPill)
             .accessibilityText(`切换到 ${s.name}`)
             .onClick(() => { this.confirmSwitch(s.url); })
         }
-        Button('测试连接')
-          .height(Dim.touchMin)
+        Button('测试')
+          .height(Dim.btnMd)
           .fontSize(Dim.fsMinor)
-          .backgroundColor(Tokens.panel2)
+          .backgroundColor(Color.Transparent)
           .fontColor(Tokens.text1)
+          .border({ width: Dim.hairline, color: Tokens.line })
+          .borderRadius(Dim.radiusPill)
           .accessibilityText(`测试 ${s.name} 的连接`)
           .onClick(() => { this.probeOne(i); })
         Button('编辑')
-          .height(Dim.touchMin)
+          .height(Dim.btnMd)
           .fontSize(Dim.fsMinor)
-          .backgroundColor(Tokens.panel2)
+          .backgroundColor(Color.Transparent)
           .fontColor(Tokens.text1)
+          .border({ width: Dim.hairline, color: Tokens.line })
+          .borderRadius(Dim.radiusPill)
           .accessibilityText(`编辑 ${s.name}`)
           .onClick(() => { this.startEdit(i); })
         Blank()
         Button('删除')
-          .height(Dim.touchMin)
+          .height(Dim.btnMd)
           .fontSize(Dim.fsMinor)
-          .backgroundColor(Tokens.panel2)
+          .backgroundColor(Color.Transparent)
           .fontColor('#E5484D')
+          .border({ width: Dim.hairline, color: Tokens.line })
+          .borderRadius(Dim.radiusPill)
           .accessibilityText(`删除服务器 ${s.name}`)
           .onClick(() => { this.deleteServer(i); })
       }
       .width('100%')
     }
     .width('100%')
-    .padding(Dim.s4)
-    .borderRadius(Dim.radiusMd)
-    .backgroundColor(Tokens.panel)
-    .margin({ left: Dim.s3, right: Dim.s3, top: Dim.s2 })
+    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+    .border(i > 0
+      ? { width: { top: Dim.hairline }, color: { top: Tokens.line } }
+      : { width: 0 })
   }
 
   @Builder
   addForm() {
     Column({ space: Dim.s2 }) {
       Text(this.editingIndex >= 0 ? '编辑服务器' : '新增服务器')
-        .fontSize(Dim.fsSub).fontColor(Tokens.text1)
-      TextInput({ text: this.newName, placeholder: '名称（可选，如：客厅主机）' })
-        .height(Dim.inputH)
-        .fontSize(Dim.fsBody)
-        .backgroundColor(Tokens.panel2)
-        .onChange((v: string) => { this.newName = v; })
-      TextInput({ text: this.newUrl, placeholder: '地址，如 http://192.168.1.10:3210' })
-        .height(Dim.inputH)
-        .fontSize(Dim.fsBody)
-        .backgroundColor(Tokens.panel2)
-        .onChange((v: string) => { this.newUrl = v; })
+        .fontSize(Dim.fsSub)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(Tokens.text1)
+        .width('100%')
+      NeuInput({ content: this.newName, placeholder: '名称（可选，如：客厅主机）' })
+        .width('100%')
+      NeuInput({ content: this.newUrl, placeholder: '地址，如 http://192.168.1.10:3210' })
+        .width('100%')
       Row({ space: Dim.s2 }) {
         Button('取消')
+          .layoutWeight(1)
           .height(Dim.touchMin)
-          .fontSize(Dim.fsBody)
-          .backgroundColor(Tokens.panel2)
+          .fontSize(Dim.fsSub)
+          .backgroundColor(Color.Transparent)
           .fontColor(Tokens.text1)
+          .border({ width: Dim.hairline, color: Tokens.line })
+          .accessibilityText('取消编辑')
           .onClick(() => {
             this.adding = false;
             this.editingIndex = -1;
@@ -441,42 +447,54 @@ export struct ServerListPage {
             this.newUrl = '';
           })
         Button(this.editingIndex >= 0 ? '保存' : '保存并检测')
+          .layoutWeight(1)
           .height(Dim.touchMin)
-          .fontSize(Dim.fsBody)
+          .fontSize(Dim.fsSub)
           .backgroundColor(Tokens.accent)
           .fontColor(Tokens.bg)
+          .accessibilityText('保存服务器')
           .onClick(() => { this.saveForm(); })
       }
       .width('100%')
     }
     .width('100%')
-    .padding(Dim.s3)
+    .padding(Dim.s4)
     .borderRadius(Dim.radiusMd)
-    .backgroundColor(Tokens.panel)
-    .margin({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s3 })
+    .backgroundColor(Tokens.bg)
+    .border({ width: Dim.hairline, color: Tokens.line })
+  }
+
+  /** 弹层顶把手（与 SettingsPage 四张弹层同款，web Sheet .grip） */
+  @Builder
+  sheetGrip() {
+    Row()
+      .width(Dim.gripW)
+      .height(Dim.gripH)
+      .borderRadius(Dim.radiusPill)
+      .backgroundColor(Tokens.line)
   }
 
   build() {
-    Column() {
-      Row() {
-        Button('返回')
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column({ space: Dim.s3 }) {
+        this.sheetGrip()
+
+        // 弹层头（与 SettingsPage sheetHead 同族：标题 + 右侧图标钮）
+        Row() {
+          Text('服务端管理')
+            .fontSize(Dim.fsSection)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Tokens.text1)
+            .layoutWeight(1)
+          Row() {
+            SymbolGlyph($r('sys.symbol.plus'))
+              .fontSize(Dim.iconMd)
+              .fontColor([Tokens.accentText])
+          }
+          .width(Dim.touchMin)
           .height(Dim.touchMin)
-          .fontSize(Dim.fsBody)
-          .backgroundColor(Tokens.panel)
-          .fontColor(Tokens.text1)
-          .accessibilityText('返回上一页')
-          .onClick(() => { this.onClose(); })
-        Blank()
-        Text('服务端管理')
-          .fontSize(Dim.fsSection)
-          .fontWeight(FontWeight.Medium)
-          .fontColor(Tokens.text1)
-        Blank()
-        Button('新增')
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsBody)
-          .backgroundColor(Tokens.panel)
-          .fontColor(Tokens.accent)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
           .accessibilityText('新增服务器')
           .onClick(() => {
             this.editingIndex = -1;
@@ -484,54 +502,65 @@ export struct ServerListPage {
             this.newUrl = '';
             this.adding = !this.adding;
           })
+          Row() {
+            SymbolGlyph($r('sys.symbol.xmark'))
+              .fontSize(Dim.iconMd)
+              .fontColor([Tokens.text2])
+          }
+          .width(Dim.touchMin)
+          .height(Dim.touchMin)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+          .accessibilityText('关闭')
+          .onClick(() => { this.onClose(); })
+        }
+        .width('100%')
+
+        Text('当前：' + this.currentName())
+          .fontSize(Dim.fsMinor)
+          .fontColor(Tokens.text2)
+          .width('100%')
+
+        if (this.notice.length > 0) {
+          Text(this.notice)
+            .fontSize(Dim.fsMinor)
+            .fontColor(Tokens.accentText)
+            .width('100%')
+        }
+
+        if (this.serverList.length === 0) {
+          Column({ space: Dim.s1 }) {
+            Text('还没有配置服务器').fontSize(Dim.fsBody).fontColor(Tokens.text2)
+            Text('点右上角「+」添加一个').fontSize(Dim.fsCaption).fontColor(Tokens.text2)
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+        } else {
+          List() {
+            ForEach(this.serverList, (s: ServerCandidate, i: number) => {
+              ListItem() {
+                this.serverRow(s, i)
+              }
+            }, (s: ServerCandidate) => s.url + '|' + s.name)
+          }
+          .width('100%')
+          .constraintSize({ maxHeight: Dim.serverListMax })
+          .backgroundColor(Tokens.bg)
+          .borderRadius(Dim.radiusMd)
+          .border({ width: Dim.hairline, color: Tokens.line })
+          .clip(true)
+        }
+
+        if (this.adding) {
+          this.addForm()
+        }
       }
       .width('100%')
-      .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
-
-      Text('当前：' + (this.currentBase.length > 0 ? this.currentBase : '未设置'))
-        .fontSize(Dim.fsMinor)
-        .fontColor(Tokens.text2)
-        .width('100%')
-        .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s0, bottom: Dim.s0 })
-
-      if (this.notice.length > 0) {
-        Text(this.notice)
-          .fontSize(Dim.fsMinor)
-          .fontColor(Tokens.accent)
-          .width('100%')
-          .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s0, bottom: Dim.s0 })
-      }
-
-      if (this.serverList.length === 0) {
-        Column({ space: Dim.s2 }) {
-          Text('还没有配置服务器').fontSize(Dim.fsSub).fontColor(Tokens.text2)
-          Text('点右上角「新增」添加一个').fontSize(Dim.fsCaption).fontColor(Tokens.text2)
-        }
-        .width('100%')
-        .layoutWeight(1)
-        .justifyContent(FlexAlign.Center)
-      } else {
-        List() {
-          ForEach(this.serverList, (s: ServerCandidate, i: number) => {
-            ListItem() {
-              this.serverRow(s, i)
-            }
-          }, (s: ServerCandidate) => s.url + '|' + s.name)
-        }
-        .width('100%')
-        .layoutWeight(1)
-      }
-
-      if (this.adding) {
-        this.addForm()
-      }
+      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s4 })
+      .backgroundColor(Tokens.panel)
+      .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
     }
     .width('100%')
     .height('100%')
-    .backgroundColor(Tokens.bg)
-    .padding({
-      top: this.avoidVp(this.topAvoidHeight),
-      bottom: this.avoidVp(this.bottomAvoidHeight)
-    })
   }
 }

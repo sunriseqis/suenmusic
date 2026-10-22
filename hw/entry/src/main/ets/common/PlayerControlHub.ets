@@ -25,6 +25,16 @@ export interface CardControlRequest {
 const VALID_CONTROLS: string[] = ['play', 'pause', 'toggle', 'next', 'prev', 'favorite'];
 
 /**
+ * 冷启动期暂存的指令（T10 续播）。
+ *
+ * 时序坑：卡片 router 冷启动的指令在 EntryAbility.onCreate 就到达，而播放内核
+ * 要等 NativeRoot 首帧后（aboutToAppear setTimeout）才 init，且续播要等
+ * AppState.bootstrap 恢复 baseUrl/登录态。期间收到的指令先存这里，
+ * 由 NativeRoot 在 init + bootstrap 完成后调用 applyPendingCardControl() 应用。
+ */
+let pendingControl: string | null = null;
+
+/**
  * 收到一条控制指令（EntryAbility callee / want 参数转发而来）。
  * 指令本身是幂等的（play 在播放中是空操作），重放不会造成状态错乱。
  */
@@ -33,12 +43,26 @@ export function dispatchCardControl(control: string): void {
     hilog.warn(DOMAIN, TAG, '忽略未知控制指令：%{public}s', control);
     return;
   }
-  hilog.info(DOMAIN, TAG, '转发控制指令至播放内核：%{public}s', control);
   const core = MediaPlayerCore.shared();
+  if (!core.ready) {
+    pendingControl = control;
+    hilog.info(DOMAIN, TAG, '播放内核未就绪，暂存指令：%{public}s', control);
+    return;
+  }
+  hilog.info(DOMAIN, TAG, '转发控制指令至播放内核：%{public}s', control);
   if (control === 'play') { core.play(); }
   else if (control === 'pause') { core.pause(); }
   else if (control === 'toggle') { core.toggle(); }
   else if (control === 'next') { core.next(); }
   else if (control === 'prev') { core.prev(); }
   else { hilog.info(DOMAIN, TAG, '收藏指令待收藏 API 接线：%{public}s', control); }
+}
+
+/** NativeRoot 在 init + bootstrap 完成后调用：应用冷启动期暂存的卡片指令 */
+export function applyPendingCardControl(): void {
+  if (pendingControl === null) { return; }
+  const control = pendingControl;
+  pendingControl = null;
+  hilog.info(DOMAIN, TAG, '应用暂存的卡片指令：%{public}s', control);
+  dispatchCardControl(control);
 }

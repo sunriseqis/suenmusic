@@ -44,6 +44,10 @@ export class Dim {
   static readonly coverSm = 44;
   static readonly coverBar = 40;
   static readonly coverXl = 280;
+  /** 有推荐理由卡时的收缩封面（web `.has-reco .cover-wrap`：min(52vw,208px) 按比例折算） */
+  static readonly coverReco = 194;
+  /** 迷你条封面（web mini-cover 42px） */
+  static readonly coverMini = 42;
   static readonly iconSm = 15;
   static readonly iconMd = 20;
   static readonly iconLg = 22;
@@ -56,6 +60,17 @@ export class Dim {
   static readonly btnPlayW = 96;
   static readonly inputH = 40;
   static readonly seqW = 24;
+  /** 两级不喜欢浮层宽（web dislike-popover 210px） */
+  static readonly popW = 210;
+  /** 迷你条底部内嵌进度条高（web mini-progress 2px） */
+  static readonly miniProgressH = 2;
+  /** Tab 栏内格圆角（web calc(r-md - 3px) = 9px） */
+  static readonly radiusTab = 9;
+  /** Tab active 琥珀指示条（web .tab.active::after 12×2） */
+  static readonly tabIndicatorW = 12;
+  static readonly tabIndicatorH = 2;
+  /** 分段控件（NeuTabs）格子高（web .tab min-height 32px） */
+  static readonly segH = 32;
 
   // ---- 哑光质感（T5.5，web neu.css 同款语义） ----
   /** 发丝线宽（1px 描边/顶沿内高光条的厚度） */
@@ -66,6 +81,16 @@ export class Dim {
   static readonly posterScrimRatio = 0.5;
   /** 指示点边长（web rail-dot 6px 方点） */
   static readonly dot = 6;
+
+  /** 弹层顶把手（web Sheet .grip 36×3） */
+  static readonly gripW = 36;
+  static readonly gripH = 3;
+  /** 弹层表单左侧 label 列宽（web .field label 60px） */
+  static readonly fieldLabelW = 60;
+  /** 弹层内明细列表最大高（超出滚动；备份/去重弹层共用） */
+  static readonly sheetListMax = 320;
+  /** 服务端管理弹层列表上限（约 3 条服务器行的高度，超出滚动） */
+  static readonly serverListMax = 330;
 
   // ---- 歌词上下留白（vp）：让第一行 / 最后一行也能滚到屏幕中间 ----
   static readonly lyricPadTop = 120;

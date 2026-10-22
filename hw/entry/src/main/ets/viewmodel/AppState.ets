@@ -32,6 +32,13 @@ export const K_LYRIC_TRANS = 'lyric_translation';
 export const K_AUTO_FAILOVER = 'auto_failover';
 /** 首页刷新信号（AppStorage 通道，T4）：NativeRoot 热启动回前台时 +1，HomePage @Watch 后重拉 */
 export const K_HOME_REFRESH = 'home_refresh';
+/** 每日推荐刷新信号（AppStorage 通道，T10）：播放页 dislike 当前曲后 +1，DailyPage @Watch 后重拉 */
+export const K_DAILY_REFRESH = 'daily_refresh';
+/** 上一次画像调优提示词（AppStorage 通道，T10 批次 C）：调优区左侧回显，跨页面存活 */
+export const K_LAST_TUNE = 'last_tune_prompt';
+
+/** WebDAV 备份配置（JSON 字符串：{url,user,pass}）的偏好键（T10 批次 C） */
+const PREF_WEBDAV = 'webdav_config';
 
 /** 首页快照的偏好键（成功拉取 /api/home 后写入，离线启动时先渲染它） */
 const PREF_HOME_SNAPSHOT = 'home_snapshot';
@@ -130,6 +137,12 @@ export class AppState {
     AppStorage.setOrCreate<number>(K_HOME_REFRESH, rev + 1);
   }
 
+  /** 每日推荐刷新信号 +1（播放页 dislike 当前曲后调，DailyPage 监听它重拉当日歌单） */
+  bumpDailyRefresh(): void {
+    const rev = AppStorage.get<number>(K_DAILY_REFRESH) ?? 0;
+    AppStorage.setOrCreate<number>(K_DAILY_REFRESH, rev + 1);
+  }
+
   // ---------------- 首页离线快照（T4 第 1 项） ----------------
 
   /** 读快照（无/损坏返回 null）。离线冷启动先渲染它，再后台尝试刷新 */
@@ -198,6 +211,31 @@ export class AppState {
       return pref.getSync(PREF_LYRIC_TRANS, true) as boolean;
     } catch (e) {
       return true;
+    }
+  }
+
+  // ---------------- WebDAV 备份配置（T10 批次 C） ----------------
+
+  /** 读 WebDAV 配置（无/损坏返回空串；设置页解析成 url/user/pass 三栏） */
+  readWebdav(): string {
+    const pref = this.pref;
+    if (pref === null) { return ''; }
+    try {
+      return pref.getSync(PREF_WEBDAV, '') as string;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /** 写 WebDAV 配置（设置页任意一次上传/下载前都会先保存，用户填了就该记住） */
+  saveWebdav(json: string): void {
+    const pref = this.pref;
+    if (pref === null) { return; }
+    try {
+      pref.putSync(PREF_WEBDAV, json);
+      pref.flush();
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '写 WebDAV 配置失败: %{public}s', JSON.stringify(e));
     }
   }
 }

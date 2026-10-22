@@ -62,6 +62,17 @@ export struct TrackItem {
   /** 过阈值回调（松手且 swipeX ≥ 85 时触发一次） */
   onSwipeToggle: (() => Promise<boolean>) | null = null;
   onTap: () => void = () => {};
+  /** 专属页（每日推荐）行：行尾常显「不喜欢」双图标钮（web TrackRow act-wide 同构，时长列让位、双钮常显） */
+  dislikeable: boolean = false;
+  /** 「不喜欢这首歌」（web dislike-track） */
+  onDislikeTrack: () => void = () => {};
+  /** 「不喜欢该歌手」（web dislike-artist） */
+  onDislikeArtist: () => void = () => {};
+
+  /** 「不喜欢这首歌」按钮按压染色（accent 反馈） */
+  @State disTrackPressed: boolean = false;
+  /** 「不喜欢该歌手」按钮按压染色 */
+  @State disArtistPressed: boolean = false;
 
   /** 最近一次手势结束时间：吞掉手势结束后的合成 click */
   private lastSwipeEndAt: number = 0;
@@ -119,6 +130,46 @@ export struct TrackItem {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
+        // 每日推荐行：行尾常显双「不喜欢」钮（点击吞掉冒泡，不触发行点击切歌）
+        if (this.dislikeable) {
+          Row({ space: Dim.s1 }) {
+            SymbolGlyph($r('sys.symbol.heart_slash'))
+              .fontSize(Dim.iconSm)
+              .fontColor([this.disTrackPressed ? Tokens.accent : Tokens.text2])
+              .height('100%')
+              .padding({ left: Dim.s2, right: Dim.s2 })
+              .alignSelf(ItemAlign.Center)
+              .accessibilityText('不喜欢这首歌')
+              .onClick(() => {
+                this.onDislikeTrack();
+              })
+              .onTouch((e: TouchEvent) => {
+                if (e.type === TouchType.Down) {
+                  this.disTrackPressed = true;
+                } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+                  this.disTrackPressed = false;
+                }
+              })
+            SymbolGlyph($r('sys.symbol.person_xmark'))
+              .fontSize(Dim.iconSm)
+              .fontColor([this.disArtistPressed ? Tokens.accent : Tokens.text2])
+              .height('100%')
+              .padding({ left: Dim.s2, right: Dim.s2 })
+              .alignSelf(ItemAlign.Center)
+              .accessibilityText('不喜欢该歌手')
+              .onClick(() => {
+                this.onDislikeArtist();
+              })
+              .onTouch((e: TouchEvent) => {
+                if (e.type === TouchType.Down) {
+                  this.disArtistPressed = true;
+                } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+                  this.disArtistPressed = false;
+                }
+              })
+          }
+          .height('100%')
+        }
       }
       .width('100%')
       .height(Dim.rowHeight)

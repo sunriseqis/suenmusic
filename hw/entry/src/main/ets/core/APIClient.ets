@@ -17,7 +17,10 @@ import { common } from '@kit.AbilityKit';
 import {
   AuthConfig, AuthSession, FavoritePage, HomeData, PublicUser,
   ResolveResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
-  SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply, Track
+  SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
+  DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
+  DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
+  SourceStatus, OkReply
 } from './Models';
 
 const TAG = 'SuenMusic_API';
@@ -55,6 +58,13 @@ interface FavoritePostBody {
 /** 批量查询收藏状态请求体（ids ≤ 500） */
 interface IdsBody {
   ids: string[];
+}
+
+/** 不喜欢请求体（`/api/recommend/dislike`，type = track | artist） */
+interface DislikeBody {
+  type: string;
+  id: string;
+  name: string;
 }
 
 export class ApiError extends Error {
@@ -323,7 +333,7 @@ export class APIClient {
 
   private async request<T>(
     path: string, method: http.RequestMethod, body: string,
-    authed: boolean, retried: boolean
+    authed: boolean, retried: boolean, timeoutOverride: number = 0
   ): Promise<T> {
     // 令牌提前续期（T4 第 8 项）：离过期不足 60 秒就先刷新再发请求，
     // 省掉"必 401 → 刷新 → 重放"一个来回。续期失败（如离线）不拦请求，
@@ -336,20 +346,23 @@ export class APIClient {
         hilog.warn(DOMAIN, TAG, '令牌提前续期失败（继续用旧令牌）: %{public}s', JSON.stringify(e));
       }
     }
-    const timeout = APIClient.isPrivate(this.baseUrl) ? 4000 : 20000;
+    // timeoutOverride > 0：长任务（AI 调优 700s、QQ 歌单导入上游慢）不走 4s/20s 快失败
+    const timeout = timeoutOverride > 0
+      ? timeoutOverride
+      : (APIClient.isPrivate(this.baseUrl) ? 4000 : 20000);
     let res: http.HttpResponse;
     try {
       res = await this.raw(path, method, body, authed, timeout);
     } catch (e) {
       if (!retried && await this.failoverIfNeeded()) {
-        return this.request<T>(path, method, body, authed, true);
+        return this.request<T>(path, method, body, authed, true, timeoutOverride);
       }
       throw new ApiError(0, 'network', '连不上服务端，请检查网络或服务器地址');
     }
 
     if (res.responseCode === 401 && authed && !retried) {
       await this.refresh();
-      return this.request<T>(path, method, body, authed, true);
+      return this.request<T>(path, method, body, authed, true, timeoutOverride);
     }
 
     if (res.responseCode < 200 || res.responseCode >= 300) {
@@ -548,5 +561,100 @@ export class APIClient {
   /** 每日推荐（只读，歌单由服务端每天 00:30 产出；`shortfall` 不是错误） */
   async dailyRecommend(): Promise<DailyRecommend> {
     return this.request<DailyRecommend>('/api/recommend/daily', http.RequestMethod.GET, '', true, false);
+  }
+
+  /**
+   * 不喜欢调优（服务端立即把它移出当日歌单并永久过滤）。
+   * `type = 'track'`：这首歌；`type = 'artist'`：该歌手（id 传 `ar[0].mid`），
+   * 服务端还会从用户的曲库归属里删链，建库器不再为其拉这位歌手。
+   */
+  async dislike(type: string, id: string, name: string): Promise<DislikeReply> {
+    const payload: DislikeBody = { type: type, id: id, name: name };
+    return this.request<DislikeReply>('/api/recommend/dislike', http.RequestMethod.POST,
+      JSON.stringify(payload), true, false);
+  }
+
+  // ---------------- 设置页（T10 批次 C：黑名单 / 导入 / 去重 / 备份 / 画像 / 音源） ----------------
+
+  /** 黑名单列表（歌曲 + 歌手两类混排，按 createdAt 倒序） */
+  async fetchDislikes(): Promise<DislikeRow[]> {
+    const r = await this.request<DislikeListReply>('/api/recommend/dislikes',
+      http.RequestMethod.GET, '', true, false);
+    return r.dislikes;
+  }
+
+  /** 黑名单恢复（DELETE /api/recommend/dislike/:type/:id，幂等） */
+  async undoDislike(type: string, id: string): Promise<OkReply> {
+    return this.request<OkReply>(
+      '/api/recommend/dislike/' + encodeURIComponent(type) + '/' + encodeURIComponent(id),
+      http.RequestMethod.DELETE, '', true, false);
+  }
+
+  /** QQ 歌单导入收藏（上游拉歌单详情可能慢，60s 预算） */
+  async importQQPlaylist(link: string): Promise<QQImportReply> {
+    interface LinkBody { link: string; }
+    const payload: LinkBody = { link: link };
+    return this.request<QQImportReply>('/api/favorites/import-qq-playlist',
+      http.RequestMethod.POST, JSON.stringify(payload), true, false, 60000);
+  }
+
+  /** 去重预检（服务端扫收藏，按「歌名 + 主歌手」分组，保留最早收藏） */
+  async dedupePreview(): Promise<DedupePreviewReply> {
+    return this.request<DedupePreviewReply>('/api/favorites/dedup/preview',
+      http.RequestMethod.POST, '', true, false);
+  }
+
+  /** 执行去重（服务端重扫分组后删除冗余；与预检之间收藏可能已变化，以服务端结果为准） */
+  async dedupeApply(): Promise<DedupeReply> {
+    return this.request<DedupeReply>('/api/favorites/dedup',
+      http.RequestMethod.POST, '', true, false);
+  }
+
+  /** 收藏曲目内容（备份导出用，一次拉齐 ≤ 500 首） */
+  async favoriteTracks(): Promise<Track[]> {
+    const r = await this.request<FavoriteTracksReply>('/api/favorites/tracks?limit=500',
+      http.RequestMethod.GET, '', true, false);
+    return r.tracks;
+  }
+
+  /** 批量回写收藏（备份导入用；服务端单次上限 500，这里自动分批，返回累计新增数） */
+  async importFavorites(tracks: Track[]): Promise<number> {
+    interface TracksBody { tracks: Track[]; }
+    let added = 0;
+    for (let start = 0; start < tracks.length; start += 500) {
+      const part = tracks.slice(start, start + 500);
+      if (part.length === 0) { continue; }
+      const payload: TracksBody = { tracks: part };
+      const r = await this.request<ImportFavoritesReply>('/api/favorites/import',
+        http.RequestMethod.POST, JSON.stringify(payload), true, false);
+      added += r.added;
+    }
+    return added;
+  }
+
+  /** 音乐画像（summary 为空串 = 尚未生成） */
+  async fetchPersona(): Promise<PersonaDetail> {
+    return this.request<PersonaDetail>('/api/ai/persona', http.RequestMethod.GET, '', true, false);
+  }
+
+  /**
+   * 画像调优。超时预算链：服务端模型调用 600s < 客户端 700s < Fastify 900s
+   * （web `api/ai.ts` 同款口径，客户端必须比服务端晚放弃，让服务端先给结论）。
+   */
+  async tunePersona(guidance: string): Promise<TuneReply> {
+    interface GuidanceBody { guidance: string; }
+    const payload: GuidanceBody = { guidance: guidance };
+    return this.request<TuneReply>('/api/ai/persona/tune', http.RequestMethod.POST,
+      JSON.stringify(payload), true, false, 700000);
+  }
+
+  /** B 站音源授权状态（只读；扫码/退出是 Web 面板管理员专属） */
+  async bilibiliStatus(): Promise<SourceStatus> {
+    return this.request<SourceStatus>('/api/bilibili/account', http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 网易云音源授权状态（只读，与 B 站同构） */
+  async neteaseStatus(): Promise<SourceStatus> {
+    return this.request<SourceStatus>('/api/netease/account', http.RequestMethod.GET, '', true, false);
   }
 }

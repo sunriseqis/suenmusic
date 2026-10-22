@@ -4,11 +4,11 @@ import { MediaPlayerCore } from '../core/MediaPlayerCore';
 import { DailyRecommend, Track } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy, parseAiHeader } from '../common/Copy';
-import { Dim, Motion } from '../common/Dimension';
+import { Dim } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
 import { SkeletonList } from './SkeletonList';
-import { AppState } from '../viewmodel/AppState';
+import { AppState, K_DAILY_REFRESH } from '../viewmodel/AppState';
 
 const TAG = 'SuenMusic_Daily';
 /** greeting 拆不出主标题时的回退页名（web parseAiHeader 默认值同款） */
@@ -19,7 +19,8 @@ const DEFAULT_HEADER_TITLE = '专属推荐';
  *
  * **`shortfall` 不是错误** —— 曲库不足是正常业务结果，界面给统一空态
  * （S4 §五：日历图标 + 引导文案），不重试、不报错。
- * 「播放全部」= 当日歌单整队入 `setQueue`，从第 1 首起播。
+ * 行尾「不喜欢」双钮（T10 批次 A）：track / artist 两级调优，
+ * 服务端落地后从「当日歌单 + 播放队列」同时摘掉（web Daily.vue 同口径）。
  */
 @Component
 export struct DailyPage {
@@ -28,10 +29,15 @@ export struct DailyPage {
   @State err: string = '';
   /** 已收藏曲目 id（右滑手势的文案/序号染色用，失败静默） */
   @State favIds: string[] = [];
-  /** 「播放全部」按压缩放动效（S4 §二） */
-  @State playAllPressed: boolean = false;
+  /** 播放页 dislike 当前曲后 +1（服务端已过滤，重拉即最新） */
+  @StorageProp(K_DAILY_REFRESH) @Watch('onDailyRev') dailyRev: number = 0;
 
   aboutToAppear(): void { this.load(); }
+
+  /** 播放页的 dislike 落地后重拉当日歌单（跨页同步，不靠切 Tab 触发） */
+  private onDailyRev(): void {
+    this.load();
+  }
 
   private async load(): Promise<void> {
     if (this.loading) { return; }
@@ -117,20 +123,70 @@ export struct DailyPage {
     }
   }
 
-  private async playAll(): Promise<void> {
-    const data = this.data;
-    if (data === null || data.tracks.length === 0) { return; }
-    let token = '';
+  // ---------------- 不喜欢调优（T10 批次 A，web Daily.vue dislikeTrack/dislikeArtist 同口径） ----------------
+
+  private showToast(message: string): void {
     try {
-      token = (await APIClient.shared().streamSessionToken()).token;
+      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
     } catch (e) {
-      hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
+      hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  /** 把一首歌从「当日歌单 + 播放队列」里同时摘掉。自然缩水，不补位。 */
+  private removeFromList(track: Track): void {
+    const core = MediaPlayerCore.shared();
+    const q = core.getQueueSnapshot();
+    for (let i = 0; i < q.length; i++) {
+      if (q[i].id === track.id) {
+        void core.removeAt(i);
+        break;
+      }
+    }
+    if (this.data === null) { return; }
+    const next: Track[] = [];
+    for (let i = 0; i < this.data.tracks.length; i++) {
+      if (this.data.tracks[i].id !== track.id) { next.push(this.data.tracks[i]); }
+    }
+    this.data.tracks = next;
+  }
+
+  private async dislikeTrack(track: Track): Promise<void> {
+    try {
+      await APIClient.shared().dislike('track', track.id, track.name);
+    } catch (e) {
+      this.showToast(Copy.describeError(e));
+      return;
+    }
+    this.showToast(`已不再推荐「${track.name}」`);
+    this.removeFromList(track);
+  }
+
+  private async dislikeArtist(track: Track): Promise<void> {
+    const first = track.ar.length > 0 ? track.ar[0] : null;
+    const mid = first === null ? '' : (first.mid ?? '');
+    const name = first === null ? '' : first.name;
+    if (mid.length === 0) {
+      this.showToast('这首曲目没有可识别的歌手信息');
+      return;
     }
     try {
-      await MediaPlayerCore.shared().setQueue(data.tracks, 0, token);
+      await APIClient.shared().dislike('artist', mid, name);
     } catch (e) {
-      this.err = Copy.describeError(e);
-      hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
+      this.showToast(Copy.describeError(e));
+      return;
+    }
+    this.showToast(`已不再推荐歌手「${name}」的相关歌曲`);
+    if (this.data === null) { return; }
+    // 该歌手的所有歌都从当日歌单与队列里移除（快照迭代，removeFromList 逐首摘）
+    const targets: Track[] = [];
+    for (let i = 0; i < this.data.tracks.length; i++) {
+      const t = this.data.tracks[i];
+      const a = t.ar.length > 0 ? t.ar[0] : null;
+      if (a !== null && (a.mid ?? '') === mid) { targets.push(t); }
+    }
+    for (let i = 0; i < targets.length; i++) {
+      this.removeFromList(targets[i]);
     }
   }
 
@@ -190,23 +246,6 @@ export struct DailyPage {
         .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
 
         if (this.data.tracks.length > 0) {
-          Button('播放全部')
-            .width('100%')
-            .height(Dim.touchMin)
-            .fontSize(Dim.fsSub)
-            .backgroundColor(Tokens.accent)
-            .fontColor(Tokens.bg)
-            .margin({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
-            // 按压缩放回弹（S4 §二：0.96，松手还原）
-            .scale({ x: this.playAllPressed ? Motion.pressScale : 1, y: this.playAllPressed ? Motion.pressScale : 1 })
-            .onTouch((e: TouchEvent) => {
-              if (e.type === TouchType.Down) {
-                this.playAllPressed = true;
-              } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
-                this.playAllPressed = false;
-              }
-            })
-            .onClick(() => { this.playAll(); })
           List({ space: 0 }) {
             ForEach(this.data.tracks, (t: Track, i: number) => {
               ListItem() {
@@ -215,6 +254,9 @@ export struct DailyPage {
                   index: i + 1,
                   coverSize: Dim.s5 * 2,
                   isFav: this.favIds.indexOf(t.id) >= 0,
+                  dislikeable: true,
+                  onDislikeTrack: () => { this.dislikeTrack(t); },
+                  onDislikeArtist: () => { this.dislikeArtist(t); },
                   onSwipeToggle: () => this.toggleFav(t),
                   onTap: () => { this.playAt(i); }
                 })

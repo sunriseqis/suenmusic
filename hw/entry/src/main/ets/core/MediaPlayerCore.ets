@@ -20,6 +20,7 @@ import { fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import { preferences } from '@kit.ArkData';
 import { Track, artistLine } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
@@ -27,6 +28,18 @@ import { APIClient } from './APIClient';
 
 const TAG = 'SuenMusic_Player';
 const DOMAIN = 0x0000;
+
+/** 播放会话持久化（冷启动续播，T10）：队列+下标低频整存，位置 5s 节流单存 */
+const PLAYER_PREFS = 'suenmusic_player';
+const SESSION_KEY = 'session';
+const POS_KEY = 'pos';
+const POS_PERSIST_INTERVAL_MS = 5000;
+
+/** 持久化的播放会话形状（preferences 'session' 键的 JSON） */
+interface PersistedSession {
+  tracks: Track[];
+  index: number;
+}
 
 /** AppStorage 键（UI 与卡片共用；卡片读的是 NowPlaying 快照，这里只服务 UI） */
 export const K_TITLE = 'np_title';
@@ -77,10 +90,32 @@ export class MediaPlayerCore {
   /** 上次向 AVSession 推送进度的时间（节流用，见 timeUpdate） */
   private lastStatePushAt: number = 0;
   private releasing: boolean = false;
+  // ---- 冷启动续播（T10：进程被系统收走后，卡片/播控指令恢复上次会话） ----
+  private prefs: preferences.Preferences | null = null;
+  /** init 内启动的偏好装载；restore 必须等它落地，否则冷启动首批指令读不到会话 */
+  private prefsReady: Promise<void> | null = null;
+  /** 上次持久化播放位置的时间（5s 节流） */
+  private lastPosPersistAt: number = 0;
+  /** 会话恢复中标志：防止恢复路径内的空队列分支再次进入 restore */
+  private restoring: boolean = false;
+  /** 歌词拉取序号：切歌后旧请求回来直接丢弃 */
+  private lyricSeq: number = 0;
 
   init(context: common.Context, av: HarmonyAVSessionManager): void {
     this.av = av;
     OfflineCache.shared().init(context);
+    this.prefsReady = this.loadPrefs(context);
+  }
+
+  /** init 是否已执行（PlayerControlHub 冷启动期据此暂存卡片指令） */
+  get ready(): boolean { return this.av !== null; }
+
+  private async loadPrefs(context: common.Context): Promise<void> {
+    try {
+      this.prefs = await preferences.getPreferences(context, PLAYER_PREFS);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '打开播放会话偏好失败: %{public}s', JSON.stringify(e));
+    }
   }
 
   /** 队列快照（副本）—— UI 只读，不允许直接改内部数组 */
@@ -101,6 +136,34 @@ export class MediaPlayerCore {
   /** 队列变化后自增版本号，驱动 UI 重新取快照 */
   private bumpQueue(): void {
     AppStorage.setOrCreate<number>(K_QUEUE_VERSION, Date.now());
+    this.persistSession();
+  }
+
+  /** 队列/下标变化即整存（低频：切歌、增删、排序才触发；restore 读回后也重存一次） */
+  private persistSession(): void {
+    const prefs = this.prefs;
+    if (prefs === null) { return; }
+    const data: PersistedSession = { tracks: this.queue, index: this.index };
+    prefs.put(SESSION_KEY, JSON.stringify(data))
+      .then(() => {
+        return prefs.flush();
+      })
+      .catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, TAG, '持久化播放队列失败: %{public}s', JSON.stringify(e));
+      });
+  }
+
+  /** 播放位置单存（高频：只写数值，不重写队列 JSON） */
+  private persistPosition(posMs: number): void {
+    const prefs = this.prefs;
+    if (prefs === null) { return; }
+    prefs.put(POS_KEY, Math.max(0, posMs))
+      .then(() => {
+        return prefs.flush();
+      })
+      .catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, TAG, '持久化播放位置失败: %{public}s', JSON.stringify(e));
+      });
   }
 
   /** 跳到指定下标并（可选）起播 */
@@ -234,6 +297,11 @@ export class MediaPlayerCore {
   }
 
   async play(): Promise<void> {
+    // 冷启动续播：进程被系统收走后队列全丢，先恢复上次会话再起播
+    if (this.queue.length === 0) {
+      await this.restoreSession('play');
+      return;
+    }
     const p = this.player;
     if (p === null) { return; }
     this.wantPlay = true;
@@ -261,6 +329,8 @@ export class MediaPlayerCore {
     // 官方建议：收到暂停后如果不再需要播放，主动取消长时任务，
     // 否则"申请了但没在播"会被系统判定异常并挂起
     await this.av?.stopContinuousTask();
+    // 暂停即落位置：进程若在后台被收走，续播从这里恢复
+    this.persistPosition(AppStorage.get<number>(K_POS) ?? 0);
     this.publishState();
   }
 
@@ -282,6 +352,11 @@ export class MediaPlayerCore {
   }
 
   async next(): Promise<void> {
+    // 冷启动续播：空队列时 next = 恢复会话并播下一首（从头，位置不跨曲恢复）
+    if (this.queue.length === 0) {
+      await this.restoreSession('next');
+      return;
+    }
     if (this.index + 1 >= this.queue.length) { return; }
     this.index += 1;
     this.bumpQueue();
@@ -302,6 +377,11 @@ export class MediaPlayerCore {
   }
 
   async prev(): Promise<void> {
+    // 冷启动续播：空队列时 prev = 恢复会话并播上一首
+    if (this.queue.length === 0) {
+      await this.restoreSession('prev');
+      return;
+    }
     if (this.index - 1 < 0) { return; }
     this.index -= 1;
     this.bumpQueue();
@@ -324,6 +404,52 @@ export class MediaPlayerCore {
     this.releaseOpenFile();
     await this.av?.stopContinuousTask();
     this.publishState();
+  }
+
+  /**
+   * 恢复上次播放会话（冷启动续播，T10）。
+   *
+   * 触发方：卡片/播控的 play/next/prev 指令在空队列时进入。流程：
+   * 读持久化队列+下标+位置 → 重新领流令牌（旧令牌随上一进程死掉）→
+   * play 意图带 `pendingSeekMs` 走 prepared 后 seek 到保存位置；
+   * next/prev 意图先挪下标、从头起播（位置不跨曲恢复）。
+   */
+  private async restoreSession(intent: string): Promise<void> {
+    if (this.restoring || this.queue.length > 0) { return; }
+    this.restoring = true;
+    try {
+      const ready = this.prefsReady;
+      if (ready !== null) { await ready; }
+      const prefs = this.prefs;
+      if (prefs === null) { return; }
+      const raw = prefs.getSync(SESSION_KEY, '');
+      if (typeof raw !== 'string' || raw.length === 0) { return; }
+      const saved = JSON.parse(raw) as PersistedSession;
+      if (!saved.tracks || saved.tracks.length === 0) { return; }
+      const posVal = prefs.getSync(POS_KEY, 0);
+      const posMs = typeof posVal === 'number' ? posVal : 0;
+      const tokenRes = await APIClient.shared().streamSessionToken();
+      this.queue = saved.tracks;
+      this.index = Math.max(0, Math.min(saved.index, saved.tracks.length - 1));
+      if (intent === 'next') {
+        this.index = Math.min(this.index + 1, this.queue.length - 1);
+      } else if (intent === 'prev') {
+        this.index = Math.max(this.index - 1, 0);
+      }
+      this.token = tokenRes.token;
+      if (intent === 'play') { this.pendingSeekMs = posMs; }
+      this.failStreak = 0;
+      this.failHandled = false;
+      hilog.info(DOMAIN, TAG,
+        '恢复播放会话：%{public}d 首，下标 %{public}d，位置 %{public}dms，意图 %{public}s',
+        this.queue.length, this.index, posMs, intent);
+      this.bumpQueue();
+      await this.loadCurrent(true);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '恢复播放会话失败: %{public}s', JSON.stringify(e));
+    } finally {
+      this.restoring = false;
+    }
   }
 
   // ---------------- 内部 ----------------
@@ -370,6 +496,8 @@ export class MediaPlayerCore {
 
     // 先落 UI 元数据：切歌瞬间界面就该变，别等 prepare
     this.publishTrack(track);
+    // 切歌即重置持久化位置：否则自动接续（endOfStream）后恢复会拿旧位置 seek 新曲
+    this.persistPosition(0);
 
     try {
       if (this.player === null) {
@@ -537,6 +665,12 @@ export class MediaPlayerCore {
     p.on('timeUpdate', (timeMs: number) => {
       const pos = Math.max(0, timeMs);
       AppStorage.setOrCreate<number>(K_POS, pos);
+      // 续播位置持久化：5s 节流（只写数值，prefs.flush 由 persistPosition 内部负责）
+      const persistNow = Date.now();
+      if (persistNow - this.lastPosPersistAt >= POS_PERSIST_INTERVAL_MS) {
+        this.lastPosPersistAt = persistNow;
+        this.persistPosition(pos);
+      }
       /**
        * 给 AVSession 的进度**必须节流**。
        *
@@ -604,6 +738,29 @@ export class MediaPlayerCore {
       durationMs: track.dt
     };
     this.av?.updateMetadata(meta);
+    // 歌词单独异步补：2x4 卡片歌词窗 + 播控中心滚动歌词都吃这一口
+    this.fetchLyric(track);
+  }
+
+  /**
+   * 拉当前曲歌词 → AVSession（2x4 卡片歌词窗 + 播控中心滚动歌词）。
+   *
+   * 拉不到不影响播放（纯音乐/接口失败只是继续不显示歌词）；
+   * 回来时已切歌（序号变了或当前曲对不上）直接丢弃，防止旧词盖新曲。
+   */
+  private async fetchLyric(track: Track): Promise<void> {
+    const mySeq = ++this.lyricSeq;
+    try {
+      const res = await APIClient.shared().lyric(track.id);
+      if (mySeq !== this.lyricSeq) { return; }
+      const cur = this.current;
+      if (cur === null || cur.id !== track.id) { return; }
+      const lrc = res.lrc.lyric;
+      if (lrc.length === 0) { return; }
+      await this.av?.updateLyric({ assetId: track.id, lyric: lrc });
+    } catch (e) {
+      // 歌词拉不到不影响播放
+    }
   }
 
   private publishState(): void {

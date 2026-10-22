@@ -146,6 +146,8 @@ class HarmonyAVSessionManager {
       // 会话一建好就先给它一条**只有应用名**的最小元数据：系统要看到会话有
       // 元数据才会在锁屏/播控中心给出那条控件。真曲目信息随后被覆盖。
       // 这里写应用名而不是编一个歌名 —— 不知道就不知道，别骗系统。
+      // 播控中心点击展开歌词面板由 AVMetadata.lyric 驱动（fetchLyric 接线，
+      // T10），不需要 setLaunchAbility 拉起应用。
       await this.pushMinimalMetadata();
     } catch (err) {
       hilog.error(DOMAIN, TAG, 'Failed to create AVSession: %{public}s', JSON.stringify(err));

@@ -30,6 +30,8 @@ export interface AuthConfig {
 export interface TrackArtist {
   id: string;
   name: string;
+  /** 网易云/QQ 歌手 mid —— 「不喜欢歌手」按它过滤（老快照可能缺） */
+  mid?: string;
 }
 
 export interface TrackAlbum {
@@ -45,6 +47,8 @@ export interface Track {
   al: TrackAlbum;
   /** 毫秒。**B 站音源真实时长常与此不符**，以流的 `X-Audio-Duration-Ms` 为准 */
   dt: number;
+  /** 专属推荐理由（服务端 reasonMap 下发；仅每日歌单内的曲目携带，普通曲目缺省） */
+  recommendReason?: string;
 }
 
 export interface Toplist {
@@ -196,6 +200,104 @@ export interface DailyRecommend {
   welcomePhrase?: string;
   tracks: Track[];
   message?: string;
+}
+
+/** `POST /api/recommend/dislike` 的返回（track = 永久过滤这首歌；artist = 连带删用户曲库归属链） */
+export interface DislikeReply {
+  ok: boolean;
+  type: string;
+  id: string;
+}
+
+/** `GET /api/recommend/dislikes` 的黑名单行（type = track / artist） */
+export interface DislikeRow {
+  type: string;
+  targetId: string;
+  name: string;
+  createdAt: number;
+}
+
+/** `GET /api/recommend/dislikes` 的返回 */
+export interface DislikeListReply {
+  dislikes: DislikeRow[];
+}
+
+/** `POST /api/favorites/import-qq-playlist` 的返回 */
+export interface QQImportReply {
+  ok: boolean;
+  playlistName: string;
+  received: number;
+  added: number;
+  skipped: number;
+  total: number;
+}
+
+/** 去重预检的重复组（服务端口径：歌名 + 主歌手相同；保留最早收藏） */
+export interface DedupeGroup {
+  key: string;
+  name: string;
+  artist: string;
+  total: number;
+  keepTrackId: string;
+  removeTrackIds: string[];
+}
+
+/** `POST /api/favorites/dedup/preview` 的返回 */
+export interface DedupePreviewReply {
+  ok: boolean;
+  duplicateCount: number;
+  groupsCount: number;
+  groups: DedupeGroup[];
+}
+
+/** `POST /api/favorites/dedup` 的返回 */
+export interface DedupeReply {
+  ok: boolean;
+  removedCount: number;
+  remainingCount: number;
+}
+
+/** `GET /api/favorites/tracks` 的返回（收藏曲目内容一次补齐） */
+export interface FavoriteTracksReply {
+  tracks: Track[];
+}
+
+/** `POST /api/favorites/import` 的返回（备份恢复用，tracks ≤ 500/批） */
+export interface ImportFavoritesReply {
+  ok: boolean;
+  received: number;
+  added: number;
+  total: number;
+}
+
+/** `GET /api/ai/persona`（音乐画像；summary 为空 = 尚未生成） */
+export interface PersonaDetail {
+  summary: string;
+  profileLines: string[];
+  ledgerLines: string[];
+}
+
+/** `POST /api/ai/persona/tune` 的返回 */
+export interface TuneReply {
+  ok: boolean;
+  persona: PersonaDetail;
+}
+
+/** 音源授权账号（B 站 mid / 网易云 userId，name 一定有） */
+export interface SourceAccount {
+  name?: string;
+}
+
+/** `GET /api/bilibili/account` 与 `/api/netease/account`（同构） */
+export interface SourceStatus {
+  configured: boolean;
+  source: string;
+  account: SourceAccount | null;
+}
+
+/** 简单 ok 应答 */
+export interface OkReply {
+  ok: boolean;
 }
 
 export interface ApiErrorInner {
