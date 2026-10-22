@@ -84,3 +84,8 @@ __pycache__/
 *.py[cod]
 # 私人生产数据，永不入库
 suenmusic-data/
+
+# ---- UI 走查调试产物（截图/布局 dump/比对分析），永不入库 ----
+.shots/
+hw/.ui-shots/
+hw/.ui-analysis/
