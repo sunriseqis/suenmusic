@@ -1,5 +1,5 @@
 /**
- * 服务端管理页（S3 增量 3）。
+ * 服务端管理页（S3 增量 3；S4 打磨：尺寸令牌/热区/无障碍）。
  *
  * 列出全部候选 + 可达状态（四态：未知/检测中/可达/不可达，不用布尔红绿灯防闪烁）、
  * 新增（名称/地址）、删除（删当前在用的会先自动切到剩余第一个）、
@@ -11,6 +11,7 @@ import { APIClient, ApiError } from '../core/APIClient';
 import { MediaPlayerCore } from '../core/MediaPlayerCore';
 import { ServerCandidate } from '../core/Models';
 import { Tokens } from '../common/Tokens';
+import { Dim } from '../common/Dimension';
 import { K_BASE_URL } from '../viewmodel/AppState';
 
 /** 探测四态 */
@@ -345,87 +346,92 @@ export struct ServerListPage {
 
   @Builder
   serverRow(s: ServerCandidate, i: number) {
-    Column({ space: 8 }) {
-      Row({ space: 8 }) {
-        Circle({ width: 8, height: 8 }).fill(this.statusColor(i))
-        Text(s.name).fontSize(15).fontColor(Tokens.text1).maxLines(1)
+    Column({ space: Dim.s2 }) {
+      Row({ space: Dim.s2 }) {
+        Circle({ width: Dim.s2, height: Dim.s2 }).fill(this.statusColor(i))
+        Text(s.name).fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (s.url === this.currentBase) {
           Text('当前')
-            .fontSize(10)
+            .fontSize(Dim.fsCaption)
             .fontColor(Tokens.accent)
-            .padding({ left: 6, right: 6, top: 2, bottom: 2 })
-            .borderRadius(8)
+            .padding({ left: Dim.s1, right: Dim.s1, top: Dim.s0, bottom: Dim.s0 })
+            .borderRadius(Dim.radiusRow)
             .backgroundColor(Tokens.panel2)
         }
         Blank()
-        Text(this.statusText(i)).fontSize(11).fontColor(this.statusColor(i))
+        Text(this.statusText(i)).fontSize(Dim.fsCaption).fontColor(this.statusColor(i))
       }
       .width('100%')
 
       Text(s.url)
-        .fontSize(12)
+        .fontSize(Dim.fsMinor)
         .fontColor(Tokens.text2)
         .maxLines(1)
         .textOverflow({ overflow: TextOverflow.Ellipsis })
 
-      Row({ space: 10 }) {
+      // 行内操作键：可点区域统一 44vp（S4 §三）
+      Row({ space: Dim.s2 }) {
         if (s.url !== this.currentBase) {
           Button('切换')
-            .height(30)
-            .fontSize(12)
+            .height(Dim.touchMin)
+            .fontSize(Dim.fsMinor)
             .backgroundColor(Tokens.panel2)
             .fontColor(Tokens.accent)
+            .accessibilityText(`切换到 ${s.name}`)
             .onClick(() => { this.confirmSwitch(s.url); })
         }
         Button('测试连接')
-          .height(30)
-          .fontSize(12)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsMinor)
           .backgroundColor(Tokens.panel2)
           .fontColor(Tokens.text1)
+          .accessibilityText(`测试 ${s.name} 的连接`)
           .onClick(() => { this.probeOne(i); })
         Button('编辑')
-          .height(30)
-          .fontSize(12)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsMinor)
           .backgroundColor(Tokens.panel2)
           .fontColor(Tokens.text1)
+          .accessibilityText(`编辑 ${s.name}`)
           .onClick(() => { this.startEdit(i); })
         Blank()
         Button('删除')
-          .height(30)
-          .fontSize(12)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsMinor)
           .backgroundColor(Tokens.panel2)
           .fontColor('#E5484D')
+          .accessibilityText(`删除服务器 ${s.name}`)
           .onClick(() => { this.deleteServer(i); })
       }
       .width('100%')
     }
     .width('100%')
-    .padding(14)
-    .borderRadius(12)
+    .padding(Dim.s4)
+    .borderRadius(Dim.radiusMd)
     .backgroundColor(Tokens.panel)
-    .margin({ left: 12, right: 12, top: 8 })
+    .margin({ left: Dim.s3, right: Dim.s3, top: Dim.s2 })
   }
 
   @Builder
   addForm() {
-    Column({ space: 10 }) {
+    Column({ space: Dim.s2 }) {
       Text(this.editingIndex >= 0 ? '编辑服务器' : '新增服务器')
-        .fontSize(14).fontColor(Tokens.text1)
+        .fontSize(Dim.fsSub).fontColor(Tokens.text1)
       TextInput({ text: this.newName, placeholder: '名称（可选，如：客厅主机）' })
-        .height(40)
-        .fontSize(13)
+        .height(Dim.inputH)
+        .fontSize(Dim.fsBody)
         .backgroundColor(Tokens.panel2)
         .onChange((v: string) => { this.newName = v; })
       TextInput({ text: this.newUrl, placeholder: '地址，如 http://192.168.1.10:3210' })
-        .height(40)
-        .fontSize(13)
+        .height(Dim.inputH)
+        .fontSize(Dim.fsBody)
         .backgroundColor(Tokens.panel2)
         .onChange((v: string) => { this.newUrl = v; })
-      Row({ space: 10 }) {
+      Row({ space: Dim.s2 }) {
         Button('取消')
-          .height(36)
-          .fontSize(13)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsBody)
           .backgroundColor(Tokens.panel2)
           .fontColor(Tokens.text1)
           .onClick(() => {
@@ -435,8 +441,8 @@ export struct ServerListPage {
             this.newUrl = '';
           })
         Button(this.editingIndex >= 0 ? '保存' : '保存并检测')
-          .height(36)
-          .fontSize(13)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsBody)
           .backgroundColor(Tokens.accent)
           .fontColor(Tokens.bg)
           .onClick(() => { this.saveForm(); })
@@ -444,32 +450,34 @@ export struct ServerListPage {
       .width('100%')
     }
     .width('100%')
-    .padding(12)
-    .borderRadius(12)
+    .padding(Dim.s3)
+    .borderRadius(Dim.radiusMd)
     .backgroundColor(Tokens.panel)
-    .margin({ left: 12, right: 12, top: 8, bottom: 12 })
+    .margin({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s3 })
   }
 
   build() {
     Column() {
       Row() {
         Button('返回')
-          .height(32)
-          .fontSize(13)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsBody)
           .backgroundColor(Tokens.panel)
           .fontColor(Tokens.text1)
+          .accessibilityText('返回上一页')
           .onClick(() => { this.onClose(); })
         Blank()
         Text('服务端管理')
-          .fontSize(16)
+          .fontSize(Dim.fsSection)
           .fontWeight(FontWeight.Medium)
           .fontColor(Tokens.text1)
         Blank()
         Button('新增')
-          .height(32)
-          .fontSize(13)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsBody)
           .backgroundColor(Tokens.panel)
           .fontColor(Tokens.accent)
+          .accessibilityText('新增服务器')
           .onClick(() => {
             this.editingIndex = -1;
             this.newName = '';
@@ -478,26 +486,26 @@ export struct ServerListPage {
           })
       }
       .width('100%')
-      .padding({ left: 12, right: 12, top: 10, bottom: 6 })
+      .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
 
       Text('当前：' + (this.currentBase.length > 0 ? this.currentBase : '未设置'))
-        .fontSize(12)
+        .fontSize(Dim.fsMinor)
         .fontColor(Tokens.text2)
         .width('100%')
-        .padding({ left: 14, right: 14, top: 2, bottom: 2 })
+        .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s0, bottom: Dim.s0 })
 
       if (this.notice.length > 0) {
         Text(this.notice)
-          .fontSize(12)
+          .fontSize(Dim.fsMinor)
           .fontColor(Tokens.accent)
           .width('100%')
-          .padding({ left: 14, right: 14, top: 2, bottom: 2 })
+          .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s0, bottom: Dim.s0 })
       }
 
       if (this.serverList.length === 0) {
-        Column({ space: 6 }) {
-          Text('还没有配置服务器').fontSize(14).fontColor(Tokens.text2)
-          Text('点右上角「新增」添加一个').fontSize(11).fontColor(Tokens.text2)
+        Column({ space: Dim.s2 }) {
+          Text('还没有配置服务器').fontSize(Dim.fsSub).fontColor(Tokens.text2)
+          Text('点右上角「新增」添加一个').fontSize(Dim.fsCaption).fontColor(Tokens.text2)
         }
         .width('100%')
         .layoutWeight(1)

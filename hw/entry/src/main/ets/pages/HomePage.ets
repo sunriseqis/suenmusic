@@ -5,9 +5,12 @@ import { ApiError, APIClient } from '../core/APIClient';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
+import { Dim } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
+import { TrackRow, TrackRowSource } from '../common/TrackSources';
+import { SkeletonList } from './SkeletonList';
 
-/** 首页：新歌/榜单（S2 只做能点播的列表，视觉在 S4 打磨） */
+/** 首页：新歌/榜单（S2 只做能点播的列表；S4 加骨架屏/下拉刷新/懒加载） */
 @Component
 export struct HomePage {
   @State home: HomeData | null = null;
@@ -21,13 +24,17 @@ export struct HomePage {
   @State lastOkAt: number = 0;
   /** 热启动刷新信号（NativeRoot 回前台 +1）：后台重拉，离线时横幅能及时出现/消失 */
   @StorageLink(K_HOME_REFRESH) @Watch('onHomeRev') homeRev: number = 0;
+  /** 下拉刷新状态（Refresh 两向绑定） */
+  @State refreshing: boolean = false;
+  /** 新歌列表的 LazyForEach 渲染投影（数据真相仍是 home.newSongs） */
+  private songRows: TrackRowSource = new TrackRowSource();
+
+  aboutToAppear(): void { this.load(); }
 
   /** 热启动回前台（rev 变化）：重拉首页。离线时失败 → 挂离线横幅；在线成功 → 清横幅 */
   private onHomeRev(): void {
     this.load();
   }
-
-  aboutToAppear(): void { this.load(); }
 
   private async load(): Promise<void> {
     // 先渲染快照（如有）：离线冷启动也有列表可看，然后照样后台刷新
@@ -61,7 +68,18 @@ export struct HomePage {
       hilog.warn(0x0000, 'HomePage', '首页刷新失败: %{public}s', JSON.stringify(e));
     } finally {
       this.loading = false;
+      this.refreshing = false;
     }
+  }
+
+  /** home.newSongs + favIds → LazyForEach 投影（数据/收藏每次变化后同步） */
+  private syncSongRows(): void {
+    const songs = this.home === null ? [] : this.home.newSongs;
+    const rows: TrackRow[] = [];
+    for (let i = 0; i < songs.length; i++) {
+      rows.push(new TrackRow(songs[i], this.hasFav(songs[i].id), i + 1));
+    }
+    this.songRows.reload(rows);
   }
 
   /** 快照时刻 → 「10-21 12:30」（离线提示行用） */
@@ -89,6 +107,7 @@ export struct HomePage {
       if (this.favIds[i] !== trackId) { next.push(this.favIds[i]); }
     }
     this.favIds = next;
+    this.songRows.setFav(trackId, fav);
   }
 
   private async refreshFavMarks(tracks: Track[]): Promise<void> {
@@ -96,12 +115,17 @@ export struct HomePage {
     for (let i = 0; i < tracks.length; i++) {
       if (!this.hasFav(tracks[i].id)) { unknown.push(tracks[i].id); }
     }
-    if (unknown.length === 0) { return; }
+    if (unknown.length === 0) {
+      this.syncSongRows();
+      return;
+    }
     try {
       const fav = await APIClient.shared().favoredIds(unknown);
       for (let i = 0; i < fav.length; i++) { this.setFav(fav[i], true); }
     } catch (e) {
       hilog.warn(0x0000, 'SuenMusic_Fav', '拉取收藏标记失败（静默）: %{public}s', JSON.stringify(e));
+    } finally {
+      this.syncSongRows();
     }
   }
 
@@ -133,13 +157,20 @@ export struct HomePage {
     }
   }
 
-  private async playAt(list: Track[], index: number): Promise<void> {
+  private async playAt(trackId: string): Promise<void> {
     /**
      * 断网（飞行模式）时取不到流令牌 —— 不能因此拦截点击：
      * 缓存命中的曲目走 `fd://` 离线播根本不需要令牌，所以这里降级成
      * 空令牌继续 setQueue；真正无网又无缓存的曲目由播放内核的失败
      * 自愈（failStreak ≥ 3 停下）给出人话提示，不会无限连跳。
+     * 懒加载行点击时按下标定位会过期（收藏页剪行同因），改按 id 找。
      */
+    const songs = this.home === null ? [] : this.home.newSongs;
+    let index = -1;
+    for (let i = 0; i < songs.length; i++) {
+      if (songs[i].id === trackId) { index = i; break; }
+    }
+    if (index < 0) { return; }
     let token = '';
     try {
       token = (await APIClientToken()).token;
@@ -147,7 +178,7 @@ export struct HomePage {
       hilog.warn(0x0000, 'HomePage', '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
     }
     try {
-      await MediaPlayerCore.shared().setQueue(list, index, token);
+      await MediaPlayerCore.shared().setQueue(songs, index, token);
     } catch (e) {
       this.err = Copy.describeError(e);
       hilog.error(0x0000, 'HomePage', 'setQueue 失败: %{public}s', JSON.stringify(e));
@@ -157,63 +188,75 @@ export struct HomePage {
   build() {
     Column() {
       if (this.loading && this.home === null) {
-        Row() { LoadingProgress().width(28).height(28) }.width('100%').justifyContent(FlexAlign.Center).margin({ top: 40 })
+        // 冷启动首屏：骨架块替代转圈（S4 §六）
+        SkeletonList()
       } else if (this.err.length > 0 && this.home === null) {
-        Column({ space: 10 }) {
-          Text(this.err).fontSize(13).fontColor('#E5484D')
-          Button('重试').onClick(() => { this.load(); })
-        }.width('100%').margin({ top: 40 })
+        Column({ space: Dim.s3 }) {
+          Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Button('重试')
+            .height(Dim.touchMin)
+            .fontSize(Dim.fsSub)
+            .backgroundColor(Tokens.panel)
+            .fontColor(Tokens.text1)
+            .onClick(() => { this.load(); })
+        }.width('100%').margin({ top: Dim.s5 })
       } else if (this.home !== null) {
-        List({ space: 0 }) {
-          if (this.offlineAt > 0) {
-            ListItem() {
-              Text('离线数据 · 最后更新 ' + this.fmtSnapshotTime(this.offlineAt))
-                .fontSize(11).fontColor(Tokens.text2)
-                .width('100%').padding({ left: 16, top: 8, bottom: 4 })
-            }
-          }
-          if (this.home.welcomePhrase !== undefined && this.home.welcomePhrase.length > 0) {
-            ListItem() {
-              Text(this.home.welcomePhrase).fontSize(16).fontWeight(FontWeight.Medium)
-                .width('100%').padding({ left: 16, right: 16, top: 12, bottom: 4 })
-            }
-          }
-          if (this.home.newSongs.length > 0) {
-            ListItem() {
-              Text('新歌首发').fontSize(12).fontColor(Tokens.text2)
-                .width('100%').padding({ left: 16, top: 12, bottom: 4 })
-            }
-            ForEach(this.home.newSongs, (t: Track, i: number) => {
+        // 下拉刷新（S4 §10.3）：阻尼以 Refresh 默认手感为准，轻拉即刷、刷完即收
+        Refresh({ refreshing: $$this.refreshing }) {
+          List({ space: 0 }) {
+            if (this.offlineAt > 0) {
               ListItem() {
-                TrackItem({
-                  track: t,
-                  index: i + 1,
-                  isFav: this.favIds.indexOf(t.id) >= 0,
-                  onSwipeToggle: () => this.toggleFav(t),
-                  onTap: () => { this.playAt(this.home === null ? [] : this.home.newSongs, i); }
-                })
+                Text('离线数据 · 最后更新 ' + this.fmtSnapshotTime(this.offlineAt))
+                  .fontSize(Dim.fsCaption).fontColor(Tokens.text2)
+                  .width('100%').padding({ left: Dim.s4, top: Dim.s2, bottom: Dim.s1 })
               }
-            }, (t: Track) => t.id)
-          }
-          if (this.home.toplists.length > 0) {
-            ListItem() {
-              Text('榜单').fontSize(12).fontColor(Tokens.text2)
-                .width('100%').padding({ left: 16, top: 16, bottom: 4 })
             }
-            ForEach(this.home.toplists, (l: Toplist) => {
+            if (this.home.welcomePhrase !== undefined && this.home.welcomePhrase.length > 0) {
               ListItem() {
-                Row() {
-                  Text(l.name).fontSize(15).fontColor(Tokens.text1)
-                  Blank()
-                  Text(l.updateFrequency === undefined ? '' : l.updateFrequency)
-                    .fontSize(11).fontColor(Tokens.text2)
+                Text(this.home.welcomePhrase).fontSize(Dim.fsSection).fontWeight(FontWeight.Medium)
+                  .width('100%').padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
+              }
+            }
+            if (this.home.newSongs.length > 0) {
+              ListItem() {
+                Text('新歌首发').fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+                  .width('100%').padding({ left: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
+              }
+              // 长列表懒加载（S4 §四）：只挂可见区附近的行
+              LazyForEach(this.songRows, (row: TrackRow) => {
+                ListItem() {
+                  TrackItem({
+                    track: row.track,
+                    index: row.no,
+                    isFav: row.fav,
+                    onSwipeToggle: () => this.toggleFav(row.track),
+                    onTap: () => { this.playAt(row.track.id); }
+                  })
                 }
-                .width('100%').padding({ left: 16, right: 16, top: 10, bottom: 10 })
+              }, (row: TrackRow) => row.track.id)
+            }
+            if (this.home.toplists.length > 0) {
+              ListItem() {
+                Text('榜单').fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+                  .width('100%').padding({ left: Dim.s4, top: Dim.s4, bottom: Dim.s1 })
               }
-            }, (l: Toplist) => l.id)
+              ForEach(this.home.toplists, (l: Toplist) => {
+                ListItem() {
+                  Row() {
+                    Text(l.name).fontSize(Dim.fsTitle).fontColor(Tokens.text1)
+                    Blank()
+                    Text(l.updateFrequency === undefined ? '' : l.updateFrequency)
+                      .fontSize(Dim.fsCaption).fontColor(Tokens.text2)
+                  }
+                  .width('100%').padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+                }
+              }, (l: Toplist) => l.id)
+            }
           }
+          .width('100%')
+          .layoutWeight(1)
         }
-        .width('100%')
+        .onRefreshing(() => { this.load(); })
         .layoutWeight(1)
       }
     }

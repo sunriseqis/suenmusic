@@ -2,8 +2,9 @@ import { AppState } from '../viewmodel/AppState';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
+import { Dim, Motion } from '../common/Dimension';
 
-/** 登录页（S2：地址 + 账号 + 口令；多服务端编辑放 S3） */
+/** 登录页（S2：地址 + 账号 + 口令；多服务端编辑放 S3；S4：尺寸令牌/按压动效） */
 @Component
 export struct LoginPage {
   @State address: string = '';
@@ -11,6 +12,7 @@ export struct LoginPage {
   @State password: string = '';
   @State busy: boolean = false;
   @State err: string = '';
+  @State loginPressed: boolean = false;
 
   // 窗口全屏布局下的系统避让区实时值（刘海/状态栏、底部手势条，随机型动态变化）
   @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
@@ -43,47 +45,57 @@ export struct LoginPage {
   }
 
   build() {
-    Column({ space: 16 }) {
-      Text('SuenMusic').fontSize(28).fontWeight(FontWeight.Bold)
-      Text('自托管音乐').fontSize(13).fontColor(Tokens.text2)
+    Column({ space: Dim.s4 }) {
+      Text('SuenMusic').fontSize(Dim.fsBrand).fontWeight(FontWeight.Bold).fontColor(Tokens.text1)
+      Text('自托管音乐').fontSize(Dim.fsBody).fontColor(Tokens.text2)
 
-      Column({ space: 10 }) {
-        Text('服务端地址').fontSize(12).fontColor(Tokens.text2).width('100%')
+      Column({ space: Dim.s2 }) {
+        Text('服务端地址').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%')
         TextInput({ text: this.address, placeholder: 'http://192.168.1.10:3210' })
           .type(InputType.Normal)
           .onChange((v: string) => { this.address = v; })
 
-        Text('用户名').fontSize(12).fontColor(Tokens.text2).width('100%').margin({ top: 6 })
+        Text('用户名').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%').margin({ top: Dim.s2 })
         TextInput({ text: this.username, placeholder: '用户名' })
           .onChange((v: string) => { this.username = v; })
 
-        Text('口令').fontSize(12).fontColor(Tokens.text2).width('100%').margin({ top: 6 })
+        Text('口令').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%').margin({ top: Dim.s2 })
         TextInput({ text: this.password, placeholder: '口令' })
           .type(InputType.Password)
           .onChange((v: string) => { this.password = v; })
       }
       .width('100%')
-      .padding(16)
-      .borderRadius(12)
+      .padding(Dim.s4)
+      .borderRadius(Dim.radiusMd)
       .backgroundColor(Tokens.panel)
 
       if (this.err.length > 0) {
-        Text(this.err).fontSize(12).fontColor('#E5484D').width('100%')
+        Text(this.err).fontSize(Dim.fsMinor).fontColor('#E5484D').width('100%')
       }
 
       Button(this.busy ? '登录中…' : '登录')
         .width('100%')
-        .height(44)
+        .height(Dim.touchMin)
+        .fontSize(Dim.fsSub)
         .enabled(!this.busy && this.username.length > 0 && this.password.length > 0)
+        .scale({ x: this.loginPressed ? Motion.pressScale : 1, y: this.loginPressed ? Motion.pressScale : 1 })
+        .onTouch((e: TouchEvent) => {
+          if (e.type === TouchType.Down) {
+            this.loginPressed = true;
+          } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+            this.loginPressed = false;
+          }
+        })
+        .accessibilityText(this.busy ? '正在登录' : '登录')
         .onClick(() => { this.submit(); })
     }
     .width('100%')
     .height('100%')
     .padding({
-      left: 24,
-      right: 24,
-      top: this.avoidVp(this.topAvoidHeight) + 24,
-      bottom: this.avoidVp(this.bottomAvoidHeight) + 24
+      left: Dim.s5,
+      right: Dim.s5,
+      top: this.avoidVp(this.topAvoidHeight) + Dim.s5,
+      bottom: this.avoidVp(this.bottomAvoidHeight) + Dim.s5
     })
     .justifyContent(FlexAlign.Center)
     .backgroundColor(Tokens.bg)

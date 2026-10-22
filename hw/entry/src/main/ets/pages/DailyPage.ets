@@ -4,7 +4,10 @@ import { MediaPlayerCore } from '../core/MediaPlayerCore';
 import { DailyRecommend, Track } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
+import { Dim, Motion } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
+import { EmptyState } from './EmptyState';
+import { SkeletonList } from './SkeletonList';
 import { AppState } from '../viewmodel/AppState';
 
 const TAG = 'SuenMusic_Daily';
@@ -12,8 +15,8 @@ const TAG = 'SuenMusic_Daily';
 /**
  * 每日推荐：只读（歌单由服务端每天 00:30 产出，无「换一批」）。
  *
- * **`shortfall` 不是错误** —— 曲库不足是正常业务结果，界面给引导文案
- * （「曲库还太少，先多听几首再来看看」），不重试、不报错。
+ * **`shortfall` 不是错误** —— 曲库不足是正常业务结果，界面给统一空态
+ * （S4 §五：日历图标 + 引导文案），不重试、不报错。
  * 「播放全部」= 当日歌单整队入 `setQueue`，从第 1 首起播。
  */
 @Component
@@ -23,6 +26,8 @@ export struct DailyPage {
   @State err: string = '';
   /** 已收藏曲目 id（右滑手势的文案/序号染色用，失败静默） */
   @State favIds: string[] = [];
+  /** 「播放全部」按压缩放动效（S4 §二） */
+  @State playAllPressed: boolean = false;
 
   aboutToAppear(): void { this.load(); }
 
@@ -134,14 +139,17 @@ export struct DailyPage {
   build() {
     Column() {
       if (this.loading && this.data === null) {
-        Row() { LoadingProgress().width(28).height(28) }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
+        // 首次加载：骨架屏替代转圈（S4 §六）
+        SkeletonList()
       } else if (this.err.length > 0 && this.data === null) {
-        Column({ space: 10 }) {
-          Text(this.err).fontSize(13).fontColor('#E5484D')
-          Button('重试').onClick(() => { this.load(); })
+        Column({ space: Dim.s3 }) {
+          Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Button('重试')
+            .height(Dim.touchMin)
+            .fontSize(Dim.fsSub)
+            .backgroundColor(Tokens.panel)
+            .fontColor(Tokens.text1)
+            .onClick(() => { this.load(); })
         }
         .width('100%')
         .layoutWeight(1)
@@ -149,28 +157,37 @@ export struct DailyPage {
       } else if (this.data !== null) {
         if (this.data.welcomePhrase !== undefined && this.data.welcomePhrase.length > 0) {
           Text(this.data.welcomePhrase)
-            .fontSize(18)
+            .fontSize(Dim.fsHeadline)
             .fontWeight(FontWeight.Medium)
             .fontColor(Tokens.text1)
             .width('100%')
-            .padding({ left: 16, right: 16, top: 12 })
+            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
         }
         if (this.data.greeting !== undefined && this.data.greeting.length > 0) {
           Text(this.data.greeting)
-            .fontSize(12)
+            .fontSize(Dim.fsMinor)
             .fontColor(Tokens.text2)
             .width('100%')
-            .padding({ left: 16, right: 16, top: 4 })
+            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s1 })
         }
 
         if (this.data.tracks.length > 0) {
           Button('播放全部')
             .width('100%')
-            .height(44)
-            .fontSize(14)
+            .height(Dim.touchMin)
+            .fontSize(Dim.fsSub)
             .backgroundColor(Tokens.accent)
             .fontColor(Tokens.bg)
-            .margin({ left: 16, right: 16, top: 12 })
+            .margin({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
+            // 按压缩放回弹（S4 §二：0.96，松手还原）
+            .scale({ x: this.playAllPressed ? Motion.pressScale : 1, y: this.playAllPressed ? Motion.pressScale : 1 })
+            .onTouch((e: TouchEvent) => {
+              if (e.type === TouchType.Down) {
+                this.playAllPressed = true;
+              } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+                this.playAllPressed = false;
+              }
+            })
             .onClick(() => { this.playAll(); })
           List({ space: 0 }) {
             ForEach(this.data.tracks, (t: Track, i: number) => {
@@ -188,40 +205,37 @@ export struct DailyPage {
           .width('100%')
           .layoutWeight(1)
         } else if (this.data.status === 'shortfall') {
-          // 曲库不足：引导文案（服务端 message 优先），不是错误、不重试
-          Column() {
-            Text(this.data.message === undefined ? '曲库还太少，先多听几首再来看看' : this.data.message)
-              .fontSize(13).fontColor(Tokens.text2)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
+          // 曲库不足：统一空态（日历图标，S4 §五），服务端 message 优先；不是错误、不重试
+          EmptyState({
+            icon: $r('sys.symbol.calendar'),
+            title: this.data.message === undefined ? Copy.emptyDailyTitle : this.data.message,
+            subtitle: Copy.emptyDailySub
+          })
         } else if (this.data.status === 'generating') {
-          Column() {
-            Text(this.data.message === undefined ? '今日歌单正在生成，稍后再来看看' : this.data.message)
-              .fontSize(13).fontColor(Tokens.text2)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
+          EmptyState({
+            title: this.data.message === undefined ? '今日歌单正在生成，稍后再来看看' : this.data.message
+          })
         } else if (this.data.status === 'error') {
-          Column({ space: 10 }) {
+          Column({ space: Dim.s3 }) {
             Text(this.data.message === undefined ? '今日歌单生成失败' : this.data.message)
-              .fontSize(13).fontColor(Tokens.text2)
-            Button('重试').onClick(() => { this.load(); })
+              .fontSize(Dim.fsBody).fontColor(Tokens.text2)
+            Button('重试')
+              .height(Dim.touchMin)
+              .fontSize(Dim.fsSub)
+              .backgroundColor(Tokens.panel)
+              .fontColor(Tokens.text1)
+              .onClick(() => { this.load(); })
           }
           .width('100%')
           .layoutWeight(1)
           .justifyContent(FlexAlign.Center)
         } else {
-          // 状态 ready 但曲目被过滤成空：与 shortfall 同口径的人话
-          Column() {
-            Text('曲库还太少，先多听几首再来看看')
-              .fontSize(13).fontColor(Tokens.text2)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
+          // 状态 ready 但曲目被过滤成空：与 shortfall 同口径的统一空态
+          EmptyState({
+            icon: $r('sys.symbol.calendar'),
+            title: Copy.emptyDailyTitle,
+            subtitle: Copy.emptyDailySub
+          })
         }
       }
     }

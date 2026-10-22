@@ -1,6 +1,7 @@
 import { Track, artistLine } from '../core/Models';
 import { K_TRACKID } from '../core/MediaPlayerCore';
 import { Tokens } from '../common/Tokens';
+import { Dim, Motion } from '../common/Dimension';
 
 // ---------------------------------------------------------------------------
 // 移动端右滑：收藏 / 取消收藏（§一点六，与 web TrackRow.vue 逐一对齐，单位 vp≈web CSS px）
@@ -21,8 +22,8 @@ const SWIPE_DAMP_FACTOR = 0.25;
 const SWIPE_THRESHOLD = 85;
 /** 触发后（收藏页）的滑出距离 */
 const SWIPE_OUT = 360;
-/** 滑出/弹回动画时长 */
-const SWIPE_ANIM_MS = 200;
+/** 滑出/弹回动画时长（走 Motion 统一时长） */
+const SWIPE_ANIM_MS = Motion.standard;
 /** 手势结束后吞掉合成 click 的时间窗（手势仲裁之外再加一道保险，防误切歌） */
 const CLICK_GUARD_MS = 350;
 
@@ -34,7 +35,8 @@ const CLICK_GUARD_MS = 350;
  * 右滑过阈值回调 `onSwipeToggle`：普通页 = 切换收藏；收藏页传
  * `swipeRemoveOnUnfavorite`，先滑出 360、动画走完再回调（父级随后剪行）。
  * 回调返回 `true` = 状态已落地（收藏页会剪掉本行），`false` = 失败（行弹回）。
- * 行高 56vp、颜色只走 `Tokens.*`（动作区 danger 红除外 —— web 同款语义色）。
+ * 行高 `Dim.rowHeight`、颜色只走 `Tokens.*`（动作区 danger 红除外 —— web 同款语义色）。
+ * 按压高亮 = 列表项点击反馈（S4 §二：Tokens.panel，不用透明度）。
  */
 @Component
 export struct TrackItem {
@@ -63,7 +65,7 @@ export struct TrackItem {
   private lastSwipeEndAt: number = 0;
 
   private animateSwipeTo(target: number): void {
-    this.getUIContext().animateTo({ duration: SWIPE_ANIM_MS, curve: Curve.EaseOut }, () => {
+    this.getUIContext().animateTo({ duration: SWIPE_ANIM_MS, curve: Motion.curve }, () => {
       this.swipeX = target;
     });
   }
@@ -72,43 +74,43 @@ export struct TrackItem {
     Stack() {
       // 右滑拉出的动作区：出现在行的左侧，文案 = 当前状态的反义。
       // 底色按 web：未收藏→琥珀（accentText + 白字）；已收藏→danger 红 + 浅红字。
-      Row({ space: 6 }) {
+      Row({ space: Dim.s1 }) {
         Image(this.isFav ? $r('app.media.card_heart_filled') : $r('app.media.card_heart'))
-          .width(15)
-          .height(15)
+          .width(Dim.iconSm)
+          .height(Dim.iconSm)
           .fillColor(this.isFav ? '#FFDAD6' : Color.White)
         Text(this.isFav ? '取消收藏' : '收藏')
-          .fontSize(13)
+          .fontSize(Dim.fsBody)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.isFav ? '#FFDAD6' : Color.White)
       }
       .width('100%')
       .height('100%')
-      .padding({ left: 20 })
+      .padding({ left: Dim.s5 })
       .alignItems(VerticalAlign.Center)
       .justifyContent(FlexAlign.Start)
       .backgroundColor(this.isFav ? '#8A1F18' : Tokens.accentText)
-      .borderRadius(8)
+      .borderRadius(Dim.radiusRow)
 
       // 行内容：底色必须不透明 —— 下面就是动作区，透明会整行透出那条色
-      Row({ space: 10 }) {
+      Row({ space: Dim.s2 }) {
         if (this.index >= 0) {
           Text(this.index.toString())
-            .fontSize(12)
+            .fontSize(Dim.fsMinor)
             .fontColor(this.isFav && this.markFav ? Tokens.accent : Tokens.text2)
-            .width(24)
+            .width(Dim.seqW)
             .textAlign(TextAlign.Center)
         }
         Image(this.track.al.picUrl.length > 0 ? this.track.al.picUrl : $r('app.media.app_icon'))
-          .width(44).height(44).borderRadius(6).objectFit(ImageFit.Cover)
-        Column({ space: 2 }) {
+          .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
+        Column({ space: Dim.s0 }) {
           Text(this.track.name)
-            .fontSize(15)
+            .fontSize(Dim.fsTitle)
             .fontColor(this.currentTrackId === this.track.id ? Tokens.accent : Tokens.text1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
           Text(artistLine(this.track))
-            .fontSize(11)
+            .fontSize(Dim.fsCaption)
             .fontColor(Tokens.text2)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -117,16 +119,16 @@ export struct TrackItem {
         .layoutWeight(1)
       }
       .width('100%')
-      .height(56)
-      .padding({ left: 16, right: 16 })
+      .height(Dim.rowHeight)
+      .padding({ left: Dim.s4, right: Dim.s4 })
       .backgroundColor(this.pressed ? Tokens.panel : Tokens.bg)
-      .borderRadius(8)
+      .borderRadius(Dim.radiusRow)
       .translate({ x: this.swipeX })
     }
     .width('100%')
-    .height(56)
+    .height(Dim.rowHeight)
     .clip(true)
-    .borderRadius(8)
+    .borderRadius(Dim.radiusRow)
     .onTouch((e: TouchEvent) => {
       if (e.type === TouchType.Down) {
         this.pressed = true;

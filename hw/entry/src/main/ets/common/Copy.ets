@@ -55,4 +55,15 @@ export class Copy {
     if (code === 'source_unavailable') { return '这首暂时找不到可播放音源'; }
     return fallback;
   }
+
+  // ---- 空态文案（S4 §五，统一走 EmptyState，禁止页面自造） ----
+  static readonly emptySearchTitle: string = '没找到相关歌曲';
+  static readonly emptySearchSub: string = '换个关键词试试';
+  static readonly emptyFavTitle: string = '还没有收藏';
+  static readonly emptyFavSub: string = '在播放页点心形就能收藏';
+  static readonly emptyDailyTitle: string = '曲库还太少';
+  static readonly emptyDailySub: string = '先多听几首再来看';
+  static readonly emptyLyricTitle: string = '这首歌暂无歌词';
+  static readonly emptyQueueTitle: string = '队列是空的';
+  static readonly emptyQueueSub: string = '去首页挑一首';
 }

@@ -1,5 +1,5 @@
 /**
- * 歌词（S3；T4 增加翻译双语行）。
+ * 歌词（S3；T4 增加翻译双语行；S4 §四懒加载 + §五统一空态）。
  *
  * 解析器复用 `common/NowPlaying.ets` 的 `parseLyricLines` / `activeLyricIndex` ——
  * 桌面卡片的滚动歌词用的是同一份实现，**不要在页面里再写一套**（两份解析必然漂移）。
@@ -7,6 +7,8 @@
  * 歌词按曲目缓存到内存：一首歌来回切不该反复打服务端（服务端本身也有
  * `Cache-Control: private, max-age=86400`，但省一次往返总是好的）。
  * T4 起缓存同时存原文行与对齐后的翻译行（`LyricDoc`），开关翻译不重新拉取。
+ * S4 起行列表走 `LazyForEach`（长歌词 800 行也只挂可见区）：
+ * 「当前行」高亮进行数据（`LyricRow.active`），逐行 `onDataChange` 精确刷新。
  */
 
 import { APIClient } from '../core/APIClient';
@@ -14,6 +16,10 @@ import { LyricResult } from '../core/Models';
 import { MediaPlayerCore, K_TRACKID, K_POS } from '../core/MediaPlayerCore';
 import { LyricLine, parseLyricLines, activeLyricIndex } from '../common/NowPlaying';
 import { Tokens } from '../common/Tokens';
+import { Copy } from '../common/Copy';
+import { Dim } from '../common/Dimension';
+import { LyricRow, LyricRowSource } from '../common/TrackSources';
+import { EmptyState } from './EmptyState';
 import { K_LYRIC_TRANS } from '../viewmodel/AppState';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
@@ -59,8 +65,8 @@ function alignTranslation(lines: LyricLine[], transLines: LyricLine[]): string[]
 export struct LyricView {
   @StorageLink(K_TRACKID) @Watch('onTrackChanged') trackId: string = '';
   @StorageLink(K_POS) @Watch('onPositionChanged') positionMs: number = 0;
-  /** 显示歌词翻译（设置页开关，AppStorage 通道，默认开） */
-  @StorageProp(K_LYRIC_TRANS) lyricTrans: boolean = true;
+  /** 显示歌词翻译（设置页开关，AppStorage 通道，默认开）；切换后整组重挂（懒加载行不感知 @StorageProp） */
+  @StorageProp(K_LYRIC_TRANS) @Watch('onTransChanged') lyricTrans: boolean = true;
 
   @State lines: LyricLine[] = [];
   @State trans: string[] = [];
@@ -69,6 +75,8 @@ export struct LyricView {
   @State status: string = 'idle';
   @State errText: string = '';
 
+  /** LazyForEach 渲染投影（原文行 + 翻译 + 当前行高亮，全在进行数据里） */
+  private rows: LyricRowSource = new LyricRowSource();
   private scroller: Scroller = new Scroller();
   /** 当前正在加载的曲目（切歌时用它丢弃过期结果） */
   private loadingId: string = '';
@@ -84,6 +92,7 @@ export struct LyricView {
       this.lines = [];
       this.trans = [];
       this.activeIndex = -1;
+      this.syncRows();
       return;
     }
     const cached = LYRIC_CACHE.get(id);
@@ -92,6 +101,11 @@ export struct LyricView {
       return;
     }
     this.load(id);
+  }
+
+  /** 翻译开关切换：懒加载行不感知 @StorageProp，整组重挂一次 */
+  onTransChanged(): void {
+    this.syncRows();
   }
 
   private async load(id: string): Promise<void> {
@@ -133,18 +147,33 @@ export struct LyricView {
     if (doc.lines.length === 0) {
       this.status = 'empty';
       this.activeIndex = -1;
+      this.syncRows();
       return;
     }
     this.status = 'ready';
     this.activeIndex = activeLyricIndex(doc.lines, this.positionMs);
+    this.syncRows();
     this.scrollToActive(false);
+  }
+
+  /** lines + trans + activeIndex → LazyForEach 投影（切歌/翻译开关后整组同步） */
+  private syncRows(): void {
+    const rows: LyricRow[] = [];
+    for (let i = 0; i < this.lines.length; i++) {
+      rows.push(new LyricRow(this.lines[i], i < this.trans.length ? this.trans[i] : '', i === this.activeIndex));
+    }
+    this.rows.reload(rows);
   }
 
   onPositionChanged(): void {
     if (this.lines.length === 0) { return; }
     const idx = activeLyricIndex(this.lines, this.positionMs);
     if (idx === this.activeIndex) { return; }
+    const prev = this.activeIndex;
     this.activeIndex = idx;
+    // 当前行高亮：懒加载行只认行数据，逐行精确刷新（不整组重挂，避免滚动闪烁）
+    this.rows.setActive(prev, false);
+    this.rows.setActive(idx, true);
     this.scrollToActive(true);
   }
 
@@ -161,51 +190,53 @@ export struct LyricView {
   build() {
     Column() {
       if (this.status === 'idle') {
-        Text('暂无播放中的曲目').fontSize(13).fontColor(Tokens.text2)
+        Text('暂无播放中的曲目').fontSize(Dim.fsBody).fontColor(Tokens.text2)
       } else if (this.status === 'loading') {
-        LoadingProgress().width(28).height(28)
+        LoadingProgress().width(Dim.iconXl).height(Dim.iconXl)
       } else if (this.status === 'empty') {
-        Text('这首歌暂无歌词').fontSize(13).fontColor(Tokens.text2)
+        // 无歌词：统一空态（S4 §五，不带图标）
+        EmptyState({ title: Copy.emptyLyricTitle })
       } else if (this.status === 'error') {
-        Column({ space: 8 }) {
-          Text(this.errText).fontSize(13).fontColor('#E5484D')
-          Button('重试').height(32).fontSize(12)
+        Column({ space: Dim.s2 }) {
+          Text(this.errText).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Button('重试').height(Dim.btnMd).fontSize(Dim.fsMinor)
             .backgroundColor(Tokens.panel2).fontColor(Tokens.text1)
             .onClick(() => { this.onTrackChanged(); })
         }
       } else {
         List({ scroller: this.scroller, space: 0 }) {
           // 上下留白：让第一行/最后一行也能滚到中间（Blank 不能直接进 ListItem，用空 Column 占位）
-          ListItem() { Column().height(120) }
-          ForEach(this.lines, (line: LyricLine, i: number) => {
+          ListItem() { Column().height(Dim.lyricPadTop) }
+          // 长歌词懒加载（S4 §四）：只挂可见区附近的行
+          LazyForEach(this.rows, (row: LyricRow) => {
             ListItem() {
               Column() {
-                Text(line.text)
-                  .fontSize(i === this.activeIndex ? 18 : 15)
-                  .fontWeight(i === this.activeIndex ? FontWeight.Medium : FontWeight.Normal)
-                  .fontColor(i === this.activeIndex ? Tokens.accent : Tokens.text2)
+                Text(row.line.text)
+                  .fontSize(row.active ? Dim.fsHeadline : Dim.fsTitle)
+                  .fontWeight(row.active ? FontWeight.Medium : FontWeight.Normal)
+                  .fontColor(row.active ? Tokens.accent : Tokens.text2)
                   .textAlign(TextAlign.Center)
                   .width('100%')
-                if (this.lyricTrans && this.trans[i] !== undefined && this.trans[i].length > 0) {
-                  // 翻译行：text2、字号比原文行小 3（T4 规格）
-                  Text(this.trans[i])
-                    .fontSize(i === this.activeIndex ? 15 : 12)
+                if (this.lyricTrans && row.trans.length > 0) {
+                  // 翻译行：text2、字号比原文行小一档（T4 规格）
+                  Text(row.trans)
+                    .fontSize(row.active ? Dim.fsTitle : Dim.fsMinor)
                     .fontColor(Tokens.text2)
                     .textAlign(TextAlign.Center)
                     .width('100%')
-                    .padding({ top: 2 })
+                    .padding({ top: Dim.s0 })
                 }
               }
               .alignItems(HorizontalAlign.Center)
               .width('100%')
-              .padding({ left: 24, right: 24, top: 8, bottom: 8 })
+              .padding({ left: Dim.s5, right: Dim.s5, top: Dim.s2, bottom: Dim.s2 })
               .onClick(() => {
                 // 点歌词跳转：对齐 Web 端行为
-                MediaPlayerCore.shared().seek(Math.max(0, line.timeMs));
+                MediaPlayerCore.shared().seek(Math.max(0, row.line.timeMs));
               })
             }
-          }, (line: LyricLine, i: number) => i + '_' + line.timeMs)
-          ListItem() { Column().height(160) }
+          }, (row: LyricRow, i: number) => i + '_' + row.line.timeMs)
+          ListItem() { Column().height(Dim.lyricPadBottom) }
         }
         .width('100%')
         .height('100%')

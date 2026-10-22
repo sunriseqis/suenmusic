@@ -1,5 +1,5 @@
 /**
- * 离线缓存面板（S3 增量 3）。
+ * 离线缓存面板（S3 增量 3；S4 打磨：尺寸令牌/热区/无障碍）。
  *
  * 顶部：已用/配额 + 进度条；中部：已缓存曲目（曲名/歌手/大小/缓存时间）；
  * 单条删除（正在播放的会被 OfflineCache 拒绝并提示「正在播放，已跳过」）；
@@ -8,6 +8,7 @@
 
 import { OfflineCache, CacheEntryInfo } from '../core/OfflineCache';
 import { Tokens } from '../common/Tokens';
+import { Dim } from '../common/Dimension';
 
 @Component
 export struct CachePage {
@@ -96,15 +97,15 @@ export struct CachePage {
 
   @Builder
   entryRow(e: CacheEntryInfo) {
-    Row({ space: 10 }) {
-      Column({ space: 3 }) {
+    Row({ space: Dim.s2 }) {
+      Column({ space: Dim.s1 }) {
         Text(this.displayName(e))
-          .fontSize(14)
+          .fontSize(Dim.fsSub)
           .fontColor(Tokens.text1)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text((e.artist ?? '') + ' · ' + this.fmtBytes(e.bytes) + ' · ' + this.fmtTime(e.savedAt))
-          .fontSize(11)
+          .fontSize(Dim.fsCaption)
           .fontColor(Tokens.text2)
           .maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -112,17 +113,19 @@ export struct CachePage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
+      // 删除键：可点区域扩到 44vp（S4 §三，原来 28vp 太小）
       Button('删除')
-        .height(28)
-        .fontSize(12)
+        .height(Dim.touchMin)
+        .fontSize(Dim.fsMinor)
         .backgroundColor(Tokens.panel2)
         .fontColor('#E5484D')
+        .accessibilityText(`删除缓存 ${this.displayName(e)}`)
         .onClick(() => { this.removeEntry(e); })
     }
     .width('100%')
-    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
-    .margin({ left: 12, right: 12, top: 6 })
-    .borderRadius(12)
+    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s2, bottom: Dim.s2 })
+    .margin({ left: Dim.s3, right: Dim.s3, top: Dim.s2 })
+    .borderRadius(Dim.radiusMd)
     .backgroundColor(Tokens.panel)
   }
 
@@ -130,25 +133,26 @@ export struct CachePage {
     Column() {
       Row() {
         Button('返回')
-          .height(32)
-          .fontSize(13)
+          .height(Dim.touchMin)
+          .fontSize(Dim.fsBody)
           .backgroundColor(Tokens.panel)
           .fontColor(Tokens.text1)
+          .accessibilityText('返回上一页')
           .onClick(() => { this.onClose(); })
         Blank()
         Text('离线缓存')
-          .fontSize(16)
+          .fontSize(Dim.fsSection)
           .fontWeight(FontWeight.Medium)
           .fontColor(Tokens.text1)
       }
       .width('100%')
-      .padding({ left: 12, right: 12, top: 10, bottom: 6 })
+      .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
 
-      Column({ space: 6 }) {
+      Column({ space: Dim.s2 }) {
         Row() {
-          Text('已用 ' + this.fmtBytes(this.used)).fontSize(12).fontColor(Tokens.text2)
+          Text('已用 ' + this.fmtBytes(this.used)).fontSize(Dim.fsMinor).fontColor(Tokens.text2)
           Blank()
-          Text('配额 ' + this.fmtBytes(this.quota)).fontSize(12).fontColor(Tokens.text2)
+          Text('配额 ' + this.fmtBytes(this.quota)).fontSize(Dim.fsMinor).fontColor(Tokens.text2)
         }
         .width('100%')
 
@@ -160,20 +164,20 @@ export struct CachePage {
           .color(Tokens.accent)
       }
       .width('100%')
-      .padding({ left: 14, right: 14, top: 6, bottom: 8 })
+      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s2, bottom: Dim.s2 })
 
       if (this.notice.length > 0) {
         Text(this.notice)
-          .fontSize(12)
+          .fontSize(Dim.fsMinor)
           .fontColor(Tokens.accent)
           .width('100%')
-          .padding({ left: 14, right: 14, top: 2, bottom: 2 })
+          .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s0, bottom: Dim.s0 })
       }
 
       if (this.entries.length === 0) {
-        Column({ space: 6 }) {
-          Text('还没有缓存曲目').fontSize(14).fontColor(Tokens.text2)
-          Text('播放过的歌曲会自动缓存到这里').fontSize(11).fontColor(Tokens.text2)
+        Column({ space: Dim.s2 }) {
+          Text('还没有缓存曲目').fontSize(Dim.fsSub).fontColor(Tokens.text2)
+          Text('播放过的歌曲会自动缓存到这里').fontSize(Dim.fsCaption).fontColor(Tokens.text2)
         }
         .width('100%')
         .layoutWeight(1)
@@ -192,12 +196,13 @@ export struct CachePage {
 
       Button('清空全部（' + this.fmtBytes(this.used) + '）')
         .width('90%')
-        .height(44)
-        .fontSize(14)
+        .height(Dim.touchMin)
+        .fontSize(Dim.fsSub)
         .backgroundColor(Tokens.panel2)
         .fontColor('#E5484D')
         .enabled(this.entries.length > 0)
-        .margin({ top: 8, bottom: 12 })
+        .accessibilityText('清空全部离线缓存')
+        .margin({ top: Dim.s2, bottom: Dim.s3 })
         .onClick(() => { this.confirmClear(); })
     }
     .width('100%')

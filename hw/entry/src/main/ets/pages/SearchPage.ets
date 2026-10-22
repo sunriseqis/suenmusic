@@ -6,7 +6,11 @@ import { MediaPlayerCore } from '../core/MediaPlayerCore';
 import { Track, Album, Artist } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
+import { Dim } from '../common/Dimension';
+import { TrackRow, TrackRowSource } from '../common/TrackSources';
 import { TrackItem } from './TrackItem';
+import { EmptyState } from './EmptyState';
+import { SkeletonList } from './SkeletonList';
 import { AppState } from '../viewmodel/AppState';
 
 const TAG = 'SuenMusic_Search';
@@ -16,7 +20,6 @@ const PAGE_LIMIT = 30;
 const RECENT_MAX = 10;
 /** 分片：type 用服务端命名（artist 分片在响应里叫 artists/hasMore.artist） */
 const SLICE_TYPES: string[] = ['song', 'album', 'artist'];
-const SLICE_LABELS: string[] = ['单曲', '专辑', '歌手'];
 
 /**
  * 搜索页：搜索框 + 分片切换（单曲/专辑/歌手）+ 翻页 + 最近搜索。
@@ -24,6 +27,7 @@ const SLICE_LABELS: string[] = ['单曲', '专辑', '歌手'];
  * 翻页的 `hasMore` 严格按分片键判断（`hasMore.artist` 之类）——
  * 搜歌手时 songs 恒空属正常，不能拿 `songs.length` 当"没结果"。
  * 点歌只有一个入口：`MediaPlayerCore.setQueue`（令牌失败降级空令牌）。
+ * 单曲分片懒加载（S4 §四）：数据真相仍是 `this.songs`，`songRows` 是渲染投影。
  */
 @Component
 export struct SearchPage {
@@ -44,6 +48,8 @@ export struct SearchPage {
   @State favIds: string[] = [];
   /** 限流提示：来自服务端 degraded.message（HTTP 200 空结果），展示而非吞成"无结果" */
   @State degradedText: string = '';
+  /** 单曲分片的 LazyForEach 渲染投影（数据真相仍是 this.songs） */
+  private songRows: TrackRowSource = new TrackRowSource();
 
   lastQuery: string = '';
   /** 请求序号：切分片/重新搜索后，丢弃还在途的过期响应 */
@@ -136,6 +142,15 @@ export struct SearchPage {
     return this.hasMore[this.activeSlice];
   }
 
+  /** this.songs + favIds → LazyForEach 投影（数据/收藏每次变化后同步） */
+  private syncSongRows(): void {
+    const rows: TrackRow[] = [];
+    for (let i = 0; i < this.songs.length; i++) {
+      rows.push(new TrackRow(this.songs[i], this.hasFav(this.songs[i].id), i + 1));
+    }
+    this.songRows.reload(rows);
+  }
+
   private async doSearch(query: string, targetPage: number): Promise<void> {
     const q = query.trim();
     if (q.length === 0) { return; }
@@ -153,6 +168,7 @@ export struct SearchPage {
         this.loadingMore = false;
         this.err = '';
         this.searched = true;
+        this.syncSongRows();
         const sec = Math.ceil((this.cooldownUntil - now) / 1000);
         this.degradedText = `QQ 音乐搜索被限流，请在 ${sec} 秒后重试`;
       }
@@ -164,6 +180,9 @@ export struct SearchPage {
     if (first) { this.searching = true; } else { this.loadingMore = true; }
     this.err = '';
     this.degradedText = '';
+    // 搜索发起即记下关键词：失败后「重试」才有词可试（原来只在成功后记，失败重试是空操作）
+    this.lastQuery = q;
+    hilog.info(0x0000, TAG, '搜索请求: q=%{public}s type=%{public}s page=%{public}d', q, SLICE_TYPES[slice], targetPage);
     try {
       const res = await APIClient.shared().search(q, SLICE_TYPES[slice], targetPage, PAGE_LIMIT);
       if (mySeq !== this.reqSeq) {
@@ -181,8 +200,8 @@ export struct SearchPage {
       }
       this.hasMore = [res.hasMore.song, res.hasMore.album, res.hasMore.artist];
       this.page = res.page;
-      this.lastQuery = q;
       this.searched = true;
+      this.syncSongRows();
       // 空结果 + degraded = QQ 上游限流（2001）：显示服务端给的人话 + 记下冷却窗做节流。
       // 有结果时部分分片可能也在限流，但不打扰用户（与 web Search.vue 同口径）。
       const total = res.songs.length + res.albums.length + res.artists.length;
@@ -197,10 +216,15 @@ export struct SearchPage {
     } catch (e) {
       if (mySeq !== this.reqSeq) { return; }
       this.err = Copy.describeError(e);
+      // 首搜失败必须可见：原实现 searched 只在成功时置 true，
+      // 失败后 UI 仍停留在「最近搜索」，错误被完全吞掉（观感=点了没反应）
+      if (first && this.sliceCount() === 0) { this.searched = true; }
+      hilog.warn(0x0000, TAG, '搜索失败: q=%{public}s err=%{public}s', q, this.err);
     } finally {
       if (mySeq === this.reqSeq) {
         this.searching = false;
         this.loadingMore = false;
+        this.syncSongRows();
       }
     }
   }
@@ -261,6 +285,7 @@ export struct SearchPage {
       if (this.favIds[i] !== trackId) { next.push(this.favIds[i]); }
     }
     this.favIds = next;
+    this.songRows.setFav(trackId, fav);
   }
 
   private async refreshFavMarks(tracks: Track[]): Promise<void> {
@@ -268,12 +293,17 @@ export struct SearchPage {
     for (let i = 0; i < tracks.length; i++) {
       if (!this.hasFav(tracks[i].id)) { unknown.push(tracks[i].id); }
     }
-    if (unknown.length === 0) { return; }
+    if (unknown.length === 0) {
+      this.syncSongRows();
+      return;
+    }
     try {
       const fav = await APIClient.shared().favoredIds(unknown);
       for (let i = 0; i < fav.length; i++) { this.setFav(fav[i], true); }
     } catch (e) {
       hilog.warn(0x0000, 'SuenMusic_Fav', '拉取收藏标记失败（静默）: %{public}s', JSON.stringify(e));
+    } finally {
+      this.syncSongRows();
     }
   }
 
@@ -312,7 +342,13 @@ export struct SearchPage {
     this.doSearch(this.lastQuery, this.page + 1);
   }
 
-  private async playAt(index: number): Promise<void> {
+  /** 懒加载行闭包里的按下标定位会过期（翻页/合并后行还在），改按 id 找 */
+  private async playAt(trackId: string): Promise<void> {
+    let index = -1;
+    for (let i = 0; i < this.songs.length; i++) {
+      if (this.songs[i].id === trackId) { index = i; break; }
+    }
+    if (index < 0) { return; }
     // 与 HomePage.playAt 同一语义：令牌失败降级空令牌，缓存曲走 fd://
     let token = '';
     try {
@@ -333,73 +369,74 @@ export struct SearchPage {
   @Builder
   sliceButton(label: string, slice: number) {
     Text(label)
-      .fontSize(13)
+      .fontSize(Dim.fsBody)
       .fontColor(this.activeSlice === slice ? Tokens.accent : Tokens.text2)
-      .padding({ left: 12, right: 12, top: 6, bottom: 6 })
-      .borderRadius(14)
+      .padding({ left: Dim.s3, right: Dim.s3 })
+      .constraintSize({ minHeight: Dim.touchMin })
+      .borderRadius(Dim.radiusPill)
       .backgroundColor(this.activeSlice === slice ? Tokens.panel : Color.Transparent)
       .onClick(() => { this.switchSlice(slice); })
   }
 
   @Builder
   albumRow(album: Album) {
-    Row({ space: 10 }) {
+    Row({ space: Dim.s2 }) {
       Image(album.picUrl.length > 0 ? album.picUrl : $r('app.media.app_icon'))
-        .width(44).height(44).borderRadius(6).objectFit(ImageFit.Cover)
-      Column({ space: 2 }) {
+        .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
+      Column({ space: Dim.s0 }) {
         Text(album.name)
-          .fontSize(15).fontColor(Tokens.text1).maxLines(1)
+          .fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(album.singerName === undefined ? '' : album.singerName)
-          .fontSize(11).fontColor(Tokens.text2).maxLines(1)
+          .fontSize(Dim.fsCaption).fontColor(Tokens.text2).maxLines(1)
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 16, right: 16 })
+    .height(Dim.rowHeight)
+    .padding({ left: Dim.s4, right: Dim.s4 })
   }
 
   @Builder
   artistRow(artist: Artist) {
-    Row({ space: 10 }) {
+    Row({ space: Dim.s2 }) {
       Image(artist.picUrl.length > 0 ? artist.picUrl : $r('app.media.app_icon'))
-        .width(44).height(44).borderRadius(22).objectFit(ImageFit.Cover)
-      Column({ space: 2 }) {
+        .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusAvatar).objectFit(ImageFit.Cover)
+      Column({ space: Dim.s0 }) {
         Text(artist.name)
-          .fontSize(15).fontColor(Tokens.text1).maxLines(1)
+          .fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
         Text(`单曲 ${artist.musicSize} · 专辑 ${artist.albumSize}`)
-          .fontSize(11).fontColor(Tokens.text2).maxLines(1)
+          .fontSize(Dim.fsCaption).fontColor(Tokens.text2).maxLines(1)
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
     }
     .width('100%')
-    .height(56)
-    .padding({ left: 16, right: 16 })
+    .height(Dim.rowHeight)
+    .padding({ left: Dim.s4, right: Dim.s4 })
   }
 
   @Builder
   listFooter() {
     Row() {
       if (this.loadingMore) {
-        LoadingProgress().width(20).height(20)
+        LoadingProgress().width(Dim.iconMd).height(Dim.iconMd)
       } else if (this.err.length > 0) {
         // 翻页失败：给人话 + 可手动重试（不自动轰炸）
         Text(this.err)
-          .fontSize(12).fontColor('#E5484D')
+          .fontSize(Dim.fsMinor).fontColor('#E5484D')
           .onClick(() => { this.loadMore(); })
       } else if (this.sliceHasMore()) {
         Text('加载更多')
-          .fontSize(12).fontColor(Tokens.text2)
-          .padding({ top: 12, bottom: 12 })
+          .fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+          .padding({ top: Dim.s3, bottom: Dim.s3 })
           .onClick(() => { this.loadMore(); })
       } else if (this.sliceCount() > 0) {
         Text('没有更多了')
-          .fontSize(12).fontColor(Tokens.text2)
-          .padding({ top: 12, bottom: 12 })
+          .fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+          .padding({ top: Dim.s3, bottom: Dim.s3 })
       }
     }
     .width('100%')
@@ -410,32 +447,36 @@ export struct SearchPage {
   recentList() {
     Column() {
       Row() {
-        Text('最近搜索').fontSize(13).fontColor(Tokens.text2)
+        Text('最近搜索').fontSize(Dim.fsBody).fontColor(Tokens.text2)
         Blank()
         Text('清空')
-          .fontSize(12).fontColor(Tokens.text2)
-          .padding({ top: 4, bottom: 4 })
+          .fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+          .padding({ top: Dim.s1, bottom: Dim.s1, left: Dim.s2, right: Dim.s2 })
+          .constraintSize({ minHeight: Dim.touchMin })
+          .accessibilityText('清空最近搜索')
           .onClick(() => { this.clearRecent(); })
       }
       .width('100%')
-      .padding({ left: 16, right: 16, top: 12, bottom: 4 })
+      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
 
       List({ space: 0 }) {
         ForEach(this.recent, (q: string, i: number) => {
           ListItem() {
             Row() {
               Text(q)
-                .fontSize(14).fontColor(Tokens.text1).maxLines(1)
+                .fontSize(Dim.fsSub).fontColor(Tokens.text1).maxLines(1)
                 .textOverflow({ overflow: TextOverflow.Ellipsis })
                 .layoutWeight(1)
               Text('删除')
-                .fontSize(12).fontColor(Tokens.text2)
-                .padding({ top: 6, bottom: 6, left: 8 })
+                .fontSize(Dim.fsMinor).fontColor(Tokens.text2)
+                .padding({ left: Dim.s2, right: Dim.s2 })
+                .constraintSize({ minHeight: Dim.touchMin })
+                .accessibilityText(`删除搜索记录 ${q}`)
                 .onClick(() => { this.removeRecentAt(i); })
             }
             .width('100%')
-            .height(44)
-            .padding({ left: 16, right: 16 })
+            .height(Dim.touchMin)
+            .padding({ left: Dim.s4, right: Dim.s4 })
             .onClick(() => {
               this.keyword = q;
               this.doSearch(q, 1);
@@ -460,69 +501,76 @@ export struct SearchPage {
         .fontColor(Tokens.text1)
         .caretStyle({ color: Tokens.accent })
         .backgroundColor(Tokens.panel)
-        .height(40)
-        .margin({ left: 16, right: 16, top: 12 })
+        .height(Dim.inputH)
+        .margin({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
 
-      Row({ space: 4 }) {
+      Row({ space: Dim.s1 }) {
         this.sliceButton('单曲', 0)
         this.sliceButton('专辑', 1)
         this.sliceButton('歌手', 2)
       }
       .width('100%')
       .justifyContent(FlexAlign.Center)
-      .padding({ top: 8, bottom: 8 })
+      .padding({ top: Dim.s2, bottom: Dim.s2 })
 
-      if (!this.searched) {
+      if (this.searching && this.sliceCount() === 0) {
+        // 首次搜索加载：骨架屏替代转圈（S4 §六）。
+        // 放在 !searched 之前：首搜在途时立即离开「最近搜索」页，给出发起反馈
+        SkeletonList()
+      } else if (!this.searched) {
         if (this.recent.length > 0) {
           this.recentList()
         } else {
-          Column() {
-            Text('搜索你想听的歌')
-              .fontSize(13).fontColor(Tokens.text2)
-          }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
+          // 初始提示：空态（无图标，副文案即引导）
+          EmptyState({ title: '搜索你想听的歌', subtitle: '搜歌曲、歌手或专辑' })
         }
-      } else if (this.searching && this.sliceCount() === 0) {
-        Row() { LoadingProgress().width(28).height(28) }
-          .width('100%')
-          .layoutWeight(1)
-          .justifyContent(FlexAlign.Center)
       } else if (this.degradedText.length > 0 && this.sliceCount() === 0) {
         // QQ 上游限流：服务端 200 + degraded，提示而非空结果（T2 补验第 7 条）
-        Column({ space: 8 }) {
+        Column({ space: Dim.s2 }) {
           Text(this.degradedText)
-            .fontSize(13).fontColor(Tokens.accent).textAlign(TextAlign.Center)
-            .padding({ left: 32, right: 32 })
+            .fontSize(Dim.fsBody).fontColor(Tokens.accent).textAlign(TextAlign.Center)
+            .padding({ left: Dim.s6, right: Dim.s6 })
           Text('上游限流是临时的，稍等一下再试，不是搜索坏了')
-            .fontSize(12).fontColor(Tokens.text2)
+            .fontSize(Dim.fsMinor).fontColor(Tokens.text2)
         }
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else if (this.err.length > 0 && this.sliceCount() === 0) {
-        Column({ space: 10 }) {
-          Text(this.err).fontSize(13).fontColor('#E5484D')
-          Button('重试').onClick(() => { this.doSearch(this.lastQuery, 1); })
+        Column({ space: Dim.s3 }) {
+          Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Button('重试')
+            .height(Dim.touchMin)
+            .fontSize(Dim.fsSub)
+            .backgroundColor(Tokens.panel)
+            .fontColor(Tokens.text1)
+            .onClick(() => { this.doSearch(this.lastQuery, 1); })
         }
         .width('100%')
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
+      } else if (this.sliceCount() === 0) {
+        // 搜到了空结果：统一空态（S4 §五）
+        EmptyState({
+          icon: $r('sys.symbol.magnifyingglass'),
+          title: Copy.emptySearchTitle,
+          subtitle: Copy.emptySearchSub
+        })
       } else {
         List({ space: 0 }) {
           if (this.activeSlice === 0) {
-            ForEach(this.songs, (t: Track, i: number) => {
+            // 单曲长列表懒加载（S4 §四）
+            LazyForEach(this.songRows, (row: TrackRow) => {
               ListItem() {
                 TrackItem({
-                  track: t,
-                  index: i + 1,
-                  isFav: this.favIds.indexOf(t.id) >= 0,
-                  onSwipeToggle: () => this.toggleFav(t),
-                  onTap: () => { this.playAt(i); }
+                  track: row.track,
+                  index: row.no,
+                  isFav: row.fav,
+                  onSwipeToggle: () => this.toggleFav(row.track),
+                  onTap: () => { this.playAt(row.track.id); }
                 })
               }
-            }, (t: Track) => t.id)
+            }, (row: TrackRow) => row.track.id)
           } else if (this.activeSlice === 1) {
             ForEach(this.albums, (a: Album) => {
               ListItem() { this.albumRow(a) }

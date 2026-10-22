@@ -1,5 +1,5 @@
 /**
- * 鸿蒙原生客户端入口（S2）。
+ * 鸿蒙原生客户端入口（S2；S4 打磨：Tab 切换动效/浮层转场/冷启动延后）。
  *
  * **这里没有 ArkWeb、没有 WebView** —— 全原生迭代的前提。
  * 旧 `pages/Index.ets`（WebView 壳）保留在原处作为回退路径，S2/S3 验收通过后删除。
@@ -20,6 +20,7 @@ import { MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_HAS_TRACK, K_
 import { HarmonyAVSessionManager } from '../common/AVSessionManager';
 import { common } from '@kit.AbilityKit';
 import { Tokens } from '../common/Tokens';
+import { Dim, Motion } from '../common/Dimension';
 
 @Entry
 @Component
@@ -50,13 +51,17 @@ struct NativeRoot {
   }
 
   aboutToAppear(): void {
-    // `getContext(this)` 已弃用；从 UIContext 取宿主 Context
-    const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
-    this.avSession = new HarmonyAVSessionManager(ctx, null);
-    this.avSession.init();
-    // 播放内核需要 context 拿 filesDir（缓存）与 AVSession（锁屏/长时任务）
-    MediaPlayerCore.shared().init(ctx, this.avSession);
-    AppState.shared().bootstrap(ctx);
+    // 冷启动（S4 §四验收#4）：AVSession/播放内核/bootstrap 都是首帧之后才需要的
+    // 初始化，让出主线程先把登录页首帧画出来（<1.5s 目标）
+    setTimeout(() => {
+      // `getContext(this)` 已弃用；从 UIContext 取宿主 Context
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      this.avSession = new HarmonyAVSessionManager(ctx, null);
+      this.avSession.init();
+      // 播放内核需要 context 拿 filesDir（缓存）与 AVSession（锁屏/长时任务）
+      MediaPlayerCore.shared().init(ctx, this.avSession);
+      AppState.shared().bootstrap(ctx);
+    }, 0);
   }
 
   aboutToDisappear(): void {
@@ -89,15 +94,20 @@ struct NativeRoot {
     return false;
   }
 
-  /** 底部导航按钮：系统 Symbol 图标 + 文字，选中态 accent */
+  /** 底部导航按钮：系统 Symbol 图标 + 文字，选中态 accent；选中图标轻微弹大 */
   @Builder
   tabBuilder(title: string, icon: Resource, idx: number) {
-    Column({ space: 2 }) {
+    Column({ space: Dim.s0 }) {
       SymbolGlyph(icon)
-        .fontSize(22)
+        .fontSize(Dim.iconLg)
         .fontColor(this.currentTab === idx ? [Tokens.accent] : [Tokens.text2])
+        .scale({
+          x: this.currentTab === idx ? 1.15 : 1,
+          y: this.currentTab === idx ? 1.15 : 1
+        })
+        .animation({ duration: Motion.standard, curve: Motion.curve })
       Text(title)
-        .fontSize(10)
+        .fontSize(Dim.fsCaption)
         .fontColor(this.currentTab === idx ? Tokens.accent : Tokens.text2)
     }
     .justifyContent(FlexAlign.Center)
@@ -105,23 +115,25 @@ struct NativeRoot {
 
   @Builder
   playerBar() {
-    Row({ space: 10 }) {
+    Row({ space: Dim.s2 }) {
       Image(this.cover.length > 0 ? this.cover : $r('app.media.app_icon'))
-        .width(40).height(40).borderRadius(6).objectFit(ImageFit.Cover)
-      Column({ space: 2 }) {
-        Text(this.title).fontSize(14).fontColor(Tokens.text1).maxLines(1)
+        .width(Dim.coverBar).height(Dim.coverBar).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
+      Column({ space: Dim.s0 }) {
+        Text(this.title).fontSize(Dim.fsSub).fontColor(Tokens.text1).maxLines(1)
           .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.artist).fontSize(11).fontColor(Tokens.text2).maxLines(1)
+        Text(this.artist).fontSize(Dim.fsCaption).fontColor(Tokens.text2).maxLines(1)
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       Button(this.playing ? '暂停' : '播放')
-        .height(32).backgroundColor(Tokens.accent).fontColor(Tokens.bg).fontSize(12)
+        .height(Dim.touchMin).backgroundColor(Tokens.accent).fontColor(Tokens.bg).fontSize(Dim.fsMinor)
+        .accessibilityText(this.playing ? '暂停' : '播放')
         .onClick(() => { MediaPlayerCore.shared().toggle(); })
     }
     .width('100%')
-    .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+    .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
     .backgroundColor(Tokens.panel)
+    .accessibilityText('打开播放页')
     .onClick(() => { this.showPlayer = true; })
   }
 
@@ -148,7 +160,11 @@ struct NativeRoot {
             }
               .tabBar(this.tabBuilder('我的', $r('sys.symbol.person'), 4))
           }
-          .onChange((i: number) => { this.currentTab = i; })
+          .onChange((i: number) => {
+            // 页面零动效：任何整页位移/透明度变化都会读成"抖动/闪屏"。
+            // 动效只保留在 tab 按钮上（选中图标弹跳 + 变色）
+            this.currentTab = i;
+          })
           // 禁用 Tabs 自带的横滑切页：它会抢走列表行右滑收藏手势的横向位移
           // （Tab 仍可通过底部 tabBar 点击切换，与 web 移动端行为一致）
           .scrollable(false)
@@ -163,16 +179,45 @@ struct NativeRoot {
         })
       }
 
+      // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板不关浮层（避免误触丢输入/状态）
+      if (this.showPlayer || this.showServers || this.showCache) {
+        Column()
+          .width('100%')
+          .height('100%')
+          .backgroundColor(Tokens.scrim)
+          .transition(TransitionEffect.OPACITY.animation({ duration: Motion.standard, curve: Motion.curve }))
+          .onClick(() => {})
+      }
+
+      // 播放页 / 服务端管理 / 缓存面板：底部上滑转场（S4 §二，200ms EaseOut）
       if (this.showPlayer) {
-        PlayerPage({ onClose: () => { this.showPlayer = false; } })
+        Column() {
+          PlayerPage({ onClose: () => { this.showPlayer = false; } })
+        }
+        .width('100%')
+        .height('100%')
+        .transition(TransitionEffect.translate({ y: '100%' })
+          .animation({ duration: Motion.standard, curve: Motion.curve }))
       }
 
       if (this.showServers) {
-        ServerListPage({ onClose: () => { this.showServers = false; } })
+        Column() {
+          ServerListPage({ onClose: () => { this.showServers = false; } })
+        }
+        .width('100%')
+        .height('100%')
+        .transition(TransitionEffect.translate({ y: '100%' })
+          .animation({ duration: Motion.standard, curve: Motion.curve }))
       }
 
       if (this.showCache) {
-        CachePage({ onClose: () => { this.showCache = false; } })
+        Column() {
+          CachePage({ onClose: () => { this.showCache = false; } })
+        }
+        .width('100%')
+        .height('100%')
+        .transition(TransitionEffect.translate({ y: '100%' })
+          .animation({ duration: Motion.standard, curve: Motion.curve }))
       }
     }
     .width('100%')
