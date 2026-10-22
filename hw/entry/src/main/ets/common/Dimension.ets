@@ -57,6 +57,16 @@ export class Dim {
   static readonly inputH = 40;
   static readonly seqW = 24;
 
+  // ---- 哑光质感（T5.5，web neu.css 同款语义） ----
+  /** 发丝线宽（1px 描边/顶沿内高光条的厚度） */
+  static readonly hairline = 1;
+  /** 海报大卡占屏宽比例（web ≤767px 一屏 2 张 → 露出下一张边缘的视觉暗示） */
+  static readonly posterRatio = 0.62;
+  /** 海报压字渐变区占卡高比例（web poster-meta 的渐变覆盖带） */
+  static readonly posterScrimRatio = 0.5;
+  /** 指示点边长（web rail-dot 6px 方点） */
+  static readonly dot = 6;
+
   // ---- 歌词上下留白（vp）：让第一行 / 最后一行也能滚到屏幕中间 ----
   static readonly lyricPadTop = 120;
   static readonly lyricPadBottom = 160;

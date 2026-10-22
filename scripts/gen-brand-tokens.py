@@ -35,6 +35,12 @@ WANTED = {
     "--accent-text": "accentText",
     "--scrim": "scrim",
     "--track": "track",
+    # 海报位/封面卡共有形态（T5.5）：顶沿内高光、压字渐变、日期角标、badge 深字
+    "--hi": "hi",
+    "--poster-scrim": "posterScrim",
+    "--poster-scrim-mid": "posterScrimMid",
+    "--date-chip": "dateChip",
+    "--badge-ink": "badgeInk",
 }
 
 

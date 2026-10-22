@@ -51,6 +51,8 @@ export struct TrackItem {
   track: Track = { id: '', name: '', ar: [], al: { id: '', name: '', picUrl: '' }, dt: 0 };
   /** 序号（1 起）；< 0 不显示序号列 */
   index: number = -1;
+  /** 封面边长（vp）。默认 44（新歌/搜索行）；收藏/专属行传 48 提权重（T5.5 §2.2） */
+  coverSize: number = Dim.coverSm;
   /** 当前曲目是否已收藏：决定动作区文案、底色与序号染色 */
   @Prop isFav: boolean = false;
   /** 已收藏时把序号染琥珀；收藏页传 false（每行都是收藏，全染没有信息量） */
@@ -102,7 +104,7 @@ export struct TrackItem {
             .textAlign(TextAlign.Center)
         }
         Image(this.track.al.picUrl.length > 0 ? this.track.al.picUrl : $r('app.media.app_icon'))
-          .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
+          .width(this.coverSize).height(this.coverSize).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
         Column({ space: Dim.s0 }) {
           Text(this.track.name)
             .fontSize(Dim.fsTitle)

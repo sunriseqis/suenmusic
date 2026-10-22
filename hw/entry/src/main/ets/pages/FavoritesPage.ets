@@ -236,6 +236,7 @@ export struct FavoritesPage {
                   TrackItem({
                     track: item.track,
                     index: -1,
+                    coverSize: Dim.s5 * 2,
                     isFav: true,
                     markFav: false,
                     swipeRemoveOnUnfavorite: true,

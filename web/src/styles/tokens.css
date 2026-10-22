@@ -103,6 +103,12 @@
   --scrim: rgba(20, 20, 20, 0.42);
   --track: #dcd6c9;
 
+  /* ---- 跨端共有组件色（海报压字 / 日期角标 / badge 字色） ---- */
+  --poster-scrim: rgba(0, 0, 0, 0.78); /* 海报压字渐变·底缘（对比度兜底，不靠图片） */
+  --poster-scrim-mid: rgba(0, 0, 0, 0.42); /* 海报压字渐变·中段 */
+  --date-chip: rgba(0, 0, 0, 0.5); /* 发行日角标自带暗底 */
+  --badge-ink: #ffffff; /* badge 深字：浅色琥珀上用白 */
+
   /* 品牌标记（MarkBold）：浅色下琥珀要压深才在纸底上可读 */
   --mark-plate: #fffdf8;
   --mark-frame: #d8d2c6;
@@ -129,6 +135,12 @@
 
   --scrim: rgba(0, 0, 0, 0.66);
   --track: #2a2c30;
+
+  /* ---- 跨端共有组件色（与浅色块同值：压字/角标是内容层，不随主题翻面） ---- */
+  --poster-scrim: rgba(0, 0, 0, 0.78);
+  --poster-scrim-mid: rgba(0, 0, 0, 0.42);
+  --date-chip: rgba(0, 0, 0, 0.5);
+  --badge-ink: #1a1206; /* badge 深字：琥珀填充上的深墨 */
 
   /* 品牌标记（MarkBold） */
   --mark-plate: #17181b;

@@ -18,6 +18,11 @@ enum DesignTokens {
     static let accentText = Color(red: 0.910, green: 0.639, blue: 0.239) // #e8a33d
     static let scrim = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.659) // rgba(0, 0, 0, 0.66)
     static let track = Color(red: 0.165, green: 0.173, blue: 0.188) // #2a2c30
+    static let hi = Color(red: 1.000, green: 1.000, blue: 1.000, opacity: 0.059) // rgba(255, 255, 255, 0.06)
+    static let posterScrim = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.780) // rgba(0, 0, 0, 0.78)
+    static let posterScrimMid = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.420) // rgba(0, 0, 0, 0.42)
+    static let dateChip = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.502) // rgba(0, 0, 0, 0.5)
+    static let badgeInk = Color(red: 0.102, green: 0.071, blue: 0.024) // #1a1206
 
     // ---- 浅色（纸白）—— 备用 ----
     static let bgLight = Color(red: 0.949, green: 0.941, blue: 0.918) // #f2f0ea
@@ -30,4 +35,9 @@ enum DesignTokens {
     static let accentTextLight = Color(red: 0.561, green: 0.306, blue: 0.031) // #8f4e08
     static let scrimLight = Color(red: 0.078, green: 0.078, blue: 0.078, opacity: 0.420) // rgba(20, 20, 20, 0.42)
     static let trackLight = Color(red: 0.863, green: 0.839, blue: 0.788) // #dcd6c9
+    static let hiLight = Color(red: 1.000, green: 1.000, blue: 1.000, opacity: 0.949) // rgba(255, 255, 255, 0.95)
+    static let posterScrimLight = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.780) // rgba(0, 0, 0, 0.78)
+    static let posterScrimMidLight = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.420) // rgba(0, 0, 0, 0.42)
+    static let dateChipLight = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.502) // rgba(0, 0, 0, 0.5)
+    static let badgeInkLight = Color(red: 1.000, green: 1.000, blue: 1.000) // #ffffff
 }

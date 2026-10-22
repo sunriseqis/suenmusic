@@ -20,6 +20,8 @@ const PREF_NAME = 'suenmusic';
 
 export const K_LOGGED_IN = 'logged_in';
 export const K_USER_NAME = 'user_name';
+/** 用户昵称（displayName，可空）—— 首页欢迎区第一行；空则回退 username */
+export const K_USER_DISPLAY = 'user_display';
 /** 收藏集合版本号：任何页面收藏/取消成功后 +1，收藏页监听它做跨页即时刷新 */
 export const K_FAV_REV = 'fav_rev';
 /** 当前服务端地址（AppStorage 通道）：设置页/服务端管理页跨组件即时显示 */
@@ -71,6 +73,7 @@ export class AppState {
       this.user = await this.api.me();
       AppStorage.setOrCreate<boolean>(K_LOGGED_IN, true);
       AppStorage.setOrCreate<string>(K_USER_NAME, this.user.username);
+      AppStorage.setOrCreate<string>(K_USER_DISPLAY, this.user.displayName);
       hilog.info(DOMAIN, TAG, '恢复登录成功: %{public}s', this.user.username);
     } catch (e) {
       // 刷新令牌失效才真的回登录页；网络不通不该把用户踢出去
@@ -98,6 +101,7 @@ export class AppState {
     this.user = session.user;
     AppStorage.setOrCreate<boolean>(K_LOGGED_IN, true);
     AppStorage.setOrCreate<string>(K_USER_NAME, session.user.username);
+    AppStorage.setOrCreate<string>(K_USER_DISPLAY, session.user.displayName);
   }
 
   signOut(): void {
@@ -105,6 +109,7 @@ export class AppState {
     this.user = null;
     AppStorage.setOrCreate<boolean>(K_LOGGED_IN, false);
     AppStorage.setOrCreate<string>(K_USER_NAME, '');
+    AppStorage.setOrCreate<string>(K_USER_DISPLAY, '');
   }
 
   async home(): Promise<HomeData> {

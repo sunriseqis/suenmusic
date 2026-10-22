@@ -66,4 +66,66 @@ export class Copy {
   static readonly emptyLyricTitle: string = '这首歌暂无歌词';
   static readonly emptyQueueTitle: string = '队列是空的';
   static readonly emptyQueueSub: string = '去首页挑一首';
+
+  /** 详情页占位 Toast（T5.5）：专辑/榜单详情页尚未落地（并入后续单子），点击先给口头的「有回应」 */
+  static readonly comingSoon: string = '即将上线';
+  /** 榜单卡 badge（web CoverCard `badge="榜"`） */
+  static readonly badgeToplist: string = '榜';
+  /** 首页区块标题（web `.block-title`，11px 宽字距小标） */
+  static readonly sectionNewAlbums: string = '新碟首发';
+  static readonly sectionNewSongs: string = '新歌首发';
+  static readonly sectionToplists: string = '巅峰榜';
+}
+
+// ---------------------------------------------------------------------------
+// AI 文案解析（与 web `utils/format.ts` 逐句对齐：cleanAiText / parseAiHeader）。
+// 每日页导语（greeting）= 专属推荐语；首页欢迎语（welcomePhrase）是另一个
+// 字段、另一个场景 —— 两者彻底分开，每日页只渲染 greeting。
+// ---------------------------------------------------------------------------
+
+/** 清洗 AI 输出：去 Markdown 残留 / 多余引号 / 前导杂标点，规范空白 */
+export function cleanAiText(raw: string): string {
+  let s = raw.replace(/```[\s\S]*?```/g, ' ').replace(/`([^`]+)`/g, '$1');
+  s = s.replace(/(?:^|\n)\s*#+\s*/g, ' ').replace(/#+/g, '');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1');
+  s = s.replace(/__([^_]+)__/g, '$1').replace(/_([^_]+)_/g, '$1');
+  s = s.replace(/~~([^~]+)~~/g, '$1');
+  s = s.replace(/(?:^|\n)\s*>\s*/g, ' ');
+  s = s.replace(/(?:^|\n)\s*[-*+]\s+/g, ' ');
+  s = s.replace(/["“”'‘’]/g, '').replace(/\s+/g, ' ').trim();
+  s = s.replace(/^[，,：:;；、\-—\s]+/, '').trim();
+  return s;
+}
+
+/** AI 标语/导语解析结果：主标题 + 副标题小字 */
+export interface AiHeader {
+  title: string;
+  sub: string;
+}
+
+/**
+ * 解析 AI 导语：首个逗号前（2~10 字）做主标题，其后做副标题小字；
+ * 拆不出主标题时整句落副标题、主标题回退默认页面名。
+ * 严格防御漏网的英文安全/风控标签爬上主标题位。
+ */
+export function parseAiHeader(raw: string, defaultTitle: string): AiHeader {
+  const text = cleanAiText(raw);
+  if (text.length === 0) {
+    return { title: defaultTitle, sub: '' };
+  }
+  const commaIdx = text.search(/[，,\n]/);
+  if (commaIdx > 0) {
+    const head = text.substring(0, commaIdx).trim();
+    const tail = text.substring(commaIdx + 1).trim().replace(/^[，,\s]+/, '');
+    if (/safety|system|assistant/i.test(head)) {
+      return { title: defaultTitle, sub: tail };
+    }
+    if (head.length >= 2 && head.length <= 10 && tail.length > 0) {
+      return { title: head, sub: tail };
+    }
+  }
+  if (text.length <= 8 && !/safety/i.test(text)) {
+    return { title: text, sub: '' };
+  }
+  return { title: defaultTitle, sub: text };
 }

@@ -1,16 +1,23 @@
-import { AppState, K_HOME_REFRESH } from '../viewmodel/AppState';
+import { AppState, K_HOME_REFRESH, K_USER_NAME, K_USER_DISPLAY } from '../viewmodel/AppState';
 import { MediaPlayerCore } from '../core/MediaPlayerCore';
-import { HomeData, Track, Toplist, StreamSessionToken } from '../core/Models';
+import { HomeData, Track, Toplist, Album, albumArtistLine, StreamSessionToken } from '../core/Models';
 import { ApiError, APIClient } from '../core/APIClient';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
-import { Dim } from '../common/Dimension';
+import { Dim, Motion } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
 import { TrackRow, TrackRowSource } from '../common/TrackSources';
 import { SkeletonList } from './SkeletonList';
 
-/** 首页：新歌/榜单（S2 只做能点播的列表；S4 加骨架屏/下拉刷新/懒加载） */
+/** 新歌列表实际展示行数（web 移动端 `slice(0, 8)`；点击任意一首 = 全量 newSongs 进队列） */
+const NEW_SONG_ROWS = 8;
+
+/**
+ * 首页（T5.5 重建）：对齐移动版 Web（`Home.vue` ≤767px 断点 = 最终交付标准）。
+ * 信息层级：欢迎语 → 新碟海报（一屏 2 张 1:1 大卡）→ 新歌首发（8 行 + 播放全部）
+ * → 巅峰榜（两列封面卡）。哑光质感 = 色差层面 + 发丝线 + 顶沿内高光，禁外阴影。
+ */
 @Component
 export struct HomePage {
   @State home: HomeData | null = null;
@@ -24,6 +31,9 @@ export struct HomePage {
   @State lastOkAt: number = 0;
   /** 热启动刷新信号（NativeRoot 回前台 +1）：后台重拉，离线时横幅能及时出现/消失 */
   @StorageLink(K_HOME_REFRESH) @Watch('onHomeRev') homeRev: number = 0;
+  /** 用户名 / 昵称（登录态写入 AppStorage）：欢迎区第一行；昵称缺失回退用户名 */
+  @StorageProp(K_USER_NAME) userName: string = '';
+  @StorageProp(K_USER_DISPLAY) userDisplay: string = '';
   /** 下拉刷新状态（Refresh 两向绑定） */
   @State refreshing: boolean = false;
   /** 新歌列表的 LazyForEach 渲染投影（数据真相仍是 home.newSongs） */
@@ -72,11 +82,12 @@ export struct HomePage {
     }
   }
 
-  /** home.newSongs + favIds → LazyForEach 投影（数据/收藏每次变化后同步） */
+  /** home.newSongs 前 8 首 + favIds → LazyForEach 投影（数据/收藏每次变化后同步） */
   private syncSongRows(): void {
     const songs = this.home === null ? [] : this.home.newSongs;
     const rows: TrackRow[] = [];
-    for (let i = 0; i < songs.length; i++) {
+    const shown = Math.min(songs.length, NEW_SONG_ROWS);
+    for (let i = 0; i < shown; i++) {
       rows.push(new TrackRow(songs[i], this.hasFav(songs[i].id), i + 1));
     }
     this.songRows.reload(rows);
@@ -92,6 +103,20 @@ export struct HomePage {
     const md = (month < 10 ? '0' + month : '' + month) + '-' + (day < 10 ? '0' + day : '' + day);
     const hm = (hour < 10 ? '0' + hour : '' + hour) + ':' + (minute < 10 ? '0' + minute : '' + minute);
     return md + ' ' + hm;
+  }
+
+  /** 巅峰榜 → 两列行分组（web ≤767px 两列网格；奇数行末卡独占半宽，与 web grid 同） */
+  private toplistRows(): Toplist[][] {
+    const all = this.home === null ? [] : this.home.toplists;
+    const rows: Toplist[][] = [];
+    for (let i = 0; i < all.length; i += 2) {
+      const row: Toplist[] = [all[i]];
+      if (i + 1 < all.length) {
+        row.push(all[i + 1]);
+      }
+      rows.push(row);
+    }
+    return rows;
   }
 
   // ---------------- 收藏标记（右滑手势的支撑，失败静默不打断浏览） ----------------
@@ -157,6 +182,16 @@ export struct HomePage {
     }
   }
 
+  /** 断网时取不到流令牌也继续：缓存命中的曲目走 `fd://` 离线播（详见 playAt 注释） */
+  private async acquireToken(): Promise<string> {
+    try {
+      return (await APIClientToken()).token;
+    } catch (e) {
+      hilog.warn(0x0000, 'HomePage', '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
+      return '';
+    }
+  }
+
   private async playAt(trackId: string): Promise<void> {
     /**
      * 断网（飞行模式）时取不到流令牌 —— 不能因此拦截点击：
@@ -171,12 +206,7 @@ export struct HomePage {
       if (songs[i].id === trackId) { index = i; break; }
     }
     if (index < 0) { return; }
-    let token = '';
-    try {
-      token = (await APIClientToken()).token;
-    } catch (e) {
-      hilog.warn(0x0000, 'HomePage', '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
-    }
+    const token = await this.acquireToken();
     try {
       await MediaPlayerCore.shared().setQueue(songs, index, token);
     } catch (e) {
@@ -185,11 +215,146 @@ export struct HomePage {
     }
   }
 
+  /** 专辑/榜单详情页未落地（后续单子）：点击先给「有回应」的占位 Toast */
+  private toastComingSoon(): void {
+    try {
+      this.getUIContext().getPromptAction().showToast({
+        message: Copy.comingSoon,
+        duration: 2000
+      });
+    } catch (toastErr) {
+      hilog.warn(0x0000, 'HomePage', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
+    }
+  }
+
+  // ---------------- 区块 UI（web Home.vue ≤767px 逐区块对齐） ----------------
+
+  /** 区块小标（web `.block-title`：11px、0.18em 字距、次级灰、中等字重） */
+  @Builder
+  sectionTitle(title: string) {
+    Text(title)
+      .fontSize(Dim.fsCaption)
+      .letterSpacing(Dim.s0)
+      .fontWeight(FontWeight.Medium)
+      .fontColor(Tokens.text2)
+      .width('100%')
+      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s4, bottom: Dim.s1 })
+  }
+
+  /** 哑光凸面的顶沿内高光（web `box-shadow: inset 0 1px 0 var(--hi)` 的等价物） */
+  @Builder
+  topSheen() {
+    Row()
+      .height(Dim.hairline)
+      .width('100%')
+      .backgroundColor(Tokens.hi)
+      .position({ x: 0, y: 0 })
+  }
+
+  /**
+   * 新碟海报大卡（web `.poster`）：封面铺满 + 日期角标（左上，自带暗底）+
+   * 底部渐变压字（专辑名/歌手，对比度由上暗渐变兜底、不靠图片碰运气）。
+   * 凸面板 = panel2 底 + 发丝线描边 + 顶沿内高光，无外阴影。
+   */
+  @Builder
+  posterCard(a: Album) {
+    Stack({ alignContent: Alignment.BottomStart }) {
+      Image(a.picUrl.length > 0 ? a.picUrl : $r('app.media.app_icon'))
+        .width('100%')
+        .aspectRatio(1)
+        .objectFit(ImageFit.Cover)
+      this.topSheen()
+      // 发行日角标（web `.poster-date`）：左上、rgba(0,0,0,0.5) 底白字；解析不出就空串不占位
+      Text(releaseBadge(a.publishTime === undefined ? '' : a.publishTime))
+        .fontSize(Dim.fsCaption)
+        .fontColor(Color.White)
+        .backgroundColor(Tokens.dateChip)
+        .borderRadius(Dim.s0)
+        .padding({ left: Dim.s1, right: Dim.s1, top: Dim.hairline, bottom: Dim.hairline })
+        .position({ x: Dim.s3, y: Dim.s3 })
+      // 压字区（web `.poster-meta`）：上暗渐变 0.78 → 0.42 → 透明
+      Column({ space: Dim.s0 }) {
+        Text(a.name)
+          .fontSize(Dim.fsBody)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(Color.White)
+          .maxLines(2)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(albumArtistLine(a))
+          .fontSize(Dim.fsMinor)
+          .fontColor(Color.White)
+          .opacity(0.82)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
+      .padding({ top: Dim.s5, left: Dim.s3, right: Dim.s3, bottom: Dim.s3 })
+      .linearGradient({
+        angle: 270,
+        colors: [
+          [Tokens.posterScrim, 0],
+          [Tokens.posterScrimMid, 0.52],
+          ['#00000000', 1]
+        ]
+      })
+    }
+    .width('100%')
+    .backgroundColor(Tokens.panel2)
+    .borderRadius(Dim.radiusMd)
+    .border({ width: Dim.hairline, color: Tokens.line })
+    .clip(true)
+    .margin({ left: Dim.s2, right: Dim.s2, bottom: Dim.s5 })
+    .onClick(() => { this.toastComingSoon(); })
+  }
+
+  /**
+   * 巅峰榜封面卡（web `CoverCard.vue` + badge「榜」）：
+   * 1:1 封面 + 发丝线 + 顶沿内高光 + 右下 badge + 榜名两行 + 更新频率副行。
+   */
+  @Builder
+  toplistCard(t: Toplist) {
+    Column({ space: Dim.s2 }) {
+      Stack({ alignContent: Alignment.BottomEnd }) {
+        Image(t.picUrl.length > 0 ? t.picUrl : $r('app.media.app_icon'))
+          .width('100%')
+          .aspectRatio(1)
+          .objectFit(ImageFit.Cover)
+        this.topSheen()
+        Text(Copy.badgeToplist)
+          .fontSize(Dim.fsCaption)
+          .fontColor(Tokens.badgeInk)
+          .backgroundColor(Tokens.accent)
+          .borderRadius(Dim.s0)
+          .padding({ left: Dim.s1, right: Dim.s1, top: Dim.hairline, bottom: Dim.hairline })
+          .margin(Dim.s1)
+      }
+      .width('100%')
+      .backgroundColor(Tokens.panel2)
+      .borderRadius(Dim.radiusMd)
+      .border({ width: Dim.hairline, color: Tokens.line })
+      .clip(true)
+      Text(t.name)
+        .fontSize(Dim.fsBody)
+        .fontColor(Tokens.text1)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      Text(t.updateFrequency === undefined ? '' : t.updateFrequency)
+        .fontSize(Dim.fsMinor)
+        .fontColor(Tokens.text2)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+    }
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+    .onClick(() => { this.toastComingSoon(); })
+  }
+
   build() {
     Column() {
       if (this.loading && this.home === null) {
-        // 冷启动首屏：骨架块替代转圈（S4 §六）
-        SkeletonList()
+        // 冷启动首屏：海报占位 + 列表占位（与真实区块同序，加载完成不跳变）
+        SkeletonList({ withPoster: true })
       } else if (this.err.length > 0 && this.home === null) {
         Column({ space: Dim.s3 }) {
           Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
@@ -211,17 +376,56 @@ export struct HomePage {
                   .width('100%').padding({ left: Dim.s4, top: Dim.s2, bottom: Dim.s1 })
               }
             }
+            // 欢迎区（用户定稿形态）：第一行昵称（大字）、第二行 AI 欢迎语，
+            // 两行都坚决单行（超长省略）—— AI 短语长度由后端约束，客户端只兜底不换行
             if (this.home.welcomePhrase !== undefined && this.home.welcomePhrase.length > 0) {
               ListItem() {
-                Text(this.home.welcomePhrase).fontSize(Dim.fsSection).fontWeight(FontWeight.Medium)
-                  .width('100%').padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
+                Column({ space: Dim.s0 }) {
+                  Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
+                    .fontSize(Dim.fsBrand)
+                    .fontWeight(FontWeight.Bold)
+                    .fontColor(Tokens.text1)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .width('100%')
+                  Text(this.home.welcomePhrase)
+                    .fontSize(Dim.fsBody)
+                    .fontColor(Tokens.text2)
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    .width('100%')
+                }
+                .width('100%')
+                .alignItems(HorizontalAlign.Start)
+                .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
               }
             }
-            if (this.home.newSongs.length > 0) {
+            // ---- 新碟首发：一屏 2 张 1:1 大卡横滑（web ≤767px `--poster-per-page: 2`） ----
+            if (this.home.newAlbums.length > 0) {
+              ListItem() { this.sectionTitle(Copy.sectionNewAlbums) }
               ListItem() {
-                Text('新歌首发').fontSize(Dim.fsMinor).fontColor(Tokens.text2)
-                  .width('100%').padding({ left: Dim.s4, top: Dim.s3, bottom: Dim.s1 })
+                Swiper() {
+                  ForEach(this.home.newAlbums, (a: Album) => {
+                    this.posterCard(a)
+                  }, (a: Album) => a.id)
+                }
+                .width('100%')
+                .displayCount(2)
+                .loop(false)
+                .cachedCount(1)
+                .duration(Motion.standard)
+                .curve(Motion.curve)
+                .indicator(Indicator.dot()
+                  .itemWidth(Dim.dot)
+                  .itemHeight(Dim.dot)
+                  .color(Tokens.line)
+                  .selectedColor(Tokens.accent))
               }
+              .padding({ left: Dim.s2, right: Dim.s2 })
+            }
+            // ---- 新歌首发：8 行曲目 + 播放全部（web `slice(0, 8)` + `.list-play-all`） ----
+            if (this.home.newSongs.length > 0) {
+              ListItem() { this.sectionTitle(Copy.sectionNewSongs) }
               // 长列表懒加载（S4 §四）：只挂可见区附近的行
               LazyForEach(this.songRows, (row: TrackRow) => {
                 ListItem() {
@@ -235,22 +439,24 @@ export struct HomePage {
                 }
               }, (row: TrackRow) => row.track.id)
             }
+            // ---- 巅峰榜：两列封面卡（web ≤767px 两列 CoverCard 网格） ----
             if (this.home.toplists.length > 0) {
-              ListItem() {
-                Text('榜单').fontSize(Dim.fsMinor).fontColor(Tokens.text2)
-                  .width('100%').padding({ left: Dim.s4, top: Dim.s4, bottom: Dim.s1 })
-              }
-              ForEach(this.home.toplists, (l: Toplist) => {
+              ListItem() { this.sectionTitle(Copy.sectionToplists) }
+              ForEach(this.toplistRows(), (row: Toplist[]) => {
                 ListItem() {
-                  Row() {
-                    Text(l.name).fontSize(Dim.fsTitle).fontColor(Tokens.text1)
-                    Blank()
-                    Text(l.updateFrequency === undefined ? '' : l.updateFrequency)
-                      .fontSize(Dim.fsCaption).fontColor(Tokens.text2)
+                  Row({ space: Dim.s4 }) {
+                    ForEach(row, (t: Toplist) => {
+                      this.toplistCard(t)
+                    }, (t: Toplist) => t.id)
                   }
-                  .width('100%').padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+                  .width('100%')
+                  .padding({ left: Dim.s4, right: Dim.s4, bottom: Dim.s3 })
                 }
-              }, (l: Toplist) => l.id)
+              }, (row: Toplist[]) => row[0].id)
+            }
+            // 尾部留白：最后一排榜单卡不贴 tab 栏
+            ListItem() {
+              Row().height(Dim.s4).width('100%')
             }
           }
           .width('100%')
@@ -264,6 +470,25 @@ export struct HomePage {
     .height('100%')
     .backgroundColor(Tokens.bg)
   }
+}
+
+/**
+ * 发行日角标：`2026-09-11` → `09-11`（web `releaseBadge` 同口径）。
+ * 上游 release_time 的完整格式不是契约的一部分，解析不出月日就返回空串 ——
+ * 宁可少一个角标，也不要显示 `NaN-NaN`。
+ */
+function releaseBadge(raw: string): string {
+  const m = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(raw);
+  if (m === null) {
+    return '';
+  }
+  const month = m[2];
+  const day = m[3];
+  if (month === undefined || day === undefined) {
+    return '';
+  }
+  const pad = (v: string): string => v.length < 2 ? '0' + v : v;
+  return pad(month) + '-' + pad(day);
 }
 
 /** 取流会话令牌的小包装（避免在页面里堆 try/catch） */

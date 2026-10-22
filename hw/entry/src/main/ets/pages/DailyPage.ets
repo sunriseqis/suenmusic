@@ -3,7 +3,7 @@ import { APIClient, ApiError } from '../core/APIClient';
 import { MediaPlayerCore } from '../core/MediaPlayerCore';
 import { DailyRecommend, Track } from '../core/Models';
 import { Tokens } from '../common/Tokens';
-import { Copy } from '../common/Copy';
+import { Copy, parseAiHeader } from '../common/Copy';
 import { Dim, Motion } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
@@ -11,6 +11,8 @@ import { SkeletonList } from './SkeletonList';
 import { AppState } from '../viewmodel/AppState';
 
 const TAG = 'SuenMusic_Daily';
+/** greeting 拆不出主标题时的回退页名（web parseAiHeader 默认值同款） */
+const DEFAULT_HEADER_TITLE = '专属推荐';
 
 /**
  * 每日推荐：只读（歌单由服务端每天 00:30 产出，无「换一批」）。
@@ -43,6 +45,19 @@ export struct DailyPage {
     } finally {
       this.loading = false;
     }
+  }
+
+  // ---------------- 专属推荐语（greeting → 主标题/副题，web parseAiHeader 同口径） ----------------
+  // 首页欢迎语（welcomePhrase）只属于首页 —— 本页不渲染，两个概念彻底分开（T5.5 用户反馈）。
+
+  private headerTitle(): string {
+    const g = this.data === null ? '' : (this.data.greeting ?? '');
+    return parseAiHeader(g, DEFAULT_HEADER_TITLE).title;
+  }
+
+  private headerSub(): string {
+    const g = this.data === null ? '' : (this.data.greeting ?? '');
+    return parseAiHeader(g, DEFAULT_HEADER_TITLE).sub;
   }
 
   // ---------------- 收藏标记（右滑手势的支撑，失败静默不打断浏览） ----------------
@@ -155,21 +170,24 @@ export struct DailyPage {
         .layoutWeight(1)
         .justifyContent(FlexAlign.Center)
       } else if (this.data !== null) {
-        if (this.data.welcomePhrase !== undefined && this.data.welcomePhrase.length > 0) {
-          Text(this.data.welcomePhrase)
-            .fontSize(Dim.fsHeadline)
-            .fontWeight(FontWeight.Medium)
+        // 专属推荐语：greeting 首逗号前的短语作主标题、其后作副题小字（web `.head-info` 同构）
+        Column({ space: Dim.s1 }) {
+          Text(this.headerTitle())
+            .fontSize(Dim.fsBrand)
+            .fontWeight(FontWeight.Bold)
             .fontColor(Tokens.text1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
             .width('100%')
-            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
+          if (this.headerSub().length > 0) {
+            Text(this.headerSub())
+              .fontSize(Dim.fsBody)
+              .fontColor(Tokens.text2)
+              .width('100%')
+          }
         }
-        if (this.data.greeting !== undefined && this.data.greeting.length > 0) {
-          Text(this.data.greeting)
-            .fontSize(Dim.fsMinor)
-            .fontColor(Tokens.text2)
-            .width('100%')
-            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s1 })
-        }
+        .width('100%')
+        .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
 
         if (this.data.tracks.length > 0) {
           Button('播放全部')
@@ -195,6 +213,7 @@ export struct DailyPage {
                 TrackItem({
                   track: t,
                   index: i + 1,
+                  coverSize: Dim.s5 * 2,
                   isFav: this.favIds.indexOf(t.id) >= 0,
                   onSwipeToggle: () => this.toggleFav(t),
                   onTap: () => { this.playAt(i); }

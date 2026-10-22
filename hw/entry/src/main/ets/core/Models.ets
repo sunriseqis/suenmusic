@@ -58,6 +58,11 @@ export interface Album {
   id: string;
   name: string;
   picUrl: string;
+  /** 发行日（`YYYY-MM-DD` 形态，新碟接口才有；搜索/详情可能为空）—— 海报日期角标用 */
+  publishTime?: string;
+  /** 歌手列表（新碟接口给 `artists`；老快照可能缺）—— 海报副行用 */
+  artists?: TrackArtist[];
+  /** @deprecated 服务端 `adaptQQAlbum` 不输出该字段，历史快照兼容保留 */
   singerName?: string;
 }
 
@@ -215,4 +220,21 @@ export function artistLine(t: Track): string {
     if (n.length > 0) { names.push(n); }
   }
   return names.join(' / ');
+}
+
+/**
+ * 专辑 → 展示用的一行歌手名（海报副行）。
+ * 与 web `artistNames`（`utils/format.ts`）同口径：' / ' 连接、取不到回「未知歌手」。
+ */
+export function albumArtistLine(a: Album): string {
+  const names: string[] = [];
+  const artists = a.artists ?? [];
+  for (let i = 0; i < artists.length; i++) {
+    const n = artists[i].name;
+    if (n.length > 0) { names.push(n); }
+  }
+  if (names.length === 0 && a.singerName !== undefined && a.singerName.length > 0) {
+    return a.singerName;
+  }
+  return names.length > 0 ? names.join(' / ') : '未知歌手';
 }

@@ -18,6 +18,11 @@ export class Tokens {
   static readonly accentText: string = '#E8A33D'; // #e8a33d
   static readonly scrim: string = '#A8000000'; // rgba(0, 0, 0, 0.66)
   static readonly track: string = '#2A2C30'; // #2a2c30
+  static readonly hi: string = '#0FFFFFFF'; // rgba(255, 255, 255, 0.06)
+  static readonly posterScrim: string = '#C7000000'; // rgba(0, 0, 0, 0.78)
+  static readonly posterScrimMid: string = '#6B000000'; // rgba(0, 0, 0, 0.42)
+  static readonly dateChip: string = '#80000000'; // rgba(0, 0, 0, 0.5)
+  static readonly badgeInk: string = '#1A1206'; // #1a1206
 
   // ---- 浅色（纸白）—— 备用 ----
   static readonly bgLight: string = '#F2F0EA'; // #f2f0ea
@@ -30,4 +35,9 @@ export class Tokens {
   static readonly accentTextLight: string = '#8F4E08'; // #8f4e08
   static readonly scrimLight: string = '#6B141414'; // rgba(20, 20, 20, 0.42)
   static readonly trackLight: string = '#DCD6C9'; // #dcd6c9
+  static readonly hiLight: string = '#F2FFFFFF'; // rgba(255, 255, 255, 0.95)
+  static readonly posterScrimLight: string = '#C7000000'; // rgba(0, 0, 0, 0.78)
+  static readonly posterScrimMidLight: string = '#6B000000'; // rgba(0, 0, 0, 0.42)
+  static readonly dateChipLight: string = '#80000000'; // rgba(0, 0, 0, 0.5)
+  static readonly badgeInkLight: string = '#FFFFFF'; // #ffffff
 }
