@@ -38,21 +38,29 @@ cd server && npm ci && npm start        # 默认 0.0.0.0:3210，可用 .env 覆�
 cd web && npm ci && npm run dev
 ```
 
+> **运行前提**：客户端（Web / 鸿蒙 / iOS）都需要**自建服务端**先行可用——
+> 服务端是音源解析、账号与流代理的单一真相源，脱离服务端客户端只有壳。
+
 数据库文件与运行数据在首次启动时自动创建（SQLite，WAL 模式）。
 首个注册账号自动成为管理员；注册通道在首账号落地后自动收闭，
 可在 Web 面板「设置 → 账号管理」重新打开。
+
+## 当前阶段（2026-10-22）
+
+鸿蒙原生客户端 T0–T5 已通过验收（T6 冻结定稿中，WebView 壳已删除）；
+iOS 原生重做 S0 代码就位、待 Xcode 环境验证；Android 已封库不再维护。
 
 ## 构建产物
 
 ```bash
 npm run fn:build                        # fnOS 套件 → output/suenmusic-v<version>.fpk
-cd android && ./gradlew assembleDebug   # APK（版本由 VERSION_NAME/VERSION_CODE 传入）
-npm run hw:sync                         # web/dist → 鸿蒙 rawfile（DevEco 再编译）
+npm run hw:build                        # 鸿蒙未签名 HAP → output/SuenMusic-v<版本>-unsigned.hap
 npm run ios:build                       # iOS（需 macOS + Xcode）
 npm run icons                           # 从 MarkBold.vue 重生成全端图标
 ```
 
-产物一律落在本地 `output/`（正式）与 `output/test/`（测试），**不入库**。
+Android（`android/`）已封库：不再有构建指引与 CI，历史构建方式见
+`android/README.md`。产物一律落在本地 `output/`（正式）与 `output/test/`（测试），**不入库**。
 
 > fnOS 套件的安装布局、启停/守护行为、密钥与数据库落点，以及**命令行运维必须显式
 > 指定 `SUENMUSIC_DB`** 这个坑，见 `docs/dev/fnos-ops.md`。
