@@ -246,12 +246,15 @@ export struct TrackItem {
         .padding({ left: Dim.s2, right: Dim.s2 })
         .backgroundColor(this.pressed ? Tokens.panel : Tokens.bg)
         // 在播薄染层（叠最上：7% 琥珀罩整行，视觉=掺进底色）
+        // ⚠️ 必须 hitTestBehavior(None)：这层铺满整行且盖在内容之上，默认会**吃掉点击** ——
+        // 用户 2026-10-23 报的「在播歌曲高亮时点不到行尾不喜欢按钮」就是它挡的。
         if (this.currentTrackId === this.track.id) {
           Column()
             .width('100%')
             .height('100%')
             .backgroundColor(Tokens.accent)
             .opacity(CUR_TINT)
+            .hitTestBehavior(HitTestMode.None)
         }
       }
       .width('100%')
