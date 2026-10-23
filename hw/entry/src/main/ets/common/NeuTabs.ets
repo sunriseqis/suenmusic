@@ -11,7 +11,7 @@
  */
 
 import { Tokens } from './Tokens';
-import { Dim } from './Dimension';
+import { Dim, Motion } from './Dimension';
 
 @Component
 export struct NeuTabs {
@@ -34,9 +34,14 @@ export struct NeuTabs {
           .layoutWeight(1)
           .borderRadius(Dim.radiusRow)
           .backgroundColor(this.activeIndex === i ? Tokens.panel2 : Color.Transparent)
-          .border(this.activeIndex === i
-            ? { width: { top: Dim.hairline }, color: { top: Tokens.hi } }
-            : { width: 0 })
+          // 上沿高光固定 1vp 厚、只换颜色：避免选中切换时描边宽度跳变（0↔1）闪一下
+          .border({
+            width: { top: Dim.hairline },
+            color: { top: this.activeIndex === i ? Tokens.hi : Color.Transparent }
+          })
+          // 选中态过渡（web `NeuTabs.tab{transition: color/background-color var(--dur-fast)}` 同口径）：
+          // 底色 + 文字色淡入淡出，不再硬切（用户 2026-10-23 反馈「四个分片切换没动效」）
+          .animation({ duration: Motion.fast, curve: Motion.curve })
           .accessibilityText(label)
           .accessibilityLevel(this.activeIndex === i ? 'yes' : 'no')
           .onClick(() => {

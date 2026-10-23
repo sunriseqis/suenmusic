@@ -601,9 +601,8 @@ export struct PlayerPage {
         .width(Dim.touchMin)
         .height(Dim.touchMin)
         .justifyContent(FlexAlign.Center)
-        .borderRadius(Dim.radiusSm)
-        .border({ width: Dim.hairline, color: Tokens.line })
-        .backgroundColor(this.sheet === 'dislike' ? Tokens.panel2 : Tokens.panel)
+        // 用户 2026-10-23：透明背景，不要底衬/描边（与收起键、锚定页图标键同一套）
+        .backgroundColor(Color.Transparent)
         .accessibilityText('不喜欢')
         .onClick(() => {
           this.sheet = this.sheet === 'dislike' ? 'none' : 'dislike';
