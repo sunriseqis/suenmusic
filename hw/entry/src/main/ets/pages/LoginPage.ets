@@ -70,7 +70,7 @@ export struct LoginPage {
       .backgroundColor(Tokens.panel)
 
       if (this.err.length > 0) {
-        Text(this.err).fontSize(Dim.fsMinor).fontColor('#E5484D').width('100%')
+        Text(this.err).fontSize(Dim.fsMinor).fontColor(Tokens.danger).width('100%')
       }
 
       WebButton({

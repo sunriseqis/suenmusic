@@ -601,7 +601,7 @@ export struct PlayerPage {
         // 键不再把整行撑高 → 上下留白对称、正文不被挤压，也不会盖到正文首行。
         Row() {
           WebIcon(WebIconName.DISLIKE_SONG, Dim.icon12,
-            this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
+            this.sheet === 'dislike' ? Tokens.danger : Tokens.text2)
         }
         .width(Dim.btnMd)
         .height(Dim.btnMd)
@@ -1252,7 +1252,7 @@ export struct PlayerPage {
           Blank()
           Text(this.eyebrowText())
             .fontSize(Dim.fsCaption)
-            .fontColor(this.err.length > 0 ? '#E5484D' : Tokens.text2)
+            .fontColor(this.err.length > 0 ? Tokens.danger : Tokens.text2)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
             .constraintSize({ maxWidth: '60%' })

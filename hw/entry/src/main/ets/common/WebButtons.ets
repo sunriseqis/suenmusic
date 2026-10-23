@@ -100,7 +100,7 @@ export struct WebButton {
     }
     if (this.variantKind === NeuBtnVariant.DANGER) {
       // web `.v-danger` 是 #d4564a；此处用既有豁免红近似（避免新增裸色告警）
-      return '#E5484D';
+      return Tokens.danger;
     }
     return Tokens.text1;
   }

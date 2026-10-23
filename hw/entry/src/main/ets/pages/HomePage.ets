@@ -341,7 +341,7 @@ export struct HomePage {
         SkeletonList({ withPoster: true })
       } else if (this.err.length > 0 && this.home === null) {
         Column({ space: Dim.s3 }) {
-          Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Text(this.err).fontSize(Dim.fsBody).fontColor(Tokens.danger)
           WebButton({
             labelStr: '重试',
             sizeKind: NeuBtnSize.MD,

@@ -3,7 +3,7 @@ import { Dim, Motion } from './Dimension';
 import { WebIcon, WebIconName } from './WebIcons';
 
 /** 危险语义色（T2 既有豁免，唯一允许的裸色） */
-const DANGER = '#E5484D';
+const DANGER = Tokens.danger;
 
 /**
  * 「不喜欢」三选弹窗（**自绘哑光风格**）。

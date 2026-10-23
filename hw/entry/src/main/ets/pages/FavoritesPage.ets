@@ -333,7 +333,7 @@ export struct FavoritesPage {
       } else if (this.err.length > 0) {
         // 翻页失败：给人话 + 可手动重试
         Text(this.err)
-          .fontSize(Dim.fsMinor).fontColor('#E5484D')
+          .fontSize(Dim.fsMinor).fontColor(Tokens.danger)
           .padding({ top: Dim.s3, bottom: Dim.s3 })
           .onClick(() => { this.loadMore(); })
       } else if (!this.reachedEnd) {
@@ -355,7 +355,7 @@ export struct FavoritesPage {
         SkeletonList()
       } else if (this.err.length > 0 && this.items.length === 0) {
         Column({ space: Dim.s3 }) {
-          Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Text(this.err).fontSize(Dim.fsBody).fontColor(Tokens.danger)
           WebButton({
             labelStr: '重试',
             sizeKind: NeuBtnSize.MD,

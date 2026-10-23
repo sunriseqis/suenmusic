@@ -25,4 +25,5 @@ export class Tokens {
   static readonly posterScrimMid: ResourceColor = $r('app.color.t_poster_scrim_mid'); // dark #6B000000 / light #6B000000
   static readonly dateChip: ResourceColor = $r('app.color.t_date_chip'); // dark #80000000 / light #80000000
   static readonly badgeInk: ResourceColor = $r('app.color.t_badge_ink'); // dark #1A1206 / light #FFFFFF
+  static readonly danger: ResourceColor = $r('app.color.t_danger'); // dark #D4564A / light #A8322A
 }

@@ -96,6 +96,14 @@ def main() -> None:
     dark_rows = collect(dark)
     light_rows = collect(light)
 
+    # 危险语义色：web 没有做成 CSS 变量（散落在组件 `.v-danger` 里），只有一条浅色覆盖
+    # （`NeuButton.vue: :root[data-theme='light'] .v-danger { color: #a8322a }`）。
+    # 客户端要按主题取，所以显式补成两套（深 #D4564A / 浅 #A8322A，与 web 完全一致）。
+    EXTRA_PALETTE = {'danger': ('#D4564A', '#A8322A')}
+    for name, (dv, lv) in EXTRA_PALETTE.items():
+        dark_rows.append((name, dv, 'web .v-danger 深色'))
+        light_rows.append((name, lv, 'web .v-danger 浅色'))
+
     # ---------------- 鸿蒙颜色资源（T12 色板资源化） ----------------
     def write_color_json(path: Path, rows: list[tuple[str, str, str]], extra: dict[str, str]) -> None:
         entries: dict[str, str] = {}

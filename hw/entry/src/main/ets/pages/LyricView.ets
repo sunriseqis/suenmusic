@@ -240,7 +240,7 @@ export struct LyricView {
         EmptyState({ title: Copy.emptyLyricTitle })
       } else if (this.status === 'error') {
         Column({ space: Dim.s2 }) {
-          Text(this.errText).fontSize(Dim.fsBody).fontColor('#E5484D')
+          Text(this.errText).fontSize(Dim.fsBody).fontColor(Tokens.danger)
           WebButton({
             labelStr: '重试',
             sizeKind: NeuBtnSize.SM,

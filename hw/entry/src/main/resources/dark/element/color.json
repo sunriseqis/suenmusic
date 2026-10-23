@@ -61,6 +61,10 @@
       "value": "#0E0F11"
     },
     {
+      "name": "t_danger",
+      "value": "#D4564A"
+    },
+    {
       "name": "t_date_chip",
       "value": "#80000000"
     },
