@@ -886,9 +886,14 @@ export class MediaPlayerCore {
   private fail(step: string, e: Object): void {
     const code = JSON.stringify(e);
     hilog.error(DOMAIN, TAG, '装载失败于[%{public}s]: %{public}s', step, code);
-    if (this.failHandled) { return; }
+    if (this.failHandled) {
+      hilog.warn(DOMAIN, TAG, 'fail 被 failHandled 挡下（step=%{public}s）—— 本次装载已记过一次失败', step);
+      return;
+    }
     this.failHandled = true;
     this.failStreak += 1;
+    hilog.info(DOMAIN, TAG, 'fail 处理中：step=%{public}s streak=%{public}d manual=%{public}s',
+      step, this.failStreak, this.manualLoad ? 'yes' : 'no');
 
     const track = this.current;
     const name = track === null ? '' : track.name;
@@ -909,8 +914,12 @@ export class MediaPlayerCore {
     }
     this.failTimer = setTimeout(() => {
       this.failTimer = -1;
-      // 期间已经播起来（AVPlayer 自愈）→ 什么都不做，错误一律不发
-      if (this.wantPlay) {
+      // 期间真的播起来了（AVPlayer 自愈）→ 什么都不做，错误一律不发。
+      // ⚠️ 判据必须是 player.state，**不能是 wantPlay**：wantPlay 是播放**意图**，失败后它仍为 true
+      //    （只在 settleFailure 里才清），拿它判会让窗口到期直接 return、永远不落定 ——
+      //    用户实测「点了《怎么》过 1 分钟一条报错都没有」就是栽在这行。
+      const pl = this.player;
+      if (pl !== null && pl.state === 'playing') {
         return;
       }
       this.settleFailure('《' + name + '》没有可播放的匹配音源，可点「重试」或「更多 → 修正音源」手动锚定', false);
@@ -922,6 +931,8 @@ export class MediaPlayerCore {
    * 注意这里要清 `pendingAutoplay`——否则 AVPlayer 随后一次迟到的 'prepared' 会把歌又播起来。
    */
   private settleFailure(message: string, consecutive: boolean): void {
+    hilog.error(DOMAIN, TAG, '失败落定：manual=%{public}s consecutive=%{public}s msg=%{public}s',
+      this.manualLoad ? 'yes' : 'no', consecutive ? 'yes' : 'no', message);
     if (this.failTimer !== -1) {
       clearTimeout(this.failTimer);
       this.failTimer = -1;
