@@ -1,4 +1,4 @@
-import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, EnvironmentCallback, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { rpc } from '@kit.IPCKit';
@@ -39,7 +39,59 @@ class CardControlResult implements rpc.Parcelable {
   }
 }
 
+/**
+ * 应用级环境变化回调。
+ *
+ * ⚠️ 为什么不用 `Ability.onConfigurationUpdate`：那个回调在应用**后台时经常收不到**，
+ * 于是「切系统深浅 → 只有把 app 唤回前台卡片才变色」（用户 2026-10-24 实测）。
+ * `ApplicationContext.on('environment')` 是应用级订阅，退到后台也会回调。
+ */
+class SuenEnvCallback extends EnvironmentCallback {
+  private sink: (cfg: Configuration) => void;
+
+  constructor(sink: (cfg: Configuration) => void) {
+    super();
+    this.sink = sink;
+  }
+
+  onConfigurationUpdated(config: Configuration): void {
+    this.sink(config);
+  }
+
+  onMemoryLevel(level: AbilityConstant.MemoryLevel): void {
+    // 不关心内存回调
+  }
+}
+
 export default class EntryAbility extends UIAbility {
+  /**
+   * 系统环境（含深浅色）变化 → 同步系统态；「跟随系统」模式下**立刻重推卡片**。
+   * 只在深浅真的变化时推，避免重复刷卡片。
+   */
+  private applySystemColorMode(colorMode: ConfigurationConstant.ColorMode | undefined): void {
+    const cm = colorMode === undefined ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET : colorMode;
+    const changed = Theme.syncSystemDark(cm);
+    if (!changed) {
+      return;
+    }
+    if (Theme.current() === ThemeMode.SYSTEM) {
+      this.pushSnapshotToCards(readSnapshotSync(this.context), Theme.isSystemDark(cm));
+    }
+  }
+
+  /** 应用级环境订阅：后台也能收到系统深浅变化 */
+  private registerEnvironmentListener(): void {
+    try {
+      const appCtx = this.context.getApplicationContext();
+      appCtx.on('environment', new SuenEnvCallback((cfg: Configuration): void => {
+        this.applySystemColorMode(cfg.colorMode);
+      }));
+      hilog.info(DOMAIN, TAG, '系统环境监听注册成功');
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, '系统环境监听注册失败：%{public}s', JSON.stringify(err));
+    }
+  }
+
   /**
    * 系统深浅变化。
    *
@@ -49,13 +101,7 @@ export default class EntryAbility extends UIAbility {
    * 用户 2026-10-24 实测：「切系统浅色，app 正常但卡片无变化，起播后才变，过一会才变深」。
    */
   onConfigurationUpdate(newConfig: Configuration): void {
-    const cm = newConfig.colorMode;
-    const sysDark = Theme.isSystemDark(cm);
-    Theme.syncSystemDark(cm === undefined ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET : cm);
-    if (Theme.current() === ThemeMode.SYSTEM) {
-      const snap = readSnapshotSync(this.context);
-      this.pushSnapshotToCards(snap, sysDark);
-    }
+    this.applySystemColorMode(newConfig.colorMode);
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -64,6 +110,7 @@ export default class EntryAbility extends UIAbility {
     Theme.init(this.context);
     // 系统通知落地口需要 UIAbilityContext（首次发布时才真正请求授权）
     Notifier.init(this.context);
+    this.registerEnvironmentListener();
     this.registerCardCallee();
     // router 事件（或未来的其他前台拉起）可以带 control 参数进来
     this.dispatchControlFromWant(want);

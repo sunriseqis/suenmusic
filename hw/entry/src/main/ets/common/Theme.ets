@@ -38,6 +38,8 @@ export class Theme {
   private static appCtx: common.ApplicationContext | null = null;
   private static prefs: preferences.Preferences | null = null;
   private static mode: string = ThemeMode.SYSTEM;
+  /** 最近一次已知的系统深浅（用于变化去重，避免重复推卡片） */
+  private static sysDark: boolean = false;
 
   /** EntryAbility.onCreate 调一次（越早越好，赶在窗口内容加载前） */
   static init(ctx: common.UIAbilityContext): void {
@@ -67,9 +69,12 @@ export class Theme {
   }
 
   /** 系统深浅变化时由 EntryAbility.onConfigurationUpdate 调 */
-  static syncSystemDark(colorMode: ConfigurationConstant.ColorMode): void {
+  static syncSystemDark(colorMode: ConfigurationConstant.ColorMode): boolean {
     const dark = colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    const changed = Theme.sysDark !== dark;
+    Theme.sysDark = dark;
     AppStorage.setOrCreate<boolean>(K_SYSTEM_DARK, dark);
+    return changed;
   }
 
   /**
