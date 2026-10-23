@@ -6,7 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider, formInfo } from '@kit.FormKit';
 import { dispatchCardControl, CardControlRequest } from '../common/PlayerControlHub';
 import { Notifier } from '../common/Notifier';
-import { Theme } from '../common/Theme';
+import { Theme, ThemeMode } from '../common/Theme';
 import {
   NowPlayingSnapshot,
   readSnapshotSync,
@@ -40,10 +40,22 @@ class CardControlResult implements rpc.Parcelable {
 }
 
 export default class EntryAbility extends UIAbility {
-  /** 系统深浅变化：记下系统态（卡片等需要自算深浅的地方用），并重推一次卡片 */
+  /**
+   * 系统深浅变化。
+   *
+   * ⚠️ 除了记下系统态，**还要在「跟随系统」模式下立刻重推卡片**：
+   * 卡片颜色是 payload 里的 suen_dark 驱动的（不受 setColorMode 影响），
+   * 不主动推的话，切系统主题后卡片要等到下一次播放状态变化或系统定时刷新才变 ——
+   * 用户 2026-10-24 实测：「切系统浅色，app 正常但卡片无变化，起播后才变，过一会才变深」。
+   */
   onConfigurationUpdate(newConfig: Configuration): void {
     const cm = newConfig.colorMode;
+    const sysDark = Theme.isSystemDark(cm);
     Theme.syncSystemDark(cm === undefined ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET : cm);
+    if (Theme.current() === ThemeMode.SYSTEM) {
+      const snap = readSnapshotSync(this.context);
+      this.pushSnapshotToCards(snap, sysDark);
+    }
   }
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -93,7 +105,7 @@ export default class EntryAbility extends UIAbility {
    * fd 在每张卡的 updateForm await 之后由 closeCoverFd 关闭是安全时序；
    * 这里为简化在整批复送完后统一关（IPC 序列化时 fd 已被系统复制）。
    */
-  private pushSnapshotToCards(snap: NowPlayingSnapshot): void {
+  private pushSnapshotToCards(snap: NowPlayingSnapshot, sysDarkOverride?: boolean): void {
     // 与 Index.syncCard / SuenFormAbility 一致：只有快照声明封面就绪才开 fd，
     // 否则 payload 说无封面却塞旧 formImages，既浪费也存在新旧不一致的边角。
     const coverFd = snap.coverReady ? openCoverFd(this.context) : -1;
@@ -101,8 +113,10 @@ export default class EntryAbility extends UIAbility {
       .then(async (infos: Array<formInfo.RunningFormInfo>) => {
         for (const info of infos) {
           const dimension = info.dimension === formInfo.FormDimension.Dimension_2_4 ? '3' : '2';
-          const cm1 = this.context.config.colorMode;
-          const sysDark = cm1 === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+          // 系统深浅优先用调用方传进来的（onConfigurationUpdate 时 context.config 可能还没刷新）
+          const sysDark = sysDarkOverride === undefined
+            ? Theme.isSystemDark(this.context.config.colorMode)
+            : sysDarkOverride;
           const obj = buildFormBindingObject(snap, dimension, coverFd, Theme.darkFor(this.context, sysDark));
           try {
             await formProvider.updateForm(info.formId, formBindingData.createFormBindingData(obj));
