@@ -5,6 +5,8 @@ import { DailyRecommend, Track } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy, parseAiHeader } from '../common/Copy';
 import { Dim } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
+import { DislikeDialog } from '../common/DislikeDialog';
 import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
 import { SkeletonList } from './SkeletonList';
@@ -30,6 +32,8 @@ export struct DailyPage {
   @State err: string = '';
   /** 已收藏曲目 id（右滑手势的文案/序号染色用，失败静默） */
   @State favIds: string[] = [];
+  /** 待确认的「不喜欢」目标（null = 弹窗关）；弹窗由页面持有，行组件只上报点击 */
+  @State dislikeAsk: Track | null = null;
   /** 播放页 dislike 当前曲后 +1（服务端已过滤，重拉即最新） */
   @StorageProp(K_DAILY_REFRESH) @Watch('onDailyRev') dailyRev: number = 0;
 
@@ -127,16 +131,9 @@ export struct DailyPage {
 
   // ---------------- 不喜欢调优（T10 批次 A，web Daily.vue dislikeTrack/dislikeArtist 同口径） ----------------
 
+  /** 轻提示走自绘 AppToast（系统 toast 位置不可控，用户 2026-10-23 反馈「提示漂移」） */
   private showToast(message: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({
-        message: message,
-        duration: 2000,
-        alignment: Alignment.Bottom
-      });
-    } catch (e) {
-      hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(e));
-    }
+    AppToast.show(message);
   }
 
   /** 把一首歌从「当日歌单 + 播放队列」里同时摘掉。自然缩水，不补位。 */
@@ -214,7 +211,9 @@ export struct DailyPage {
   }
 
   build() {
-    Column() {
+    // 外层 Stack：列表/空态在 Column 里，「不喜欢」弹窗盖在其上（弹窗自带 scrim 背板）
+    Stack() {
+      Column() {
       if (this.loading && this.data === null) {
         // 首次加载：骨架屏替代转圈（S4 §六）
         SkeletonList()
@@ -264,6 +263,7 @@ export struct DailyPage {
                   dislikeable: true,
                   onDislikeTrack: () => { this.dislikeTrack(t); },
                   onDislikeArtist: () => { this.dislikeArtist(t); },
+                  onDislikeAsk: () => { this.dislikeAsk = t; },
                   onSwipeToggle: () => this.toggleFav(t),
                   onTap: () => { this.playAt(i); }
                 })
@@ -306,8 +306,32 @@ export struct DailyPage {
         }
       }
     }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(Tokens.bg)
+
+      // 「不喜欢」选择弹窗（自绘哑光三选；系统 AlertDialog 风格割裂 —— 用户 2026-10-23 反馈）
+      if (this.dislikeAsk !== null) {
+        DislikeDialog({
+          trackName: this.dislikeAsk.name,
+          artistName: this.dislikeAsk.ar.length > 0 ? this.dislikeAsk.ar[0].name : '',
+          onTrack: (): void => {
+            const t = this.dislikeAsk;
+            this.dislikeAsk = null;
+            if (t !== null) { this.dislikeTrack(t); }
+          },
+          onArtist: (): void => {
+            const t = this.dislikeAsk;
+            this.dislikeAsk = null;
+            if (t !== null) { this.dislikeArtist(t); }
+          },
+          onCancel: (): void => {
+            this.dislikeAsk = null;
+          }
+        })
+      }
+    }
     .width('100%')
     .height('100%')
-    .backgroundColor(Tokens.bg)
   }
 }

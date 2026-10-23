@@ -133,6 +133,8 @@ export struct TrackItem {
   onDislikeTrack: () => void = () => {};
   /** 「不喜欢该歌手」（web dislike-artist） */
   onDislikeArtist: () => void = () => {};
+  /** 点了「不喜欢」图标 → 由**页面**弹自绘弹窗选范围（系统 AlertDialog 风格割裂，2026-10-23 用户反馈） */
+  onDislikeAsk: () => void = () => {};
 
   /** 单「不喜欢」钮按压染色（accent 反馈；T11 第 4 条：双钮合并为单钮 + 弹窗选范围） */
   @State disPressed: boolean = false;
@@ -143,42 +145,6 @@ export struct TrackItem {
   private animateSwipeTo(target: number): void {
     this.getUIContext().animateTo({ duration: SWIPE_ANIM_MS, curve: Motion.curve }, () => {
       this.swipeX = target;
-    });
-  }
-
-  /**
-   * 「不喜欢」单钮 → 弹窗选范围（T11 第 4 条）。
-   * 只负责选范围；落地动作仍由父级 onDislikeTrack / onDislikeArtist 承担
-   * （toast / 队列摘除 / 通知每日页重拉都在父级）。
-   * 没有歌手信息时「这位歌手」置灰（web dislike-artist 同口径：拿不到 mid 不能提交）。
-   */
-  private openDislikeDialog(): void {
-    const artist = this.track.ar.length > 0 ? this.track.ar[0].name : '';
-    const hasArtist = artist.length > 0;
-    this.getUIContext().showAlertDialog({
-      title: '不喜欢',
-      message: hasArtist
-        ? '《' + this.track.name + '》· 歌手「' + artist + '」'
-        : '《' + this.track.name + '》没有歌手信息，只能不喜欢这首歌',
-      buttons: [
-        {
-          value: '不喜欢这首歌',
-          action: (): void => {
-            this.onDislikeTrack();
-          }
-        },
-        {
-          value: '不喜欢这位歌手',
-          enabled: hasArtist,
-          action: (): void => {
-            this.onDislikeArtist();
-          }
-        },
-        {
-          value: '取消',
-          action: (): void => {}
-        }
-      ]
     });
   }
 
@@ -264,7 +230,7 @@ export struct TrackItem {
             .alignSelf(ItemAlign.Center)
             .accessibilityText('不喜欢')
             .onClick(() => {
-              this.openDislikeDialog();
+              this.onDislikeAsk();
             })
             .onTouch((e: TouchEvent) => {
               if (e.type === TouchType.Down) {

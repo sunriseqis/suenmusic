@@ -18,6 +18,7 @@ import { APIClient, ApiError } from '../core/APIClient';
 import { WebDavClient } from '../core/WebDavClient';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
 import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
@@ -108,15 +109,7 @@ export struct SettingsPage {
   // ---------------- 数据 ----------------
 
   private toast(msg: string): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({
-        message: msg,
-        duration: 2000,
-        alignment: Alignment.Bottom
-      });
-    } catch (e) {
-      // toast 失败静默（与 DailyPage.showToast 同款口径）
-    }
+    AppToast.show(msg);
   }
 
   private async loadDislikes(): Promise<void> {

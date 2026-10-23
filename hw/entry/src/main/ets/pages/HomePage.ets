@@ -6,6 +6,7 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
 import { Dim, Motion } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
 import { TrackItem } from './TrackItem';
 import { TrackRow, TrackRowSource } from '../common/TrackSources';
 import { SkeletonList } from './SkeletonList';
@@ -171,15 +172,7 @@ export struct HomePage {
     } catch (e) {
       this.setFav(track.id, wasFav);
       const msg = (e as ApiError).message;
-      try {
-        this.getUIContext().getPromptAction().showToast({
-          message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000,
-          alignment: Alignment.Bottom
-        });
-      } catch (toastErr) {
-        hilog.warn(0x0000, 'HomePage', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
-      }
+      AppToast.show(msg === undefined ? Copy.favOpFailed : msg);
       hilog.warn(0x0000, 'HomePage', '收藏切换失败: %{public}s', JSON.stringify(e));
       return false;
     }

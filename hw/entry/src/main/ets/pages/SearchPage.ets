@@ -7,6 +7,7 @@ import { Track, Album, Artist, Playlist, formatCount } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
 import { Dim } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
 import { TrackRow, TrackRowSource } from '../common/TrackSources';
 import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
@@ -442,15 +443,7 @@ export struct SearchPage {
     } catch (e) {
       this.setFav(track.id, wasFav);
       const msg = (e as ApiError).message;
-      try {
-        this.getUIContext().getPromptAction().showToast({
-          message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000,
-          alignment: Alignment.Bottom
-        });
-      } catch (toastErr) {
-        hilog.warn(0x0000, 'SuenMusic_Fav', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
-      }
+      AppToast.show(msg === undefined ? Copy.favOpFailed : msg);
       hilog.warn(0x0000, 'SuenMusic_Fav', '收藏切换失败: %{public}s', JSON.stringify(e));
       return false;
     }
@@ -688,11 +681,13 @@ export struct SearchPage {
           onSubmit: (v: string) => { this.doSearch(v, 1); }
         })
           .layoutWeight(1)
+        // 材质与播放页主播放键对齐（GRADIENT 凸面 + amber 字形），尺寸严格等于搜索框体高（Dim.touchMin =
+        // NeuInput 高度）—— 不再用琥珀填充块（比框体显高、全端独一份；用户 2026-10-23 反馈）
         WebIconButton({
           iconName: WebIconName.SEARCH,
-          boxSize: 44,
-          glyphColor: Tokens.badgeInk,
-          chromeKind: NeuBtnChrome.PRIMARY,
+          boxSize: Dim.touchMin,
+          glyphColor: Tokens.accent,
+          chromeKind: NeuBtnChrome.GRADIENT,
           onTap: () => { this.doSearch(this.keyword, 1); }
         })
           .accessibilityText('搜索')

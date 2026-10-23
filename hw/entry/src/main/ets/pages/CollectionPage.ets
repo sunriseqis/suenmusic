@@ -20,6 +20,7 @@ import { Track, Album, TrackArtist, SimiArtist, formatCount, albumArtistLine } f
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
 import { Dim } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
 import { TrackItem } from './TrackItem';
 import { SkeletonList } from './SkeletonList';
 import { CollectionEntry, K_COLLECTION_DEPTH, K_COLLECTION_BACK } from '../common/CollectionNav';
@@ -560,15 +561,7 @@ export struct CollectionPage {
     } catch (e) {
       this.setFav(track.id, wasFav);
       const msg = (e as ApiError).message;
-      try {
-        this.getUIContext().getPromptAction().showToast({
-          message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000,
-          alignment: Alignment.Bottom
-        });
-      } catch (toastErr) {
-        hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
-      }
+      AppToast.show(msg === undefined ? Copy.favOpFailed : msg);
       return false;
     }
   }

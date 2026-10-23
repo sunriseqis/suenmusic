@@ -30,6 +30,8 @@ import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
+import { DislikeDialog } from '../common/DislikeDialog';
 import { Copy, cleanAiText } from '../common/Copy';
 import { LyricView, fetchLyricDoc, peekLyric } from './LyricView';
 import { LyricLine } from '../common/NowPlaying';
@@ -510,17 +512,9 @@ export struct PlayerPage {
     return this.origin.length > 0 ? `${status} · ${this.origin}` : status;
   }
 
+  /** 轻提示走自绘 AppToast（系统 toast 在沉浸式窗口实测漂到顶部偏右，用户 2026-10-23 反馈） */
   private showToast(message: string): void {
-    try {
-      // 显式钉底部：不传 alignment 时 toast 会漂到顶部偏右（T11 第 3 条）
-      this.getUIContext().getPromptAction().showToast({
-        message: message,
-        duration: 2000,
-        alignment: Alignment.Bottom
-      });
-    } catch (e) {
-      hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(e));
-    }
+    AppToast.show(message);
   }
 
   /** 队列里该歌手的歌（当前曲除外）从尾往头删，前面的下标不失效；当前曲最后摘触发切歌 */
@@ -586,73 +580,6 @@ export struct PlayerPage {
 
   // ---------------- Builder ----------------
 
-  /**
-   * 两级不喜欢浮层（web dislike-popover）：两个选项 + 说明副行。
-   * 第 ⑤ 条：浮层不再占文档流（原先插在推荐卡前，展开会把进度条/歌词 peek 整体挤下去）——
-   * 挂进推荐卡的 Stack 里 BottomEnd 对齐 + offset(-100%) 上弹，盖在推荐卡正上方，零位移。
-   */
-  @Builder
-  dislikePop() {
-    Column() {
-      Row({ space: Dim.s2 }) {
-        WebIcon(WebIconName.DISLIKE_SONG, 16, '#E5484D')
-        Column({ space: Dim.s0 }) {
-          Text('不喜欢这首歌')
-            .fontSize(Dim.fsCaption)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(Tokens.text1)
-          Text(`后续不再推荐《${this.title}》`)
-            .fontSize(Dim.fsCaption)
-            .fontColor(Tokens.text2)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-      }
-      .width('100%')
-      .padding({ left: Dim.s2, right: Dim.s2, top: Dim.s2, bottom: Dim.s2 })
-      .borderRadius(Dim.radiusSm)
-      .alignItems(VerticalAlign.Top)
-      .onClick(() => {
-        this.doDislike('track');
-      })
-
-      Divider()
-        .strokeWidth(Dim.hairline)
-        .color(Tokens.line)
-        .margin({ top: Dim.s1, bottom: Dim.s1 })
-
-      Row({ space: Dim.s2 }) {
-        WebIcon(WebIconName.DISLIKE_ARTIST, 16, '#E5484D')
-        Column({ space: Dim.s0 }) {
-          Text('不喜欢该歌手')
-            .fontSize(Dim.fsCaption)
-            .fontWeight(FontWeight.Medium)
-            .fontColor(Tokens.text1)
-          Text(`后续不再推荐歌手「${this.firstArtistName()}」`)
-            .fontSize(Dim.fsCaption)
-            .fontColor(Tokens.text2)
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-      }
-      .width('100%')
-      .padding({ left: Dim.s2, right: Dim.s2, top: Dim.s2, bottom: Dim.s2 })
-      .borderRadius(Dim.radiusSm)
-      .alignItems(VerticalAlign.Top)
-      .onClick(() => {
-        this.doDislike('artist');
-      })
-    }
-    .width(Dim.popW)
-    .padding(Dim.s2)
-    .borderRadius(Dim.radiusMd)
-    .backgroundColor(Tokens.panel)
-    .border({ width: Dim.hairline, color: Tokens.line })
-    // 第 ⑤ 条：浮层不占文档流 —— Stack BottomEnd 对齐 + 上弹 100% + 底距 s1（调用处不再链属性）
-    .offset({ y: '-100%' })
-    .margin({ bottom: Dim.s1 })
-    .transition(TransitionEffect.OPACITY.animation({ duration: Motion.fast, curve: Motion.curve }))
-  }
 
   /** 专属推荐理由卡（web m-info-card）：标签 + 不喜欢入口 + 理由正文 */
   @Builder
@@ -738,16 +665,9 @@ export struct PlayerPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      // 推荐卡 + dislike 浮层同 Stack（第 ⑤ 条）：浮层 offset(-100%) 已内建在 dislikePop 根节点，
-      // 上弹盖在卡正上方不占文档流（原先占流展开会把进度条/歌词整体挤下去，2026-10-23 验收反馈）
+      // 推荐卡（不喜欢的选择弹窗已改为页面级自绘 DislikeDialog，不再用贴着卡片上弹的小浮层）
       if (this.hasReco()) {
-        Stack({ alignContent: Alignment.BottomEnd }) {
-          this.recoCard()
-          if (this.sheet === 'dislike') {
-            this.dislikePop()
-          }
-        }
-        .width('100%')
+        this.recoCard()
       }
     }
     .width('100%')
@@ -1379,12 +1299,6 @@ export struct PlayerPage {
         top: this.avoidVp(this.topAvoidHeight) + Dim.s3,
         bottom: this.avoidVp(this.bottomAvoidHeight) + Dim.s4
       })
-      // dislike 浮层背板（web pop-backdrop）：展开时点其它任意处收起
-      .onClick(() => {
-        if (this.sheet === 'dislike') {
-          this.sheet = 'none';
-        }
-      })
 
       // 浮层层级（返回手势逐层关，顺序 dislike > more > queue > lyrics，见 NativeRoot）
       if (this.sheet === 'lyrics') {
@@ -1398,6 +1312,23 @@ export struct PlayerPage {
       }
       if (this.sheet === 'anchor') {
         this.anchorSheet()
+      }
+
+      // 「不喜欢」选择弹窗（自绘哑光三选，替换系统 AlertDialog —— 用户 2026-10-23 反馈风格割裂）
+      if (this.sheet === 'dislike') {
+        DislikeDialog({
+          trackName: this.title,
+          artistName: this.firstArtistName(),
+          onTrack: (): void => {
+            this.doDislike('track');
+          },
+          onArtist: (): void => {
+            this.doDislike('artist');
+          },
+          onCancel: (): void => {
+            this.sheet = 'none';
+          }
+        })
       }
     }
     .width('100%')

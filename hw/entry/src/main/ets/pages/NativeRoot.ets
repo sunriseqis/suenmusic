@@ -31,11 +31,14 @@ import { common } from '@kit.AbilityKit';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
 import { WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
+import { AppToast, K_TOAST_TEXT, K_TOAST_SEQ } from '../common/AppToast';
 
 /** 迷你条滑动切歌阈值（web SWIPE_TH = 60px） */
 const MINI_SWIPE_TH = 60;
 /** 迷你条拖拽位移上限（web miniDragX 钳制 ±80px） */
 const MINI_DRAG_CLAMP = 80;
+/** 自绘轻提示底距（迷你条 + Tab 栏之上，避免压住壳件） */
+const TOAST_BOTTOM_GAP = 132;
 /** 手势结束后吞掉合成 click 的时间窗（TrackItem CLICK_GUARD_MS 同款保险） */
 const MINI_CLICK_GUARD_MS = 350;
 /** 启动占位图标边长（vp） */
@@ -78,6 +81,11 @@ struct NativeRoot {
   @State miniDragX: number = 0;
   // 窗口全屏布局（EntryAbility setWindowLayoutFullScreen）后系统避让区实时值：
   // 刘海/状态栏高度、底部手势条高度因机型而异，由 avoidAreaChange 动态推送，禁止硬编码
+  // 自绘轻提示（AppToast → 底部居中；系统 toast 在沉浸式窗口实测漂到顶部偏右）
+  @StorageProp(K_TOAST_TEXT) toastText: string = '';
+  @StorageProp(K_TOAST_SEQ) @Watch('onToastSeq') toastSeq: number = 0;
+  @State toastVisible: boolean = false;
+  private toastTimer: number = -1;
   @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
   @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
 
@@ -131,16 +139,22 @@ struct NativeRoot {
     } catch (e) {
       this.barFav = was;
       const err = e as ApiError;
-      try {
-        this.getUIContext().getPromptAction().showToast({
-          message: err.message,
-          duration: 2000,
-          alignment: Alignment.Bottom
-        });
-      } catch (toastErr) {
-        // toast 失败不再兜底
-      }
+      AppToast.show(err.message);
     }
+  }
+
+  /** 轻提示序号变化 = 弹一条（同文案连点也会重弹；2.2s 自动收） */
+  onToastSeq(): void {
+    if (this.toastSeq <= 0) {
+      return;
+    }
+    this.toastVisible = true;
+    if (this.toastTimer !== -1) {
+      clearTimeout(this.toastTimer);
+    }
+    this.toastTimer = setTimeout(() => {
+      this.toastVisible = false;
+    }, 2200);
   }
 
   // ---------------- 迷你条拖拽切歌（web onTouchStart/Move/End + swiped 旗标） ----------------
@@ -592,6 +606,30 @@ struct NativeRoot {
         .height('100%')
         .transition(TransitionEffect.translate({ y: '100%' })
           .animation({ duration: Motion.standard, curve: Motion.curve }))
+      }
+
+      // 自绘轻提示（全局唯一落点，压在一切浮层之上；不吃点击）
+      if (this.toastVisible && this.toastText.length > 0) {
+        Column() {
+          Text(this.toastText)
+            .fontSize(Dim.fsBody)
+            .fontColor(Tokens.text1)
+            .maxLines(3)
+            .textAlign(TextAlign.Center)
+            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+            .borderRadius(Dim.radiusMd)
+            .backgroundColor(Tokens.panel2)
+            .border({ width: Dim.hairline, color: Tokens.line })
+            .constraintSize({ maxWidth: '84%' })
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.End)
+        .alignItems(HorizontalAlign.Center)
+        .padding({ bottom: TOAST_BOTTOM_GAP + this.avoidVp(this.bottomAvoidHeight) })
+        .hitTestBehavior(HitTestMode.None)
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: Motion.fast, curve: Motion.curve }))
       }
     }
     .width('100%')

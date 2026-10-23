@@ -5,6 +5,7 @@ import { FavoriteItem, Track, artistLine } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy, parseAiHeader } from '../common/Copy';
 import { Dim } from '../common/Dimension';
+import { AppToast } from '../common/AppToast';
 import { FavRowSource } from '../common/TrackSources';
 import { TrackItem } from './TrackItem';
 import { NeuInput } from './NeuInput';
@@ -214,15 +215,7 @@ export struct FavoritesPage {
       return true;
     } catch (e) {
       const msg = (e as ApiError).message;
-      try {
-        this.getUIContext().getPromptAction().showToast({
-          message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000,
-          alignment: Alignment.Bottom
-        });
-      } catch (toastErr) {
-        hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
-      }
+      AppToast.show(msg === undefined ? Copy.favOpFailed : msg);
       hilog.warn(0x0000, TAG, '取消收藏失败: %{public}s', JSON.stringify(e));
       return false;
     }
