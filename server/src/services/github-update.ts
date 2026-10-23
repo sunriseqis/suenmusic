@@ -58,8 +58,13 @@ interface GithubRelease {
   assets?: GithubAsset[];
 }
 
+/**
+ * 发行产物命名（用户 2026-10-24 裁定）：`suenmusic-<版本>.<ext>`，**同版本永远覆盖同名文件**。
+ * 例：`suenmusic-1.6.0.hap` / `suenmusic-1.6.0.ipa` / `suenmusic-1.6.0.fpk`。
+ * 版本号只由仓库根 `VERSION` 决定，改版本才换名。
+ */
 function artifactName(versionName: string, platform: UpdatePlatform): string {
-  return `SuenMusic-v${versionName}-release.${EXTENSIONS[platform]}`;
+  return `suenmusic-${versionName}.${EXTENSIONS[platform]}`;
 }
 
 /** tag → semver。接受 `hw-v1.6.0` / `v1.6.0` / `1.6.0`，取最后一个 semver 片段 */
