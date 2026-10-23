@@ -416,6 +416,7 @@ export struct FavoritesPage {
               }, (item: FavoriteItem) => item.trackId)
               ListItem() { this.listFooter() }
             }
+              .scrollBar(BarState.Off)
             .width('100%')
             .layoutWeight(1)
             .onReachEnd(() => {

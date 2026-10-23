@@ -336,6 +336,8 @@ export interface CardPayload {
   suen_duration: string;
   /** 应用进程是否活着（'true' → 卡片按钮走 call；'false' → 走 router 冷启动） */
   suen_alive: string;
+  /** 卡片该用深色还是浅色（'true' = 深色）—— 跟随设置里的主题，自动则按系统 */
+  suen_dark: string;
   /** 卡片外观规格（formInfo.FormDimension 的数值字符串：'2'=2*2，'3'=2*4） */
   suen_dimension: string;
 }
@@ -344,7 +346,7 @@ export interface CardPayload {
  * @param dimension 卡片外观规格（'2'=2*2，'3'=2*4）。每张卡片的规格固定，
  *   由调用方从 want（onAddForm）或 RunningFormInfo.dimension（主动刷新）取。
  */
-export function toCardPayload(snap: NowPlayingSnapshot, dimension: string): CardPayload {
+export function toCardPayload(snap: NowPlayingSnapshot, dimension: string, dark: boolean): CardPayload {
   const win = buildLyricWindow(snap.lyric, snap.positionMs);
   const p: CardPayload = {
     suen_title: snap.title,
@@ -358,7 +360,9 @@ export function toCardPayload(snap: NowPlayingSnapshot, dimension: string): Card
     suen_position: String(snap.positionMs),
     suen_duration: String(snap.durationMs),
     suen_alive: snap.alive ? 'true' : 'false',
-    suen_dimension: dimension
+    suen_dimension: dimension,
+    // 卡片跟随**设置里的主题**（用户 2026-10-23 裁定）：浅色卡 / 深色卡 / 自动跟系统，由调用方算好传进来
+    suen_dark: dark ? 'true' : 'false'
   };
   return p;
 }
@@ -372,8 +376,9 @@ export function toCardPayload(snap: NowPlayingSnapshot, dimension: string): Card
  * ⚠️ fd 由调用方打开、调用方负责关闭（onAddForm 例外：返回值要参与
  * IPC 序列化，不能提前关）。
  */
-export function buildFormBindingObject(snap: NowPlayingSnapshot, dimension: string, coverFd: number): Record<string, Object> {
-  const p = toCardPayload(snap, dimension);
+export function buildFormBindingObject(snap: NowPlayingSnapshot, dimension: string, coverFd: number,
+  dark: boolean): Record<string, Object> {
+  const p = toCardPayload(snap, dimension, dark);
   const obj: Record<string, Object> = {
     'suen_title': p.suen_title,
     'suen_artist': p.suen_artist,
@@ -385,7 +390,8 @@ export function buildFormBindingObject(snap: NowPlayingSnapshot, dimension: stri
     'suen_position': p.suen_position,
     'suen_duration': p.suen_duration,
     'suen_alive': p.suen_alive,
-    'suen_dimension': p.suen_dimension
+    'suen_dimension': p.suen_dimension,
+    'suen_dark': p.suen_dark
   };
   if (coverFd >= 0 && snap.coverReady && snap.coverKey.length > 0) {
     // key 取快照里的版本化 key（见 NowPlayingSnapshot.coverKey 注释），

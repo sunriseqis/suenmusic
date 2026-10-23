@@ -86,6 +86,8 @@ struct NativeRoot {
   @StorageProp(K_TOAST_SEQ) @Watch('onToastSeq') toastSeq: number = 0;
   @State toastVisible: boolean = false;
   private toastTimer: number = -1;
+  /** 主题切换信号：切完主题立刻重推桌面卡片（卡片深浅跟设置，不跟系统） */
+  @StorageProp('card_refresh') @Watch('onCardRefresh') cardRefresh: number = 0;
   @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
   @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
 
@@ -140,6 +142,17 @@ struct NativeRoot {
       this.barFav = was;
       const err = e as ApiError;
       AppToast.show(err.message);
+    }
+  }
+
+  /** 主题切换后重推卡片 */
+  onCardRefresh(): void {
+    if (this.cardRefresh <= 0) {
+      return;
+    }
+    const av = this.avSession;
+    if (av !== null) {
+      av.refreshCard();
     }
   }
 

@@ -1,4 +1,4 @@
-import { AbilityConstant, UIAbility, Want } from '@kit.AbilityKit';
+import { AbilityConstant, Configuration, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
 import { rpc } from '@kit.IPCKit';
@@ -40,6 +40,12 @@ class CardControlResult implements rpc.Parcelable {
 }
 
 export default class EntryAbility extends UIAbility {
+  /** 系统深浅变化：记下系统态（卡片等需要自算深浅的地方用），并重推一次卡片 */
+  onConfigurationUpdate(newConfig: Configuration): void {
+    const cm = newConfig.colorMode;
+    Theme.syncSystemDark(cm === undefined ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET : cm);
+  }
+
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onCreate');
     // 主题：先把上次选择的深浅应用上（必须在窗口内容加载前，避免闪一次系统主题）
@@ -95,7 +101,9 @@ export default class EntryAbility extends UIAbility {
       .then(async (infos: Array<formInfo.RunningFormInfo>) => {
         for (const info of infos) {
           const dimension = info.dimension === formInfo.FormDimension.Dimension_2_4 ? '3' : '2';
-          const obj = buildFormBindingObject(snap, dimension, coverFd);
+          const cm1 = this.context.config.colorMode;
+          const sysDark = cm1 === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+          const obj = buildFormBindingObject(snap, dimension, coverFd, Theme.darkFor(this.context, sysDark));
           try {
             await formProvider.updateForm(info.formId, formBindingData.createFormBindingData(obj));
           } catch (err) {

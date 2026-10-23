@@ -537,6 +537,7 @@ export struct ServerListPage {
               }
             }, (s: ServerCandidate) => s.url + '|' + s.name)
           }
+            .scrollBar(BarState.Off)
           .width('100%')
           .constraintSize({ maxHeight: Dim.serverListMax })
           .backgroundColor(Tokens.bg)

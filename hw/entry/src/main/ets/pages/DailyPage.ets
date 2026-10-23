@@ -270,6 +270,7 @@ export struct DailyPage {
               }
             }, (t: Track) => t.id)
           }
+            .scrollBar(BarState.Off)
           .width('100%')
           .layoutWeight(1)
         } else if (this.data.status === 'shortfall') {

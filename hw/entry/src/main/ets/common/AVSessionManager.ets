@@ -30,6 +30,7 @@ import {
   parseLyricLines,
   activeLyricIndex
 } from './NowPlaying';
+import { Theme } from './Theme';
 
 const TAG = 'SuenMusic_AVSession';
 const DOMAIN = 0x0000;
@@ -449,6 +450,11 @@ class HarmonyAVSessionManager {
    *
    * 失败不外抛：卡片是附加功能，不该因为它拖垮播控中心那条主链路。
    */
+  /** 外部触发一次卡片刷新（主题切换等）—— 卡片深浅跟着设置走，切主题要立刻重推 */
+  async refreshCard(): Promise<void> {
+    await this.syncCard();
+  }
+
   private async syncCard(): Promise<void> {
     const hasTrack = this.currentCardTitle.length > 0;
     const snap: NowPlayingSnapshot = {
@@ -493,7 +499,7 @@ class HarmonyAVSessionManager {
         return;
       }
       for (const info of infos) {
-        const obj = buildFormBindingObject(snap, this.dimensionOfForm(info), coverFd);
+        const obj = buildFormBindingObject(snap, this.dimensionOfForm(info), coverFd, Theme.darkNow());
         try {
           // await 之后系统已在 IPC 中复制 fd，可以安全关闭自己这份
           await formProvider.updateForm(info.formId, formBindingData.createFormBindingData(obj));

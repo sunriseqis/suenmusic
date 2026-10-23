@@ -21,6 +21,7 @@ import { FormExtensionAbility, formBindingData, formProvider, formInfo } from '@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { readSnapshotSync, buildFormBindingObject } from '../common/NowPlaying';
+import { Theme } from '../common/Theme';
 
 const TAG = 'SuenMusic_Form';
 const DOMAIN = 0x0000;
@@ -80,7 +81,7 @@ export default class SuenFormAbility extends FormExtensionAbility {
     const coverFd = snap.coverReady ? this.openCoverFd() : -1;
     hilog.info(DOMAIN, TAG, '卡片被添加，规格=%{public}s，封面 fd=%{public}d', dimension, coverFd);
     return formBindingData.createFormBindingData(
-      buildFormBindingObject(snap, dimension, coverFd));
+      buildFormBindingObject(snap, dimension, coverFd, Theme.darkFor(this.context, Theme.isSystemDark(this.context.config.colorMode))));
   }
 
   /**
@@ -105,7 +106,7 @@ export default class SuenFormAbility extends FormExtensionAbility {
         return formProvider.updateForm(
           formId,
           formBindingData.createFormBindingData(
-            buildFormBindingObject(snap, dimension, coverFd))
+            buildFormBindingObject(snap, dimension, coverFd, Theme.darkFor(this.context, Theme.isSystemDark(this.context.config.colorMode))))
         ).then(() => {
           this.closeCoverFd(coverFd);
         }).catch((err: Error) => {

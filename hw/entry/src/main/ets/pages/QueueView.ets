@@ -130,6 +130,7 @@ export struct QueueView {
             }
           }, (item: Track, i: number) => item.id + '_' + i)
         }
+          .scrollBar(BarState.Off)
         .width('100%')
         .layoutWeight(1)
         .divider({ strokeWidth: 1, color: Tokens.line })

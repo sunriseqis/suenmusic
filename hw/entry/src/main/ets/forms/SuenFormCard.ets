@@ -31,6 +31,8 @@ struct SuenFormCard {
   @LocalStorageProp('suen_duration') duration: string = '0';
   @LocalStorageProp('suen_alive') alive: string = 'false';
   @LocalStorageProp('suen_dimension') dimension: string = '2';
+  /** 卡片深浅（'true' = 深色）：跟随**设置里的主题**，自动模式按系统 —— 由 App 侧算好写进 payload */
+  @LocalStorageProp('suen_dark') darkFlag: string = 'false';
   @LocalStorageProp('formId') formId: string = '';
 
   // ---- 状态 ----
@@ -46,6 +48,22 @@ struct SuenFormCard {
   private hasCover(): boolean {
     return this.coverUrl.length > 0;
   }
+
+  // ---------------- 深浅色板 ----------------
+  // ⚠️ 卡片不能用 `$r('app.color.card_*')`：那套资源只跟**系统**深浅；用户裁定卡片要跟**设置里的主题**，
+  // 所以深浅由 App 侧算好（suen_dark）传进来，这里用字面量色板（与 resources/base|dark 里的 card_* 同值）。
+  private dark(): boolean {
+    return this.darkFlag === 'true';
+  }
+
+  private cBg(): ResourceColor { return this.dark() ? '#17191D' : '#FAF8F3'; }
+  private cT1(): ResourceColor { return this.dark() ? '#E8E6E1' : '#1B1916'; }
+  private cT2(): ResourceColor { return this.dark() ? '#8D8A83' : '#6E675C'; }
+  private cAccent(): ResourceColor { return this.dark() ? '#E8A33D' : '#B0650F'; }
+  private cAccentText(): ResourceColor { return this.dark() ? '#F0B45F' : '#8F4F08'; }
+  private cAccentOn(): ResourceColor { return this.dark() ? '#1A1206' : '#FFFFFF'; }
+  private cWell(): ResourceColor { return this.dark() ? '#22262E' : '#EDEAE2'; }
+  private cLine(): ResourceColor { return this.dark() ? '#14FFFFFF' : '#1F1B1916'; }
 
   private isPlaying(): boolean {
     return this.playing === 'true';
@@ -130,7 +148,7 @@ struct SuenFormCard {
   }
 
   private btnColor(btn: string): ResourceColor {
-    return $r('app.color.card_t2');
+    return this.cT2();
   }
 
   // ---- 交互 ----
@@ -185,7 +203,7 @@ struct SuenFormCard {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor($r('app.color.card_bg'))
+    .backgroundColor(this.cBg())
     .borderRadius(16)
     .clip(true)
     .onClick(() => this.openApp())
@@ -207,13 +225,13 @@ struct SuenFormCard {
             Image($r('app.media.card_note'))
               .width(20)
               .height(20)
-              .fillColor($r('app.color.card_t2'))
+              .fillColor(this.cT2())
               .opacity(0.4)
           }
           .width(52)
           .height(52)
           .borderRadius(6)
-          .backgroundColor($r('app.color.card_well'))
+          .backgroundColor(this.cWell())
           .justifyContent(FlexAlign.Center)
         }
 
@@ -221,7 +239,7 @@ struct SuenFormCard {
           Text(this.title)
             .fontSize(12.5)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.card_t1'))
+            .fontColor(this.cT1())
             .lineHeight(16)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -230,7 +248,7 @@ struct SuenFormCard {
           if (!this.isIdle()) {
             Text(this.artist)
               .fontSize(9.5)
-              .fontColor($r('app.color.card_t2'))
+              .fontColor(this.cT2())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
@@ -250,7 +268,7 @@ struct SuenFormCard {
         Row() {
           Text(this.elapsedText())
             .fontSize(9)
-            .fontColor($r('app.color.card_t2'))
+            .fontColor(this.cT2())
         }
         .width('100%')
         .height(12)
@@ -261,11 +279,11 @@ struct SuenFormCard {
           Row()
             .width('100%')
             .height(2)
-            .backgroundColor($r('app.color.card_line'))
+            .backgroundColor(this.cLine())
           Row()
             .width(`${this.progressPct()}%`)
             .height(2)
-            .backgroundColor($r('app.color.card_accent'))
+            .backgroundColor(this.cAccent())
         }
         .width('100%')
         .height(2)
@@ -302,13 +320,13 @@ struct SuenFormCard {
             Image($r('app.media.card_note'))
               .width(26)
               .height(26)
-              .fillColor($r('app.color.card_t2'))
+              .fillColor(this.cT2())
               .opacity(0.4)
           }
           .width(84)
           .height(84)
           .borderRadius(8)
-          .backgroundColor($r('app.color.card_well'))
+          .backgroundColor(this.cWell())
           .justifyContent(FlexAlign.Center)
         }
       }
@@ -319,14 +337,14 @@ struct SuenFormCard {
       Column()
         .width(1)
         .height('100%')
-        .backgroundColor($r('app.color.card_line'))
+        .backgroundColor(this.cLine())
 
       Column() {
         Column() {
           Text(this.title)
             .fontSize(14)
             .fontWeight(FontWeight.Medium)
-            .fontColor($r('app.color.card_t1'))
+            .fontColor(this.cT1())
             .lineHeight(16)
             .maxLines(2)
             .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -335,7 +353,7 @@ struct SuenFormCard {
           if (!this.isIdle()) {
             Text(this.artist)
               .fontSize(10)
-              .fontColor($r('app.color.card_t2'))
+              .fontColor(this.cT2())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
@@ -351,8 +369,8 @@ struct SuenFormCard {
               .fontSize(idx === this.activeIndex() ? 11 : 10)
               .fontWeight(idx === this.activeIndex() ? FontWeight.Bold : FontWeight.Normal)
               .fontColor(idx === this.activeIndex()
-                ? $r('app.color.card_accent_text')
-                : $r('app.color.card_t2'))
+                ? this.cAccentText()
+                : this.cT2())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
@@ -371,17 +389,17 @@ struct SuenFormCard {
         Row() {
           Text(this.elapsedText())
             .fontSize(9)
-            .fontColor($r('app.color.card_t2'))
+            .fontColor(this.cT2())
 
           Stack({ alignContent: Alignment.Start }) {
             Row()
               .width('100%')
               .height(2)
-              .backgroundColor($r('app.color.card_line'))
+              .backgroundColor(this.cLine())
             Row()
               .width(`${this.progressPct()}%`)
               .height(2)
-              .backgroundColor($r('app.color.card_accent'))
+              .backgroundColor(this.cAccent())
           }
           .layoutWeight(1)
           .height(2)
@@ -389,7 +407,7 @@ struct SuenFormCard {
 
           Text(this.totalText())
             .fontSize(9)
-            .fontColor($r('app.color.card_t2'))
+            .fontColor(this.cT2())
         }
         .width('100%')
         .margin({ top: 8 })
@@ -401,7 +419,7 @@ struct SuenFormCard {
       Column()
         .width(1)
         .height('100%')
-        .backgroundColor($r('app.color.card_line'))
+        .backgroundColor(this.cLine())
 
       Column({ space: 12 }) {
         this.ctrlBtn('prev')
@@ -430,14 +448,14 @@ struct SuenFormCard {
           .height(this.btnSize(btn))
           .borderRadius(this.btnSize(btn) / 2)
           .backgroundColor(this.isIdle()
-            ? $r('app.color.card_well')
-            : $r('app.color.card_accent'))
+            ? this.cWell()
+            : this.cAccent())
         Image(this.btnIcon(btn))
           .width(this.btnIconSize(btn))
           .height(this.btnIconSize(btn))
           .fillColor(this.isIdle()
-            ? $r('app.color.card_t2')
-            : $r('app.color.card_accent_on'))
+            ? this.cT2()
+            : this.cAccentOn())
       }
       .width(this.btnSize(btn))
       .height(this.btnSize(btn))

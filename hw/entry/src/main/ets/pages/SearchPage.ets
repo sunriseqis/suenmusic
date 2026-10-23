@@ -662,6 +662,7 @@ export struct SearchPage {
           }
         }, (q: string) => q)
       }
+        .scrollBar(BarState.Off)
       .width('100%')
       .layoutWeight(1)
     }
@@ -782,6 +783,7 @@ export struct SearchPage {
           }
           ListItem() { this.listFooter() }
         }
+          .scrollBar(BarState.Off)
         .width('100%')
         .layoutWeight(1)
         .onReachEnd(() => { this.loadMore(); })

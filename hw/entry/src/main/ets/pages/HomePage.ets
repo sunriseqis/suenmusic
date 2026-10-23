@@ -443,6 +443,7 @@ export struct HomePage {
               Row().height(Dim.s4).width('100%')
             }
           }
+            .scrollBar(BarState.Off)
           .width('100%')
           .layoutWeight(1)
         }
