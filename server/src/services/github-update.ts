@@ -138,6 +138,13 @@ async function listReleases(): Promise<GithubRelease[]> {
     headers: githubHeaders(),
     dispatcher: proxyDispatcher(),
   } as never);
+  if (res.status === 404) {
+    // 2026-10-24：仓库**没有 Release**、或仓库是**私有**（未配 token）时 GitHub 都回 404。
+    // 按产品口径「有没有更新由后端管理」：这种情况一律当**无包**处理（返回空列表），
+    // 让 /api/update/check 正常回 available=false（客户端显示「已是最新」），而不是 502 报错。
+    log.warn('GitHub Releases 404（无 Release 或私有仓库未配 token），按无包处理');
+    return [];
+  }
   if (!res.ok) {
     throw new Error(`GitHub Releases 查询失败：HTTP ${res.status}`);
   }

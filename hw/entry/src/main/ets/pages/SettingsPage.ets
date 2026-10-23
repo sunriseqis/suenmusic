@@ -107,6 +107,8 @@ export struct SettingsPage {
   @StorageProp(K_THEME_MODE) themeMode: string = ThemeMode.SYSTEM;
   // 检查更新（T7）：'' = 只显示当前版本；'checking'；'latest'；'new=x.y.z'；'error:文案'
   @State updState: string = '';
+  /** 防重入（检查中） */
+  @State checkingUpd: boolean = false;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
 
@@ -174,19 +176,19 @@ export struct SettingsPage {
     }
   }
 
-  /** 行尾文案：当前版本 / 检查中 / 已是最新 / 有新版本 / 失败原因 */
+  /**
+   * 行尾文案（用户裁定：**只有三种形态**）
+   *   ① 未检查 → 版本号 `v1.6.0`
+   *   ② 检查后无新包（含后端无产物/私有仓库读不到，后端统一回 available=false）→ `已是最新`
+   *   ③ 后端有新包 → `新版本 x.y.z`
+   * 检查中与失败**不占第四种文案**：检查中仍显示版本号，失败只弹 toast。
+   */
   private updLabel(): string {
-    if (this.updState === 'checking') {
-      return '检查中…';
-    }
     if (this.updState === 'latest') {
-      return '已是最新 ' + this.selfVersion();
+      return '已是最新';
     }
     if (this.updState.startsWith('new=')) {
       return '新版本 ' + this.updState.slice(4);
-    }
-    if (this.updState.startsWith('error:')) {
-      return this.updState.slice(6);
     }
     return 'v' + this.selfVersion();
   }
@@ -196,10 +198,11 @@ export struct SettingsPage {
    * 不做应用内下载/静默安装：HAP 仍是未签名产物，由用户用移动端侧载工具安装。
    */
   private async checkUpdate(): Promise<void> {
-    if (this.updState === 'checking') {
+    if (this.checkingUpd) {
       return;
     }
-    this.updState = 'checking';
+    this.checkingUpd = true;
+    // 检查期间保持当前形态不变（不引入「检查中…」这第四种文案）
     try {
       const r = await APIClient.shared().checkUpdate(this.selfVersion(), this.selfVersionCode(), true);
       if (!r.available || r.latest === undefined) {
@@ -214,17 +217,11 @@ export struct SettingsPage {
       await ctx.startAbility({ action: 'ohos.want.action.viewData', uri: url });
       this.toast('新版本 ' + ver + '：已交给浏览器下载，装好后自行侧载安装');
     } catch (e) {
-      // 5xx 时优先显示服务端给的人话（例如「更新源暂时不可用」「更新服务已关闭」），
-      // 否则统一文案会把可诊断信息吞掉。
-      const apiErr = e as ApiError;
-      const fallback = Copy.describeError(e, true);
-      let msg = (apiErr.status >= 500 && apiErr.message.length > 0) ? apiErr.message : fallback;
-      // 仓库还没有 Release 时 GitHub 返回 404，翻成人话（用户自己传产物即可解决）
-      if (msg.includes('404')) {
-        msg = '仓库暂无发布产物（上传 SuenMusic-v<版本>-release.hap 到 Releases 即可）';
-      }
-      this.updState = 'error:' + msg;
-      this.toast(msg);
+      // 失败不占行尾形态：回落到「版本号」，原因只弹 toast
+      this.updState = '';
+      this.toast(Copy.describeError(e, true));
+    } finally {
+      this.checkingUpd = false;
     }
   }
 
