@@ -70,13 +70,10 @@ export default class EntryAbility extends UIAbility {
    */
   private applySystemColorMode(colorMode: ConfigurationConstant.ColorMode | undefined): void {
     const cm = colorMode === undefined ? ConfigurationConstant.ColorMode.COLOR_MODE_NOT_SET : colorMode;
-    const changed = Theme.syncSystemDark(cm);
-    if (!changed) {
-      return;
-    }
-    if (Theme.current() === ThemeMode.SYSTEM) {
-      this.pushSnapshotToCards(readSnapshotSync(this.context), Theme.isSystemDark(cm));
-    }
+    // 只同步系统态缓存。
+    // 之前在「跟随系统」时这里还会重推一次卡片，但用户实测（349e6a7）卡片仍然不实时 ——
+    // 推送并不能让卡片渲染侧重绘，白付一次表单刷新，故删除（省资源；卡片实时性已列为已知限制）。
+    Theme.syncSystemDark(cm);
   }
 
   /** 应用级环境订阅：后台也能收到系统深浅变化 */

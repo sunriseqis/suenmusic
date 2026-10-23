@@ -315,6 +315,32 @@ export interface DislikeRow {
   createdAt: number;
 }
 
+/** `GET /api/update/check` 里 latest 字段（GitHub Release 产物） */
+export interface UpdateArtifact {
+  fileName: string;
+  versionName: string;
+  versionCode: number;
+  size?: number;
+  sha256?: string;
+}
+
+/** `GET /api/update/check` 的返回（T7：只用于「有新版就交给系统浏览器下载」） */
+export interface UpdateCheckReply {
+  available: boolean;
+  current: UpdateVersionPair;
+  latest?: UpdateArtifact;
+  /** 下载路由（相对路径） */
+  downloadPath: string;
+  /** 短期下载令牌：浏览器发不出 Authorization 头，只能靠它换鉴权 */
+  downloadToken: string;
+}
+
+/** 版本二元组 */
+export interface UpdateVersionPair {
+  versionName: string;
+  versionCode: number;
+}
+
 /** `GET /api/recommend/dislikes` 的返回 */
 export interface DislikeListReply {
   dislikes: DislikeRow[];

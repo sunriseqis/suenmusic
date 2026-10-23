@@ -21,7 +21,8 @@ import {
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
   DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
   SourceStatus, OkReply, AlbumDetail, ArtistSongs, ArtistAlbums, SimilarArtists,
-  QQPlaylistResult, ToplistDetail, BiliCandidatesResult, AnchorBody, TrackAnchorReply
+  QQPlaylistResult, ToplistDetail, BiliCandidatesResult, AnchorBody, TrackAnchorReply,
+  UpdateCheckReply
 } from './Models';
 
 const TAG = 'SuenMusic_API';
@@ -486,6 +487,21 @@ export class APIClient {
 
   async home(): Promise<HomeData> {
     return this.request<HomeData>('/api/home', http.RequestMethod.GET, '', true, false);
+  }
+
+  /**
+   * 检查更新（T7）。`force=true` 才让服务端去上游核对，否则只读它本地缓存。
+   */
+  async checkUpdate(versionName: string, versionCode: number, force: boolean): Promise<UpdateCheckReply> {
+    const q = '?platform=harmony&version_name=' + encodeURIComponent(versionName)
+      + '&version_code=' + versionCode + (force ? '&force=1' : '');
+    return this.request<UpdateCheckReply>('/api/update/check' + q,
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 交给系统浏览器下载的直链（带短期令牌；浏览器发不出请求头） */
+  buildUpdateDownloadUrl(downloadPath: string, token: string): string {
+    return this.getBaseUrl() + downloadPath + '?platform=harmony&token=' + encodeURIComponent(token);
   }
 
   async resolve(trackId: string): Promise<ResolveResponse> {

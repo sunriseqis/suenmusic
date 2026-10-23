@@ -21,6 +21,7 @@ import { Dim, Motion } from '../common/Dimension';
 import { AppToast } from '../common/AppToast';
 import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
 import { picker, fileIo } from '@kit.CoreFileKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
@@ -104,6 +105,8 @@ export struct SettingsPage {
   @State clearCacheAsk: boolean = false;
   /** 当前主题模式（Theme 写入 AppStorage，这里只读来点亮分段） */
   @StorageProp(K_THEME_MODE) themeMode: string = ThemeMode.SYSTEM;
+  // 检查更新（T7）：'' = 只显示当前版本；'checking'；'latest'；'new=x.y.z'；'error:文案'
+  @State updState: string = '';
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
 
@@ -148,6 +151,81 @@ export struct SettingsPage {
       return (v >= 10 ? Math.round(v).toString() : v.toFixed(1)) + 'G';
     }
     return Math.round(b / mb).toString() + 'M';
+  }
+
+  // ---------------- 检查更新（T7，按用户指示「交给系统浏览器下载」） ----------------
+
+  /** 本机版本（bundleManager 自带，不需要 context） */
+  private selfVersion(): string {
+    try {
+      const info = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      return info.versionName;
+    } catch (e) {
+      return '';
+    }
+  }
+
+  private selfVersionCode(): number {
+    try {
+      const info = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      return info.versionCode;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /** 行尾文案：当前版本 / 检查中 / 已是最新 / 有新版本 / 失败原因 */
+  private updLabel(): string {
+    if (this.updState === 'checking') {
+      return '检查中…';
+    }
+    if (this.updState === 'latest') {
+      return '已是最新 ' + this.selfVersion();
+    }
+    if (this.updState.startsWith('new=')) {
+      return '新版本 ' + this.updState.slice(4);
+    }
+    if (this.updState.startsWith('error:')) {
+      return this.updState.slice(6);
+    }
+    return 'v' + this.selfVersion();
+  }
+
+  /**
+   * 检查更新：服务端比对版本 → 有新版本就把下载直链交给**系统浏览器**（用户自己侧载安装）。
+   * 不做应用内下载/静默安装：HAP 仍是未签名产物，由用户用移动端侧载工具安装。
+   */
+  private async checkUpdate(): Promise<void> {
+    if (this.updState === 'checking') {
+      return;
+    }
+    this.updState = 'checking';
+    try {
+      const r = await APIClient.shared().checkUpdate(this.selfVersion(), this.selfVersionCode(), true);
+      if (!r.available || r.latest === undefined) {
+        this.updState = 'latest';
+        this.toast('已是最新版本');
+        return;
+      }
+      const ver = r.latest.versionName;
+      this.updState = 'new=' + ver;
+      const url = APIClient.shared().buildUpdateDownloadUrl(r.downloadPath, r.downloadToken);
+      const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      await ctx.startAbility({ action: 'ohos.want.action.viewData', uri: url });
+      this.toast('新版本 ' + ver + '：已交给浏览器下载，装好后自行侧载安装');
+    } catch (e) {
+      // 5xx 时优先显示服务端给的人话（例如「更新源暂时不可用」「更新服务已关闭」），
+      // 否则统一文案会把可诊断信息吞掉。
+      const apiErr = e as ApiError;
+      const fallback = Copy.describeError(e, true);
+      let msg = (apiErr.status >= 500 && apiErr.message.length > 0) ? apiErr.message : fallback;
+      // 仓库还没有 Release 时 GitHub 返回 404，翻成人话（用户自己传产物即可解决）
+      if (msg.includes('404')) {
+        msg = '仓库暂无发布产物（上传 SuenMusic-v<版本>-release.hap 到 Releases 即可）';
+      }
+      this.updState = 'error:' + msg;
+      this.toast(msg);
+    }
   }
 
   /** 主题分段当前下标（跟随系统 / 浅色 / 深色） */
@@ -1374,6 +1452,31 @@ export struct SettingsPage {
 
           // ==================== 高级 ====================
           if (this.seg === 2) {
+            // 设备（T7：检查更新 → 有新版本交给系统浏览器下载，包未签名、由用户自行侧载）
+            this.secLabel('设备')
+            Column() {
+              Row() {
+                Text('检查更新')
+                  .fontSize(Dim.fsBody)
+                  .fontColor(Tokens.text1)
+                  .layoutWeight(1)
+                Text(this.updLabel())
+                  .fontSize(Dim.fsMinor)
+                  .fontColor(this.updState.startsWith('new=') ? Tokens.accentText : Tokens.text2)
+              }
+              .width('100%')
+              .height(Dim.touchMin)
+              .padding({ left: Dim.s4, right: Dim.s4 })
+              .accessibilityText('检查更新，当前 ' + this.updLabel())
+              .onClick(() => {
+                this.checkUpdate();
+              })
+            }
+            .width('100%')
+            .backgroundColor(Tokens.panel)
+            .borderRadius(Dim.radiusMd)
+            .border({ width: Dim.hairline, color: Tokens.line })
+
             this.secLabel('多服务端')
             Column() {
               Row() {
