@@ -584,6 +584,11 @@ export struct PlayerPage {
   /** 专属推荐理由卡（web m-info-card）：标签 + 不喜欢入口 + 理由正文 */
   @Builder
   recoCard() {
+    // 用户 2026-10-23：文字离卡片顶部空隙过大、上下留白不对称。
+    // 根因：dislike 键是 44 触控区，塞在标题 Row 里把整行撑到 44 高，标题文字被垂直居中 →
+    // 顶部看起来多出 ~14vp，而底部只有 padding 12vp。
+    // 改法：键**绝对定位**在卡片右上角（Stack TopEnd，不参与行高），标题行回到文字高度，
+    // 上下用同一档 padding，留白对称；正文因此也能完整显示。
     Column({ space: Dim.s2 }) {
       Row() {
         Text('专属推荐理由')
@@ -591,17 +596,16 @@ export struct PlayerPage {
           .fontWeight(FontWeight.Medium)
           .fontColor(Tokens.text2)
         Blank()
-        // 单图标「不喜欢」入口（T11 第 3 条：此处不需要文字，也不带展开箭头；
-        // 点击展开两级浮层选「这首歌 / 这位歌手」，默认不替用户选歌手）。
-        // 触控区 44（Dim.touchMin），与全端图标键口径一致。
+        // 单图标「不喜欢」入口：透明底，不使用强调色。
+        // **键壳 36**：卡片标题文字行高（fsCaption≈11fp → 实测量出来比 36 还高一点点），
+        // 键不再把整行撑高 → 上下留白对称、正文不被挤压，也不会盖到正文首行。
         Row() {
           WebIcon(WebIconName.DISLIKE_SONG, Dim.icon12,
             this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
         }
-        .width(Dim.touchMin)
-        .height(Dim.touchMin)
+        .width(Dim.btnMd)
+        .height(Dim.btnMd)
         .justifyContent(FlexAlign.Center)
-        // 用户 2026-10-23：透明背景，不要底衬/描边（与收起键、锚定页图标键同一套）
         .backgroundColor(Color.Transparent)
         .accessibilityText('不喜欢')
         .onClick(() => {
@@ -609,6 +613,7 @@ export struct PlayerPage {
         })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
 
       Text(this.recoText())
         .fontSize(Dim.fsMinor)
@@ -616,7 +621,9 @@ export struct PlayerPage {
         .width('100%')
     }
     .width('100%')
-    .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s3, bottom: Dim.s3 })
+    // top 取 0：标题行被 36 键壳撑到 36vp，文字垂直居中天然带 ~11.6vp 上留白；
+    // 若再加 top padding 就和底部（s3=12vp）不对等了 —— 这是用户反馈的「顶部空隙过大」的直接来源。
+    .padding({ left: Dim.s3, right: Dim.s3, top: 0, bottom: Dim.s3 })
     .borderRadius(Dim.radiusSm)
     .border({ width: Dim.hairline, color: Tokens.line })
     .backgroundColor(Tokens.panel2)
@@ -1027,7 +1034,9 @@ export struct PlayerPage {
   @Builder
   anchorSheet() {
     Column() {
-      Column() {
+      // 用户 2026-10-23：音源 / 已有锚点 / 搜索行 / 原版参照 / 候选列表之间**一个间隔都没有**，
+      // 全部糊成一坨 → 统一 s3 块间距（弹窗内所有分块都吃同一档，不再逐个调 padding）
+      Column({ space: Dim.s3 }) {
         // 头：标题 + 关闭（曲名在参照卡里有，不重复占行）
         Row() {
           Text('锚定音源')
@@ -1060,8 +1069,10 @@ export struct PlayerPage {
             .fontColor(Tokens.text1)
         }
         .width('100%')
-        .padding({ top: Dim.s1, bottom: Dim.s1 })
-        .border({ width: { top: Dim.hairline, bottom: Dim.hairline }, color: Tokens.line })
+        // 原来上下各一条通栏发丝线，和「已锚点 / 原版参照」两张圆角行不是一套 → 统一成 panel2 圆角行
+        .padding({ left: Dim.s2, right: Dim.s2, top: Dim.s1, bottom: Dim.s1 })
+        .borderRadius(Dim.radiusSm)
+        .backgroundColor(Tokens.panel2)
 
         // 已有锚点：回显 + 可解除（锚错了随时推翻重来）
         if (this.anchorInfo !== null) {
