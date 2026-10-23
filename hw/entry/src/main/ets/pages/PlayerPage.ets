@@ -21,7 +21,7 @@ import { media } from '@kit.MediaKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import {
   MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_POS, K_DUR, K_INDEX,
-  K_TRACKID, K_PLAY_MODE, K_ORIGIN
+  K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
 import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo } from '../core/Models';
@@ -57,6 +57,8 @@ export struct PlayerPage {
   @StorageLink(K_PLAYER_SHEET) sheet: string = 'none';
 
   // 窗口全屏布局下的系统避让区实时值（顶部收起钮与底部 peek 需避开刘海/手势条）
+  /** 当前曲的真实音源（bilibili / netease；空 = 未匹配），由内核每曲发布 */
+  @StorageProp(K_SOURCE) npSource: string = '';
   @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
   @StorageProp('bottomAvoidHeight') bottomAvoidHeight: number = 0;
 
@@ -206,8 +208,23 @@ export struct PlayerPage {
   // ---------------- 修正音源 / 手动锚定（web AnchorDialog 同口径） ----------------
 
   /** 已锚定 → bilibili；否则未解析（hw 无逐曲音源追踪：走 AVPlayer 拿不到解析响应，网易云分支无从得知，回执记差异） */
+  /**
+   * 「音源」行文案（用户 2026-10-23 裁定：**bilibili / 网易云 / 未匹配**）。
+   * 取内核每曲发布的真实解析来源，不再只按「有没有锚点」猜。
+   * 锚定过的曲目服务端 resolve 直接回锚点来源，因此锚定后这里自然是 bilibili。
+   */
   private sourceLabel(): string {
-    return this.anchorInfo !== null ? 'bilibili' : '未解析';
+    if (this.npSource === 'bilibili') {
+      return 'bilibili';
+    }
+    if (this.npSource === 'netease') {
+      return '网易云';
+    }
+    // 兜底：解析还没回来/失败但已手动锚定 —— 锚点必然是 bilibili
+    if (this.npSource.length === 0 && this.anchorInfo !== null) {
+      return 'bilibili';
+    }
+    return '未匹配';
   }
 
   private currentAnchorText(): string {

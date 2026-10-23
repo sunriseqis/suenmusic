@@ -21,7 +21,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
-import { Track, artistLine } from './Models';
+import { Track, artistLine, ResolveResponse } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
 import { Notifier } from '../common/Notifier';
@@ -752,6 +752,8 @@ export class MediaPlayerCore {
 
     // 先落 UI 元数据：切歌瞬间界面就该变，别等 prepare
     this.publishTrack(track);
+    // 音源标签（用户 2026-10-23 裁定：显示 bilibili / 网易云 / 未匹配）
+    this.refreshSourceLabel(track);
     // 切歌即重置持久化位置：否则自动接续（endOfStream）后恢复会拿旧位置 seek 新曲
     this.persistPosition(0);
 
@@ -775,6 +777,37 @@ export class MediaPlayerCore {
     } catch (e) {
       this.fail('赋流地址', e);
     }
+  }
+
+  /**
+   * 每曲音源标签发布（`K_SOURCE` → 播放页「音源」行）。
+   *
+   * 用户 2026-10-23 裁定：这一行必须显示**真实音源**（bilibili / 网易云 / 未匹配），
+   * 而不是「已锚定/未解析」这种只有锚定信息、看不出实际从哪播的说法。
+   *
+   * 取数走 `/api/resolve/<trackId>`（服务端解析缓存命中很快，且**顺带把缓存暖热**，
+   * 后续 `/api/stream` 起播更快）。火后不管：不阻塞起播，失败按「未匹配」显示。
+   * 锚定过的曲目服务端会直接回锚点来源，所以锚定后这一行自然变 `bilibili`。
+   */
+  private refreshSourceLabel(track: Track): void {
+    const id = track.id;
+    // 切歌先清空：不拿上一首的音源冒充这一首（空 = 未匹配）
+    AppStorage.setOrCreate<string>(K_SOURCE, '');
+    APIClient.shared().resolve(id)
+      .then((r: ResolveResponse): void => {
+        const cur = this.current;
+        if (cur === null || cur.id !== id) {
+          return;
+        }
+        AppStorage.setOrCreate<string>(K_SOURCE, r.ok ? r.source : '');
+      })
+      .catch((): void => {
+        const cur = this.current;
+        if (cur === null || cur.id !== id) {
+          return;
+        }
+        AppStorage.setOrCreate<string>(K_SOURCE, '');
+      });
   }
 
   /**
