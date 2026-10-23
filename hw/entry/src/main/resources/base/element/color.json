@@ -42,23 +42,23 @@
     },
     {
       "name": "start_window_background",
-      "value": "#0E0F11"
+      "value": "#F2F0EA"
     },
     {
       "name": "t_accent",
-      "value": "#E8A33D"
+      "value": "#B0650F"
     },
     {
       "name": "t_accent_text",
-      "value": "#E8A33D"
+      "value": "#8F4E08"
     },
     {
       "name": "t_badge_ink",
-      "value": "#1A1206"
+      "value": "#FFFFFF"
     },
     {
       "name": "t_bg",
-      "value": "#0E0F11"
+      "value": "#F2F0EA"
     },
     {
       "name": "t_date_chip",
@@ -66,19 +66,19 @@
     },
     {
       "name": "t_hi",
-      "value": "#0FFFFFFF"
+      "value": "#F2FFFFFF"
     },
     {
       "name": "t_line",
-      "value": "#2A2C30"
+      "value": "#DCD6C9"
     },
     {
       "name": "t_panel",
-      "value": "#17181B"
+      "value": "#FFFDF8"
     },
     {
       "name": "t_panel2",
-      "value": "#1D1F23"
+      "value": "#F7F3EA"
     },
     {
       "name": "t_poster_scrim",
@@ -90,19 +90,19 @@
     },
     {
       "name": "t_scrim",
-      "value": "#A8000000"
+      "value": "#6B141414"
     },
     {
       "name": "t_text1",
-      "value": "#E9E7E2"
+      "value": "#141414"
     },
     {
       "name": "t_text2",
-      "value": "#8A8D93"
+      "value": "#6D6A63"
     },
     {
       "name": "t_track",
-      "value": "#2A2C30"
+      "value": "#DCD6C9"
     }
   ]
 }

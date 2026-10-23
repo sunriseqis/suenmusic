@@ -6,6 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider, formInfo } from '@kit.FormKit';
 import { dispatchCardControl, CardControlRequest } from '../common/PlayerControlHub';
 import { Notifier } from '../common/Notifier';
+import { Theme } from '../common/Theme';
 import {
   NowPlayingSnapshot,
   readSnapshotSync,
@@ -41,6 +42,8 @@ class CardControlResult implements rpc.Parcelable {
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onCreate');
+    // 主题：先把上次选择的深浅应用上（必须在窗口内容加载前，避免闪一次系统主题）
+    Theme.init(this.context);
     // 系统通知落地口需要 UIAbilityContext（首次发布时才真正请求授权）
     Notifier.init(this.context);
     this.registerCardCallee();

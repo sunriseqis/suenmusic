@@ -118,7 +118,7 @@ def main() -> None:
     # 阶段 1 先让 base 也写**深色**：此时客户端还没有主题开关（阶段 2 才有），
     # 若 base 立刻切浅色，跟随系统浅色的机器会突然变成半成品浅色界面。
     # 阶段 2 接线完成后把 EMIT_LIGHT_IN_BASE 置 True 即可一键切到「base=浅色 / dark=深色」。
-    EMIT_LIGHT_IN_BASE = False
+    EMIT_LIGHT_IN_BASE = True
     base_rows = light_rows if EMIT_LIGHT_IN_BASE else dark_rows
     base_bg = light_bg if EMIT_LIGHT_IN_BASE else dark_bg
     write_color_json(HW_COLOR_BASE, base_rows, {"start_window_background": base_bg})

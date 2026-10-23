@@ -25,6 +25,7 @@ import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Theme, ThemeMode, K_THEME_MODE, THEME_LABELS, THEME_VALUES } from '../common/Theme';
 import { Copy } from '../common/Copy';
 import { OfflineCache } from '../core/OfflineCache';
 import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
@@ -101,6 +102,8 @@ export struct SettingsPage {
   @State cacheQuota: number = 0;
   /** 清空缓存确认弹窗 */
   @State clearCacheAsk: boolean = false;
+  /** 当前主题模式（Theme 写入 AppStorage，这里只读来点亮分段） */
+  @StorageProp(K_THEME_MODE) themeMode: string = ThemeMode.SYSTEM;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
 
@@ -145,6 +148,16 @@ export struct SettingsPage {
       return (v >= 10 ? Math.round(v).toString() : v.toFixed(1)) + 'G';
     }
     return Math.round(b / mb).toString() + 'M';
+  }
+
+  /** 主题分段当前下标（跟随系统 / 浅色 / 深色） */
+  private themeIndex(): number {
+    for (let i = 0; i < THEME_VALUES.length; i++) {
+      if (THEME_VALUES[i] === this.themeMode) {
+        return i;
+      }
+    }
+    return 0;
   }
 
   /** 确认后清空（正在播放的那首不动，OfflineCache 内建保护） */
@@ -1189,6 +1202,25 @@ export struct SettingsPage {
               this.lyricTransRow()
             }
             .width('100%')
+            .backgroundColor(Tokens.panel)
+            .borderRadius(Dim.radiusMd)
+            .border({ width: Dim.hairline, color: Tokens.line })
+
+            // 主题（T12 阶段 2）：三态对齐 web `stores/ui.ts`（跟随系统 / 浅色 / 深色）
+            this.secLabel('主题')
+            Column() {
+              NeuTabs({
+                labels: THEME_LABELS,
+                activeIndex: this.themeIndex(),
+                onSelect: (i: number) => {
+                  Theme.setMode(THEME_VALUES[i]);
+                  this.toast('主题：' + THEME_LABELS[i]);
+                }
+              })
+                .width('100%')
+            }
+            .width('100%')
+            .padding(Dim.s3)
             .backgroundColor(Tokens.panel)
             .borderRadius(Dim.radiusMd)
             .border({ width: Dim.hairline, color: Tokens.line })
