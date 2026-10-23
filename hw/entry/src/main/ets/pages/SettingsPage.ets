@@ -24,6 +24,9 @@ import { picker, fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Copy } from '../common/Copy';
+import { OfflineCache } from '../core/OfflineCache';
 import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
 import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
 
@@ -93,6 +96,11 @@ export struct SettingsPage {
   @State tuning: boolean = false;
   /** 上一次提交成功的调优提示词（调优区左侧回显） */
   @StorageLink(K_LAST_TUNE) lastTune: string = '';
+  // 离线缓存用量（在设置页行内直接显示 已用/上限，用户 2026-10-23 裁定：不再进弹层看）
+  @State cacheUsed: number = 0;
+  @State cacheQuota: number = 0;
+  /** 清空缓存确认弹窗 */
+  @State clearCacheAsk: boolean = false;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
 
@@ -100,6 +108,7 @@ export struct SettingsPage {
   onOpenCache: () => void = () => {};
 
   aboutToAppear(): void {
+    this.loadCacheUsage();
     this.loadWebdavFields();
     this.loadDislikes();
     this.loadPersona();
@@ -110,6 +119,43 @@ export struct SettingsPage {
 
   private toast(msg: string): void {
     AppToast.show(msg);
+  }
+
+  // ---------------- 离线缓存（行内用量 + 点击确认清空） ----------------
+
+  private loadCacheUsage(): void {
+    try {
+      const c = OfflineCache.shared();
+      this.cacheUsed = c.usedBytes();
+      this.cacheQuota = c.quotaBytes();
+    } catch (e) {
+      // 读不到用量只是不显示，不影响其它设置项
+    }
+  }
+
+  /** 紧凑容量文案：100M / 2G（web 缓存面板同口径，整数展示） */
+  private fmtShort(b: number): string {
+    const gb = 1024 * 1024 * 1024;
+    const mb = 1024 * 1024;
+    if (b <= 0) {
+      return '0M';
+    }
+    if (b >= gb) {
+      const v = b / gb;
+      return (v >= 10 ? Math.round(v).toString() : v.toFixed(1)) + 'G';
+    }
+    return Math.round(b / mb).toString() + 'M';
+  }
+
+  /** 确认后清空（正在播放的那首不动，OfflineCache 内建保护） */
+  private clearCache(): void {
+    try {
+      OfflineCache.shared().clearAll();
+      this.toast('已清空离线缓存');
+    } catch (e) {
+      this.toast(Copy.describeError(e));
+    }
+    this.loadCacheUsage();
   }
 
   private async loadDislikes(): Promise<void> {
@@ -1125,16 +1171,19 @@ export struct SettingsPage {
                   .fontSize(Dim.fsBody)
                   .fontColor(Tokens.text1)
                   .layoutWeight(1)
-                Text('管理')
+                // 行内直接给用量（用户 2026-10-23 裁定：不再「管理」弹层看，改成 100M/2G 直显）
+                Text(this.fmtShort(this.cacheUsed) + '/' + this.fmtShort(this.cacheQuota))
                   .fontSize(Dim.fsMinor)
                   .fontColor(Tokens.text2)
               }
               .width('100%')
               .height(Dim.touchMin)
               .padding({ left: Dim.s4, right: Dim.s4 })
-              .accessibilityText('打开离线缓存')
+              .accessibilityText('清空离线缓存：已用 ' + this.fmtShort(this.cacheUsed)
+                + '，上限 ' + this.fmtShort(this.cacheQuota))
               .onClick(() => {
-                this.onOpenCache();
+                this.loadCacheUsage();
+                this.clearCacheAsk = true;
               })
 
               this.lyricTransRow()
@@ -1360,6 +1409,24 @@ export struct SettingsPage {
       }
       if (this.sheet === 'backup') {
         this.backupSheet()
+      }
+
+      // 清空缓存二次确认（自绘哑光弹窗，不用系统 AlertDialog）
+      if (this.clearCacheAsk) {
+        ConfirmDialog({
+          titleStr: '清空离线缓存',
+          messageStr: '将删除全部 ' + this.fmtShort(this.cacheUsed) + ' 离线缓存（正在播放的除外），'
+            + '之后播放会重新联网下载。',
+          confirmLabel: '清空',
+          dangerFlag: true,
+          onConfirm: (): void => {
+            this.clearCacheAsk = false;
+            this.clearCache();
+          },
+          onCancel: (): void => {
+            this.clearCacheAsk = false;
+          }
+        })
       }
     }
     .width('100%')
