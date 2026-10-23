@@ -35,6 +35,14 @@ const PLAYER_PREFS = 'suenmusic_player';
 const SESSION_KEY = 'session';
 const POS_KEY = 'pos';
 const POS_PERSIST_INTERVAL_MS = 5000;
+/**
+ * 失败**挂起窗口**（ms）：装载失败先不惊动用户，给 AVPlayer/服务端一次自愈机会。
+ *
+ * 用户 2026-10-23 实测：专属页某些曲目首次 `/api/stream` 回 503（服务端还在解析），
+ * AVPlayer 内部重试后 **1 秒内就播起来了**；而我们一失败就报错+发通知，观感是
+ * 「错误闪一下又瞬间恢复」。窗口内恢复 → 静默撤销，什么都不发。
+ */
+const FAIL_GRACE_MS = 2500;
 /** 播放模式偏好键（web localStorage `suenmusic.playMode` 同口径） */
 const MODE_KEY = 'play_mode';
 
@@ -105,6 +113,8 @@ export class MediaPlayerCore {
   private failHandled: boolean = false;
   /** 连续失败上限：超过就停下报错，避免整条队列被瞬间跳空 */
   private static readonly MAX_FAIL_STREAK: number = 3;
+  /** 失败挂起定时器（-1 = 无）；恢复播放或重新装载时清除 */
+  private failTimer: number = -1;
   /** 上次向 AVSession 推送进度的时间（节流用，见 timeUpdate） */
   private lastStatePushAt: number = 0;
   private releasing: boolean = false;
@@ -745,6 +755,11 @@ export class MediaPlayerCore {
     if (track === null) { return; }
     const mySeq = ++this.seq;
     this.failHandled = false;
+    // 重新装载即撤销挂起的失败（重试 / 跳过 / 锚定后重装都走这里）
+    if (this.failTimer !== -1) {
+      clearTimeout(this.failTimer);
+      this.failTimer = -1;
+    }
     this.pendingAutoplay = autoplay || this.wantPlay;
     // 登记删除保护：缓存面板删文件必须跳过正在播的这一首（fd:// 占用中删了直接断播）
     OfflineCache.shared().setProtected(track.id);
@@ -833,33 +848,48 @@ export class MediaPlayerCore {
     const name = track === null ? '' : track.name;
 
     if (this.failStreak >= MediaPlayerCore.MAX_FAIL_STREAK) {
-      this.wantPlay = false;
-      AppStorage.setOrCreate<boolean>(K_PLAYING, false);
-      AppStorage.setOrCreate<string>('np_error', '连续多首找不到可播放音源，请检查网络或稍后再试');
-      Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
-      this.av?.stopContinuousTask();
+      this.settleFailure('连续多首找不到可播放音源，请检查网络或稍后再试', true);
       return;
     }
 
-    // 还有路可走才自动跳下一首（列表循环可回绕、随机可重洗续播，web advance 同口径）
-    const hasWayOut = this.index + 1 < this.queue.length
-      || this.playMode === 'list-loop'
-      || this.playMode === 'shuffle';
-    AppStorage.setOrCreate<string>('np_error',
-      hasWayOut ? '《' + name + '》暂无可用音源，已跳过' : '《' + name + '》暂无可用音源');
-    // 2026-10-23 用户裁定：**不弹应用内弹窗**，改发系统通知告知「没有匹配音源」，随后照常跳下一首
-    Notifier.notify('没有匹配音源',
-      hasWayOut ? '《' + name + '》没有可播放的匹配音源，已自动跳过' : '《' + name + '》没有可播放的匹配音源');
-    if (hasWayOut) {
-      // 稍等一下再跳：避免服务端瞬时抖动时把整条队列连跳掉
-      setTimeout(() => {
-        this.next();
-      }, 600);
-    } else {
-      this.wantPlay = false;
-      AppStorage.setOrCreate<boolean>(K_PLAYING, false);
-      this.av?.stopContinuousTask();
+    // ⚠️ 2026-10-23 用户裁定（第 3 版）：
+    // **不自动跳下一首**（会让人来不及手动锚定这首歌），**也不立刻报错**——
+    // 先挂起 `FAIL_GRACE_MS`：AVPlayer 对 5xx 会自行重试，专属页实测 1s 内就播起来了，
+    // 这种瞬时失败不该惊动用户（原来会在不到 1 秒内「弹错误 + 发通知 + 又瞬间恢复」）。
+    // 窗口内恢复 → 静默撤销（'playing' 分支负责清计时器）；窗口到期仍没播 → 落定失败：
+    // 停在当前曲 + 系统通知 + 错误行「重试 / 跳过」，更多菜单「修正音源」可就地锚定。
+    if (this.failTimer !== -1) {
+      clearTimeout(this.failTimer);
     }
+    this.failTimer = setTimeout(() => {
+      this.failTimer = -1;
+      // 期间已经播起来（AVPlayer 自愈）→ 什么都不做，错误一律不发
+      if (this.wantPlay) {
+        return;
+      }
+      this.settleFailure('《' + name + '》没有可播放的匹配音源，可点「重试」或「更多 → 修正音源」手动锚定', false);
+    }, FAIL_GRACE_MS);
+  }
+
+  /**
+   * 失败**落定**：报错 + 通知 + 停在当前曲（不自动切歌）。
+   * 注意这里要清 `pendingAutoplay`——否则 AVPlayer 随后一次迟到的 'prepared' 会把歌又播起来。
+   */
+  private settleFailure(message: string, consecutive: boolean): void {
+    if (this.failTimer !== -1) {
+      clearTimeout(this.failTimer);
+      this.failTimer = -1;
+    }
+    this.pendingAutoplay = false;
+    this.wantPlay = false;
+    AppStorage.setOrCreate<boolean>(K_PLAYING, false);
+    AppStorage.setOrCreate<string>('np_error', message);
+    if (consecutive) {
+      Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
+    } else {
+      Notifier.notify('没有匹配音源', message);
+    }
+    this.av?.stopContinuousTask();
   }
 
   /** 离线优先：命中缓存走 `fd://`，否则走服务端流（带短期令牌） */
@@ -938,6 +968,12 @@ export class MediaPlayerCore {
       if (state === 'playing') {
         this.wantPlay = true;
         this.failStreak = 0;
+        this.failHandled = false;
+        // 挂起的失败作废：这一首其实播起来了（瞬时失败自愈），一律不打扰用户
+        if (this.failTimer !== -1) {
+          clearTimeout(this.failTimer);
+          this.failTimer = -1;
+        }
         // 成功起播清掉上一首的失败提示，避免陈旧错误一直挂在播放页
         AppStorage.setOrCreate<string>('np_error', '');
         this.publishState();

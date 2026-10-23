@@ -26,6 +26,8 @@ import { cleanAiText } from '../utils/text.ts';
 const log = createLogger('ai-decide');
 
 const DEFAULT_COUNT = 30;
+/** 推荐理由防呆上限（字符）：正常理由远小于此，超长才截断 —— 客户端要能完整显示理由 */
+const REASON_MAX_CHARS = 120;
 /**
  * 池子给模型时的行数上限。
  *
@@ -433,8 +435,11 @@ function parseDecision(text: string, pool?: Candidate[]): RawDecision {
         const o = p as Record<string, unknown>;
         let reason = cleanAiText(String(o.reason ?? ''));
         reason = reason.replace(/他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
-        if (reason.length > 28) {
-          reason = reason.slice(0, 26) + '…';
+        // 2026-10-23：**不再截断到 26 字**（用户在客户端看到每条推荐理由都以「…」结尾，
+        // 那条「…」是这里加的，不是客户端 ellipsis）。仅保留一道防呆上限 120 字，
+        // 防模型跑飞输出整段；正常理由远小于此，原样返回给客户端换行显示。
+        if (reason.length > REASON_MAX_CHARS) {
+          reason = reason.slice(0, REASON_MAX_CHARS - 2) + '…';
         }
         return { id: String(o.id ?? '').trim(), reason };
       });
@@ -461,7 +466,9 @@ function parseDecision(text: string, pool?: Candidate[]): RawDecision {
         const rawTitle = m[1]!.replace(/[\(\)（）]/g, '').trim();
         let reason = cleanAiText((m[2] || ''));
         reason = reason.replace(/他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
-        if (reason.length > 28) reason = reason.slice(0, 26) + '…';
+        if (reason.length > REASON_MAX_CHARS) {
+          reason = reason.slice(0, REASON_MAX_CHARS - 2) + '…';
+        }
 
         // 在候选池中模糊查找匹配的歌名
         const hit = pool.find(c => {

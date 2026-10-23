@@ -787,16 +787,29 @@ export struct PlayerPage {
           .textOverflow({ overflow: TextOverflow.Ellipsis })
           .width('100%')
           .textAlign(TextAlign.Center)
-        // 播放失败可重试（T4）：重装当前曲，清错误横幅（第 ⑰ 条统一文字钮）
-        WebButton({
-          labelStr: '重试',
-          sizeKind: NeuBtnSize.MD,
-          onTap: () => {
-            this.err = '';
-            MediaPlayerCore.shared().retryCurrent();
-          }
-        })
-          .accessibilityText('重试播放当前歌曲')
+        // 失败处理（T4 + 2026-10-23 用户裁定）：内核不再自动跳过，动作交给用户
+        // 重试 = 重装当前曲；跳过 = 主动播下一首；「更多 → 修正音源」可就地锚定
+        Row({ space: Dim.s2 }) {
+          WebButton({
+            labelStr: '重试',
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => {
+              this.err = '';
+              MediaPlayerCore.shared().retryCurrent();
+            }
+          })
+            .accessibilityText('重试播放当前歌曲')
+          WebButton({
+            labelStr: '跳过',
+            variantKind: NeuBtnVariant.GHOST,
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => {
+              this.err = '';
+              MediaPlayerCore.shared().next();
+            }
+          })
+            .accessibilityText('跳过这首歌，播放下一首')
+        }
       }
 
       // 歌词 peek（web lyric-wrap：当前行 ±1，点开歌词 sheet）
@@ -1058,21 +1071,7 @@ export struct PlayerPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 音源（web src-row：去掉播放器指示灯后唯一能看出来的地方）
-        Row() {
-          Text('音源')
-            .fontSize(Dim.fsCaption)
-            .fontColor(Tokens.text2)
-          Blank()
-          Text(this.sourceLabel())
-            .fontSize(Dim.fsMinor)
-            .fontColor(Tokens.text1)
-        }
-        .width('100%')
-        // 原来上下各一条通栏发丝线，和「已锚点 / 原版参照」两张圆角行不是一套 → 统一成 panel2 圆角行
-        .padding({ left: Dim.s2, right: Dim.s2, top: Dim.s1, bottom: Dim.s1 })
-        .borderRadius(Dim.radiusSm)
-        .backgroundColor(Tokens.panel2)
+        // 音源行已删（用户 2026-10-23：锚定弹窗里不要这行 —— 音源信息在「更多」菜单里已经有了）
 
         // 已有锚点：回显 + 可解除（锚错了随时推翻重来）
         if (this.anchorInfo !== null) {
