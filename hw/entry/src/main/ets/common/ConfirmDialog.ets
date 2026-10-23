@@ -16,6 +16,8 @@ export struct ConfirmDialog {
   @Param cancelLabel: string = '取消';
   /** 危险操作（确认键红字，web .v-danger 口径：透明底红字，不做红填充） */
   @Param dangerFlag: boolean = false;
+  /** 单按钮（信息型弹窗：只有「知道了」，不给取消）—— T8 关于/卡片说明用 */
+  @Param singleFlag: boolean = false;
   @Event onConfirm: () => void = () => {};
   @Event onCancel: () => void = () => {};
 
@@ -41,6 +43,7 @@ export struct ConfirmDialog {
           .width('100%')
 
         Row({ space: Dim.s2 }) {
+          if (!this.singleFlag) {
           WebButton({
             labelStr: this.cancelLabel,
             variantKind: NeuBtnVariant.DEFAULT,
@@ -51,6 +54,7 @@ export struct ConfirmDialog {
             }
           })
             .layoutWeight(1)
+          }
           WebButton({
             labelStr: this.confirmLabel,
             variantKind: this.dangerFlag ? NeuBtnVariant.DANGER : NeuBtnVariant.PRIMARY,

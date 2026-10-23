@@ -35,6 +35,8 @@ import { Theme } from './Theme';
 const TAG = 'SuenMusic_AVSession';
 const DOMAIN = 0x0000;
 /** 卡片封面文件（formImages 的数据源），与 FormExtensionAbility 共享沙箱 */
+/** 卡片推送的地板间隔（ms）：进度类推送与 AVSession 的 ~1s 上报共用这一道闸（T9 §1.1-2） */
+const CARD_PUSH_MIN_INTERVAL_MS = 1000;
 const CARD_COVER_PATH = '/card_cover.img';
 /**
  * formImages 单张文件上限（官方：不超过 2MB）。超限会让 updateForm 整体失败 ——
@@ -99,6 +101,8 @@ class HarmonyAVSessionManager {
   private currentFavorite: boolean = false;
   /** 当前播放位置（毫秒）。web 每 ~1s 上报一次，卡片歌词靠它滚动 */
   private currentPositionMs: number = 0;
+  /** 卡片推送的 1s 地板（与进度上报同一道闸，见 syncCard(force)） */
+  private lastCardPushAt: number = 0;
   /** 封面字节是否已落盘（卡片 formImages 的前提） */
   private coverFileReady: boolean = false;
   /**
@@ -455,7 +459,22 @@ class HarmonyAVSessionManager {
     await this.syncCard();
   }
 
-  private async syncCard(): Promise<void> {
+  /**
+   * 推一次快照给桌面卡片。
+   *
+   * `force=false` 走**每秒一道**的共用闸（T9 §1.1 第 2 条：进度与 AVSession 共用一个节流，
+   * 不要两条节流各自为政）；换歌/换封面/歌词到达这类元数据变更一律 force=true 立刻推。
+   */
+  private async syncCard(force: boolean = true): Promise<void> {
+    if (!force) {
+      const nowMs = Date.now();
+      if (nowMs - this.lastCardPushAt < CARD_PUSH_MIN_INTERVAL_MS) {
+        return;
+      }
+      this.lastCardPushAt = nowMs;
+    } else {
+      this.lastCardPushAt = Date.now();
+    }
     const hasTrack = this.currentCardTitle.length > 0;
     const snap: NowPlayingSnapshot = {
       title: hasTrack ? this.currentCardTitle : '暂无歌曲播放',
@@ -915,7 +934,7 @@ class HarmonyAVSessionManager {
         // 有歌词：只在活跃行变化时推 —— 卡片刷新走 IPC，逐秒推既浪费也不平滑
         if (activeIdx !== this.lastCardLyricIndex) {
           this.lastCardLyricIndex = activeIdx;
-          this.syncCard();
+          this.syncCard(false);
         }
       } else {
         // 没歌词（纯音乐 / 尚未拉到歌词）：卡片上的进度条只能靠定时推，
@@ -923,7 +942,7 @@ class HarmonyAVSessionManager {
         const nowMs = Date.now();
         if (nowMs - this.lastCardProgressPushAt >= 5000) {
           this.lastCardProgressPushAt = nowMs;
-          this.syncCard();
+          this.syncCard(false);
         }
       }
 
@@ -931,6 +950,7 @@ class HarmonyAVSessionManager {
       const nowPlaying = state === avSession.PlaybackState.PLAYBACK_STATE_PLAY;
       if (nowPlaying !== this.isPlaying) {
         this.isPlaying = nowPlaying;
+        // 播放/暂停是**状态语义**，不受进度闸限制，立刻推
         this.syncCard();
       }
     } catch (err) {

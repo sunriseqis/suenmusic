@@ -13,7 +13,7 @@
  * 经参数传值不会建立依赖、状态变了 UI 不刷（T10 实测口径，与 NativeRoot tabItem 同款）。
  */
 
-import { AppState, K_USER_NAME, K_USER_DISPLAY, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE } from '../viewmodel/AppState';
+import { AppState, K_USER_NAME, K_USER_DISPLAY, K_USER_ROLE, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE } from '../viewmodel/AppState';
 import { APIClient, ApiError } from '../core/APIClient';
 import { WebDavClient } from '../core/WebDavClient';
 import { Tokens } from '../common/Tokens';
@@ -22,6 +22,7 @@ import { AppToast } from '../common/AppToast';
 import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { bundleManager, common } from '@kit.AbilityKit';
+import { formProvider, formInfo } from '@kit.FormKit';
 import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
@@ -109,6 +110,20 @@ export struct SettingsPage {
   @State updState: string = '';
   /** 防重入（检查中） */
   @State checkingUpd: boolean = false;
+
+  // ---- T8：账号卡 / 改口令 / 登出确认 / 关于 ----
+  @StorageProp(K_USER_ROLE) userRole: string = '';
+  @State pwOld: string = '';
+  @State pwNew: string = '';
+  @State pwNew2: string = '';
+  @State pwBusy: boolean = false;
+  @State signOutAsk: boolean = false;
+  @State aboutOpen: boolean = false;
+
+  // ---- T9：桌面卡片管理 ----
+  /** 已添加的桌面卡片张数（-1 = 还没查） */
+  @State cardCount: number = -1;
+  @State cardHelpOpen: boolean = false;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
 
@@ -117,6 +132,7 @@ export struct SettingsPage {
 
   aboutToAppear(): void {
     this.loadCacheUsage();
+    this.loadCardCount();
     this.loadWebdavFields();
     this.loadDislikes();
     this.loadPersona();
@@ -223,6 +239,79 @@ export struct SettingsPage {
     } finally {
       this.checkingUpd = false;
     }
+  }
+
+  // ---------------- T8：账号卡 / 修改口令 / 关于 ----------------
+
+  /** 角色文案（admin → 管理员） */
+  private roleLabel(): string {
+    return this.userRole === 'admin' ? '管理员' : '用户';
+  }
+
+  /** 头像位文字：昵称/账号首字符（本项目没有头像上传，用首字母圆牌，T8 §①） */
+  private avatarText(): string {
+    const n = this.userDisplay.length > 0 ? this.userDisplay : this.userName;
+    return n.length > 0 ? n.substring(0, 1).toUpperCase() : '?';
+  }
+
+  private pwReady(): boolean {
+    return this.pwOld.length > 0 && this.pwNew.length >= 6 && this.pwNew === this.pwNew2;
+  }
+
+  /** 修改口令：服务端会签发新会话（旧令牌失效），成功后必须 adopt 新令牌 */
+  private async doChangePassword(): Promise<void> {
+    if (this.pwBusy || !this.pwReady()) {
+      return;
+    }
+    this.pwBusy = true;
+    try {
+      const session = await APIClient.shared().changePassword(this.pwOld, this.pwNew);
+      APIClient.shared().adopt(session);
+      this.sheet = '';
+      this.pwOld = '';
+      this.pwNew = '';
+      this.pwNew2 = '';
+      this.toast('口令已更新');
+    } catch (e) {
+      this.toast(Copy.describeError(e, true));
+    } finally {
+      this.pwBusy = false;
+    }
+  }
+
+  /** 关于文案（版本取自 bundleManager；仓库是私有仓，不放进 UI） */
+  private aboutText(): string {
+    return 'SuenMusic v' + this.selfVersion()
+      + '（build ' + this.selfVersionCode() + '）\n\n'
+      + '单仓构建：服务端 + Web 面板 + 鸿蒙/iOS 原生客户端。\n'
+      + '本包未签名，用移动端侧载工具安装；数据只存在你自己的服务端上。';
+  }
+
+  // ---------------- T9：桌面卡片管理 ----------------
+
+  /** 查已发布到桌面的卡片张数（拿不到就是 -1，UI 不硬编 0） */
+  private loadCardCount(): void {
+    formProvider.getPublishedRunningFormInfos()
+      .then((infos: Array<formInfo.RunningFormInfo>) => {
+        this.cardCount = infos.length;
+      })
+      .catch(() => {
+        this.cardCount = -1;
+      });
+  }
+
+  private cardCountLabel(): string {
+    if (this.cardCount < 0) {
+      return '查看';
+    }
+    return this.cardCount === 0 ? '未添加' : '已添加 ' + this.cardCount + ' 张';
+  }
+
+  private cardHelpText(): string {
+    return '在桌面长按空白处 →「服务卡片」→ 找到 SuenMusic → 选 2×2 或 2×4 拖到桌面。\n\n'
+      + '· 尺寸：2×2 只显示封面/歌名/播放键；2×4 多显示歌手与滚动歌词。\n'
+      + '· 按钮：播放/暂停、上一首、下一首，点击即生效（App 未运行时走冷启动）。\n'
+      + '· 主题：「浅色/深色」按设置里的主题走；「跟随系统」时随系统深浅切换。';
   }
 
   /** 主题分段当前下标（跟随系统 / 浅色 / 深色） */
@@ -1039,6 +1128,48 @@ export struct SettingsPage {
       .animation({ duration: Motion.standard, curve: Motion.curve }))
   }
 
+  /** 修改口令弹层（T8）：旧口令 + 新口令 ×2，服务端回新会话 */
+  @Builder
+  passwordSheet() {
+    Column({ space: Dim.s3 }) {
+      this.sheetGrip()
+      this.sheetHead('修改口令')
+      NeuInput({ content: this.pwOld, placeholder: '当前口令', password: true })
+        .width('100%')
+      NeuInput({ content: this.pwNew, placeholder: '新口令（至少 6 位）', password: true })
+        .width('100%')
+      NeuInput({ content: this.pwNew2, placeholder: '再输一次新口令', password: true })
+        .width('100%')
+      if (this.pwNew2.length > 0 && this.pwNew !== this.pwNew2) {
+        Text('两次输入的新口令不一致')
+          .fontSize(Dim.fsMinor)
+          .fontColor(Tokens.danger)
+          .width('100%')
+      }
+      WebButton({
+        labelStr: this.pwBusy ? '提交中…' : '确认修改',
+        variantKind: NeuBtnVariant.PRIMARY,
+        blockFlag: true,
+        sizeKind: NeuBtnSize.MD,
+        disabledFlag: this.pwBusy || !this.pwReady(),
+        onTap: () => {
+          this.doChangePassword();
+        }
+      })
+        .accessibilityText('确认修改口令')
+      Text('改完会用新会话继续（其它设备上的登录会失效）')
+        .fontSize(Dim.fsCaption)
+        .fontColor(Tokens.text2)
+        .width('100%')
+    }
+    .width('100%')
+    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s4 })
+    .backgroundColor(Tokens.panel)
+    .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
+    .transition(TransitionEffect.translate({ y: '100%' })
+      .animation({ duration: Motion.standard, curve: Motion.curve }))
+  }
+
   /** 去重弹层（打开即自动预检，重复组明细 + 一键清理） */
   @Builder
   dedupeSheet() {
@@ -1374,25 +1505,100 @@ export struct SettingsPage {
             this.secLabel('账号')
             Column() {
               if (this.userName.length > 0) {
-                Row() {
-                  // 第 ⑪ 条：优先显示服务端昵称（K_USER_DISPLAY），缺失回退登录名
-                  Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
-                    .fontSize(Dim.fsBody)
-                    .fontColor(Tokens.text1)
-                    .layoutWeight(1)
-                  WebButton({
-                    labelStr: '登出',
-                    variantKind: NeuBtnVariant.DANGER,
-                    sizeKind: NeuBtnSize.SM,
-                    onTap: () => {
-                      AppState.shared().signOut();
-                    }
-                  })
-                    .accessibilityText('退出登录')
+                // 账号卡（T8 §①）：头像位 + 昵称 + 角色，独立面板卡而不是列表行
+                Row({ space: Dim.s3 }) {
+                  Text(this.avatarText())
+                    .fontSize(Dim.fsSection)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor(Tokens.badgeInk)
+                    .width(Dim.coverSm)
+                    .height(Dim.coverSm)
+                    .textAlign(TextAlign.Center)
+                    .borderRadius(Dim.radiusAvatar)
+                    .backgroundColor(Tokens.accent)
+                  Column({ space: Dim.s0 }) {
+                    // 第 ⑪ 条：优先显示服务端昵称（K_USER_DISPLAY），缺失回退登录名
+                    Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
+                      .fontSize(Dim.fsSub)
+                      .fontWeight(FontWeight.Medium)
+                      .fontColor(Tokens.text1)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                    Text('@' + this.userName + ' · ' + this.roleLabel())
+                      .fontSize(Dim.fsCaption)
+                      .fontColor(Tokens.text2)
+                      .maxLines(1)
+                  }
+                  .alignItems(HorizontalAlign.Start)
+                  .layoutWeight(1)
                 }
                 .width('100%')
-                .height(Dim.touchMin)
-                .padding({ left: Dim.s4, right: Dim.s4 })
+                .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+                .accessibilityText('账号 ' + this.userName + '，' + this.roleLabel())
+
+                // 修改口令（PATCH /api/auth/password，服务端回新会话）
+                Column() {
+                  Row() {
+                    Text('修改口令')
+                      .fontSize(Dim.fsBody)
+                      .fontColor(Tokens.text1)
+                      .layoutWeight(1)
+                    WebIcon(WebIconName.CHEVRON_RIGHT, Dim.icon16, Tokens.text2)
+                  }
+                  .width('100%')
+                  .height(Dim.touchMin)
+                  .padding({ left: Dim.s4, right: Dim.s4 })
+                  .accessibilityText('修改登录口令')
+                  .onClick(() => {
+                    this.pwOld = '';
+                    this.pwNew = '';
+                    this.pwNew2 = '';
+                    this.sheet = 'password';
+                  })
+                }
+                .width('100%')
+                .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
+
+                // 关于（T8 §通用）
+                Column() {
+                  Row() {
+                    Text('关于 SuenMusic')
+                      .fontSize(Dim.fsBody)
+                      .fontColor(Tokens.text1)
+                      .layoutWeight(1)
+                    Text('v' + this.selfVersion())
+                      .fontSize(Dim.fsMinor)
+                      .fontColor(Tokens.text2)
+                  }
+                  .width('100%')
+                  .height(Dim.touchMin)
+                  .padding({ left: Dim.s4, right: Dim.s4 })
+                  .accessibilityText('关于 SuenMusic')
+                  .onClick(() => {
+                    this.aboutOpen = true;
+                  })
+                }
+                .width('100%')
+                .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
+
+                // 退出登录（红字行 + 二次确认）
+                Column() {
+                  Row() {
+                    Text('退出登录')
+                      .fontSize(Dim.fsBody)
+                      .fontColor(Tokens.danger)
+                      .layoutWeight(1)
+                  }
+                  .width('100%')
+                  .height(Dim.touchMin)
+                  .padding({ left: Dim.s4, right: Dim.s4 })
+                  .accessibilityText('退出登录')
+                  .onClick(() => {
+                    this.signOutAsk = true;
+                  })
+                }
+                .width('100%')
+                .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
               } else {
                 this.rowStatic('未登录', '', true)
               }
@@ -1474,6 +1680,32 @@ export struct SettingsPage {
             .borderRadius(Dim.radiusMd)
             .border({ width: Dim.hairline, color: Tokens.line })
 
+            // 卡片（T9）：已添加张数 + 添加/使用说明
+            this.secLabel('卡片')
+            Column() {
+              Row() {
+                Text('桌面卡片')
+                  .fontSize(Dim.fsBody)
+                  .fontColor(Tokens.text1)
+                  .layoutWeight(1)
+                Text(this.cardCountLabel())
+                  .fontSize(Dim.fsMinor)
+                  .fontColor(Tokens.text2)
+              }
+              .width('100%')
+              .height(Dim.touchMin)
+              .padding({ left: Dim.s4, right: Dim.s4 })
+              .accessibilityText('桌面卡片：' + this.cardCountLabel())
+              .onClick(() => {
+                this.loadCardCount();
+                this.cardHelpOpen = true;
+              })
+            }
+            .width('100%')
+            .backgroundColor(Tokens.panel)
+            .borderRadius(Dim.radiusMd)
+            .border({ width: Dim.hairline, color: Tokens.line })
+
             this.secLabel('多服务端')
             Column() {
               Row() {
@@ -1541,6 +1773,58 @@ export struct SettingsPage {
       }
       if (this.sheet === 'backup') {
         this.backupSheet()
+      }
+      if (this.sheet === 'password') {
+        this.passwordSheet()
+      }
+
+      // T8：登出二次确认
+      if (this.signOutAsk) {
+        ConfirmDialog({
+          titleStr: '退出登录',
+          messageStr: '退出后本机缓存与离线快照保留，重新登录即可继续收听。',
+          confirmLabel: '退出',
+          dangerFlag: true,
+          onConfirm: (): void => {
+            this.signOutAsk = false;
+            AppState.shared().signOut();
+          },
+          onCancel: (): void => {
+            this.signOutAsk = false;
+          }
+        })
+      }
+
+      // T8：关于
+      if (this.aboutOpen) {
+        ConfirmDialog({
+          titleStr: '关于 SuenMusic',
+          messageStr: this.aboutText(),
+          confirmLabel: '知道了',
+          singleFlag: true,
+          onConfirm: (): void => {
+            this.aboutOpen = false;
+          },
+          onCancel: (): void => {
+            this.aboutOpen = false;
+          }
+        })
+      }
+
+      // T9：卡片添加/使用说明
+      if (this.cardHelpOpen) {
+        ConfirmDialog({
+          titleStr: '桌面卡片',
+          messageStr: this.cardHelpText(),
+          confirmLabel: '知道了',
+          singleFlag: true,
+          onConfirm: (): void => {
+            this.cardHelpOpen = false;
+          },
+          onCancel: (): void => {
+            this.cardHelpOpen = false;
+          }
+        })
       }
 
       // 清空缓存二次确认（自绘哑光弹窗，不用系统 AlertDialog）

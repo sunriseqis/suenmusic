@@ -479,6 +479,16 @@ export class APIClient {
       JSON.stringify(payload), false, false);
   }
 
+  /**
+   * 修改口令（T8）。服务端直接回新会话（旧令牌失效），调用方必须 adopt 掉。
+   */
+  async changePassword(oldPassword: string, newPassword: string): Promise<AuthSession> {
+    interface PwBody { oldPassword: string; newPassword: string; }
+    const payload: PwBody = { oldPassword: oldPassword, newPassword: newPassword };
+    return this.request<AuthSession>('/api/auth/password', http.RequestMethod.PATCH,
+      JSON.stringify(payload), true, false);
+  }
+
   async me(): Promise<PublicUser> {
     interface MeReply { user: PublicUser; }
     const r = await this.request<MeReply>('/api/auth/me', http.RequestMethod.GET, '', true, false);
