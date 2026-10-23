@@ -43,6 +43,12 @@ const POS_PERSIST_INTERVAL_MS = 5000;
  * 「错误闪一下又瞬间恢复」。窗口内恢复 → 静默撤销，什么都不发。
  */
 const FAIL_GRACE_MS = 2500;
+/**
+ * 装载**卡死看门狗**（ms）：AVPlayer 有时既不报错、也永远到不了 playing（服务端 503/上游卡住时实测如此）——
+ * 表现就是「app 不出声、不报错，但系统播控还在走进度」（进度是 AVSession 按上次上报的状态自行外推的）。
+ * 超过这个时间没进 playing，就当作失败走 `fail()`（手动点播→停住+通知；连播→跳过）。
+ */
+const STALL_MS = 6000;
 /** 播放模式偏好键（web localStorage `suenmusic.playMode` 同口径） */
 const MODE_KEY = 'play_mode';
 
@@ -115,6 +121,8 @@ export class MediaPlayerCore {
   private static readonly MAX_FAIL_STREAK: number = 3;
   /** 失败挂起定时器（-1 = 无）；恢复播放或重新装载时清除 */
   private failTimer: number = -1;
+  /** 装载卡死看门狗（-1 = 无）；进入 playing / 重新装载 / 落定失败时清除 */
+  private stallTimer: number = -1;
   /**
    * 本次装载是否**用户显式点播**（点某首歌 / 点重试 / 锚定后重装）。
    *
@@ -660,6 +668,10 @@ export class MediaPlayerCore {
 
   async stop(): Promise<void> {
     this.wantPlay = false;
+    if (this.stallTimer !== -1) {
+      clearTimeout(this.stallTimer);
+      this.stallTimer = -1;
+    }
     // 停播后不再占用缓存文件：解除删除保护
     OfflineCache.shared().setProtected('');
     const p = this.player;
@@ -777,6 +789,23 @@ export class MediaPlayerCore {
       clearTimeout(this.failTimer);
       this.failTimer = -1;
     }
+    // 卡死看门狗：本次装载若在 STALL_MS 内没进 playing，就当失败处理
+    if (this.stallTimer !== -1) {
+      clearTimeout(this.stallTimer);
+    }
+    this.stallTimer = setTimeout(() => {
+      this.stallTimer = -1;
+      if (mySeq !== this.seq) {
+        return;
+      }
+      const pl = this.player;
+      if (pl !== null && pl.state === 'playing') {
+        return;
+      }
+      hilog.error(DOMAIN, TAG, '装载超时 %{public}dms 仍未起播（状态=%{public}s），按失败处理',
+        STALL_MS, pl === null ? 'null' : pl.state);
+      this.fail('装载超时', 'stall:' + STALL_MS + 'ms');
+    }, STALL_MS);
     this.pendingAutoplay = autoplay || this.wantPlay;
     // 登记删除保护：缓存面板删文件必须跳过正在播的这一首（fd:// 占用中删了直接断播）
     OfflineCache.shared().setProtected(track.id);
@@ -897,10 +926,17 @@ export class MediaPlayerCore {
       clearTimeout(this.failTimer);
       this.failTimer = -1;
     }
+    if (this.stallTimer !== -1) {
+      clearTimeout(this.stallTimer);
+      this.stallTimer = -1;
+    }
     this.pendingAutoplay = false;
     this.wantPlay = false;
     AppStorage.setOrCreate<boolean>(K_PLAYING, false);
     AppStorage.setOrCreate<string>('np_error', message);
+    // ⚠️ 必须把「已暂停」推给播控：否则系统媒体卡片会按上一次上报的 playing 状态**自行外推进度**，
+    // 表现为「app 已经停了、不出声不报错，系统组件却显示在播」（用户 2026-10-23 报的这条 bug 的一半）。
+    this.publishState();
 
     if (consecutive) {
       Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
@@ -1016,6 +1052,11 @@ export class MediaPlayerCore {
         if (this.failTimer !== -1) {
           clearTimeout(this.failTimer);
           this.failTimer = -1;
+        }
+        // 真的进 playing 了，撤掉卡死看门狗
+        if (this.stallTimer !== -1) {
+          clearTimeout(this.stallTimer);
+          this.stallTimer = -1;
         }
         // 成功起播清掉上一首的失败提示，避免陈旧错误一直挂在播放页
         AppStorage.setOrCreate<string>('np_error', '');
