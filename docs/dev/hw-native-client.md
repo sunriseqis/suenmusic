@@ -93,7 +93,11 @@ npm run hw:build    # 读根 VERSION → 注入 versionName/versionCode → 未�
 
 ## 三点五、服务端使用规约（2026-10-23）
 
-- 服务端 `http://192.168.89.10:3210` 由 **Lead 常驻管理**；日志 `/tmp/suenmusic-server.log`
+- 服务端 `http://192.168.89.10:3210` 由 **systemd 用户级服务托管**（`suenmusic.service`，已 enable + linger）：
+  崩溃自动重启（Restart=on-failure, 3s）、DSH/终端会话重启不影响、机器重启自启
+  - 操作：`systemctl --user restart|status|stop suenmusic`
+  - 日志：`/tmp/suenmusic-server.log`（append 模式）
+- （历史：曾用 nohup 挂在会话下，DSH 重启被连坐 SIGTERM 两次，已废弃）
 - **执行方环境禁止自行启动服务端**（`node-run.mjs` / `strip-types` 等一律不跑）——
   已发生两次抢 3210 端口、起不监听占进程的事故
 - 客户端测试连 Lead 实例（`suenqi / suenmusic2026`）；异常写回执由 Lead 处理
