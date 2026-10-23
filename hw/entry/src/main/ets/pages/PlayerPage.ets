@@ -1094,11 +1094,13 @@ export struct PlayerPage {
         Row({ space: Dim.s2 }) {
           NeuInput({ content: this.anchorKeyword, placeholder: '歌名 歌手' })
             .layoutWeight(1)
-          WebButton({
-            labelStr: this.anchorSearching ? '搜索中…' : '搜索',
-            variantKind: NeuBtnVariant.PRIMARY,
-            sizeKind: NeuBtnSize.MD,
-            disabledFlag: this.anchorSearching,
+          // 搜索键改**放大镜图标**（不再占「搜索」两字宽度），灰白透明底 —— 与播放页收起键同一套 PLAIN 键，
+          // 不用琥珀填充（用户 2026-10-23 反馈：锚定页这两类图标不要强调色打底）
+          WebIconButton({
+            iconName: WebIconName.SEARCH,
+            boxSize: Dim.touchMin,
+            glyphColor: this.anchorSearching ? Tokens.accent : Tokens.text2,
+            chromeKind: NeuBtnChrome.PLAIN,
             onTap: () => {
               this.searchAnchor();
             }
@@ -1211,12 +1213,14 @@ export struct PlayerPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      WebButton({
-        labelStr: this.anchoringBvid === c.bvid ? '锚定中…' : '锚定',
-        variantKind: NeuBtnVariant.PRIMARY,
-        sizeKind: NeuBtnSize.SM,
-        disabledFlag: this.anchoringBvid.length > 0,
+      // 锚定键改**大头针图标**（sys.symbol.pin），灰白透明底；提交中染 accent 且拦住重复点击
+      WebIconButton({
+        iconName: WebIconName.PIN,
+        boxSize: Dim.touchMin,
+        glyphColor: this.anchoringBvid === c.bvid ? Tokens.accent : Tokens.text2,
+        chromeKind: NeuBtnChrome.PLAIN,
         onTap: () => {
+          if (this.anchoringBvid.length > 0) { return; }
           this.doAnchor(c);
         }
       })

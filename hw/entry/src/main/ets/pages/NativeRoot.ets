@@ -363,15 +363,6 @@ struct NativeRoot {
 
   // ---------------- 迷你播放条（web PlayerBar.vue compact 形态逐元素对齐） ----------------
 
-  /** 顶沿内高光（web neu-raised 的 inset hi 等价物，HomePage topSheen 同款） */
-  @Builder
-  barSheen() {
-    Row()
-      .height(Dim.hairline)
-      .width('100%')
-      .backgroundColor(Tokens.hi)
-      .position({ x: 0, y: 0 })
-  }
 
   /**
    * 迷你条：凸面板 + 底部内嵌 2px 进度条 + 封面/歌名/歌手 + 红心/播放图标键。
@@ -405,7 +396,7 @@ struct NativeRoot {
           iconName: this.barFav ? WebIconName.HEART_FILLED : WebIconName.HEART,
           boxSize: 28,
           glyphColor: this.barFav ? Tokens.accent : Tokens.text2,
-          chromeKind: NeuBtnChrome.CHROME,
+          chromeKind: NeuBtnChrome.PLAIN,
           onTap: () => { this.toggleBarFav(); }
         })
           .accessibilityText(this.barFav ? '取消收藏' : '收藏')
@@ -415,7 +406,7 @@ struct NativeRoot {
           iconName: this.playing ? WebIconName.PAUSE : WebIconName.PLAY,
           boxSize: 36,
           glyphColor: Tokens.text1,
-          chromeKind: NeuBtnChrome.CHROME,
+          chromeKind: NeuBtnChrome.PLAIN,
           onTap: () => { MediaPlayerCore.shared().toggle(); }
         })
           .accessibilityText(this.playing ? '暂停' : '播放')
@@ -423,7 +414,8 @@ struct NativeRoot {
       .width('100%')
       .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
 
-      this.barSheen()
+      // 注意：这里原本还有一条 1vp 顶沿内高光（barSheen）—— 用户 2026-10-23 反馈「按钮上方有一条横线」，
+      // 迷你条高度矮，这条高光横跨整条上沿、压在按钮上方，观感就是一条杂线，故删除。
 
       // 底部内嵌进度条（web mini-progress neu-inset：line 底 + accent 填充）
       Row() {

@@ -60,6 +60,8 @@ export class WebIconName {
   static readonly MODE_REPEAT_ONE: string = 'mode-repeat-one';
   static readonly MODE_SHUFFLE: string = 'mode-shuffle';
   static readonly MODE_SHUFFLE_ONCE: string = 'mode-shuffle-once';
+  /** 大头针（锚定/固定；sys.symbol.pin 已在资源表核验存在） */
+  static readonly PIN: string = 'pin';
   static readonly DISLIKE_SONG: string = 'dislike-song';
   static readonly DISLIKE_ARTIST: string = 'dislike-artist';
 }
@@ -93,6 +95,8 @@ function sysSymbolOf(name: string): Resource {
       return $r('sys.symbol.forward_end_fill');
     case WebIconName.SEARCH:
       return $r('sys.symbol.magnifyingglass');
+    case WebIconName.PIN:
+      return $r('sys.symbol.pin');
     case WebIconName.HEART:
       return $r('sys.symbol.heart');
     case WebIconName.HEART_FILLED:
