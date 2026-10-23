@@ -623,7 +623,10 @@ export class MediaPlayerCore {
     this.failStreak = 0;
     this.failHandled = false;
     this.bumpQueue();
-    await this.loadCurrent(auto || this.wantPlay);
+    // ⚠️ 这里**必须** loadCurrent(true)：切歌的语义就是「播下一首」。
+    // 原来写 `auto || this.wantPlay`，一旦上一首失败把 wantPlay 清了，后续每首歌都只 prepare 不 play，
+    // 状态停在 prepared → 6s 看门狗判「装载超时」→ 又跳过 → 整条队列连环误报（用户 2026-10-23 报的 bug）。
+    await this.loadCurrent(true);
   }
 
   async next(): Promise<void> {
@@ -645,7 +648,8 @@ export class MediaPlayerCore {
     // 用户点「重试」/ 锚定后重装 = 显式点播语义：再失败也不跳
     this.manualLoad = true;
     this.bumpQueue();
-    await this.loadCurrent(forcePlay || this.wantPlay);
+    // 重试 = 让这首播起来，不受失败后 wantPlay=false 影响（forcePlay 参数保留仅为兼容旧调用）
+    await this.loadCurrent(true);
   }
 
   async prev(): Promise<void> {
@@ -663,7 +667,8 @@ export class MediaPlayerCore {
     this.failStreak = 0;
     this.failHandled = false;
     this.bumpQueue();
-    await this.loadCurrent(this.wantPlay);
+    // 上一首同样是「播」语义：不能因上一首失败留下的 wantPlay=false 而只 prepare 不 play
+    await this.loadCurrent(true);
   }
 
   async stop(): Promise<void> {
@@ -965,7 +970,8 @@ export class MediaPlayerCore {
         // 稍等再跳：服务端瞬时抖动时不至于把整条队列连跳掉
         setTimeout(() => {
           this.manualLoad = false;
-          this.next();
+          // 用 advance(true) 而不是 next()：连播语义要保留（列表循环回绕 / 随机重洗 / 顺序到头停）
+          this.advance(true);
         }, 600);
         return;
       }
