@@ -49,6 +49,8 @@ const FAIL_GRACE_MS = 2500;
  * 超过这个时间没进 playing，就当作失败走 `fail()`（手动点播→停住+通知；连播→跳过）。
  */
 const STALL_MS = 6000;
+/** 手动点播到无音源曲目时，「正在播放」那行显示的文案（用户 2026-10-23 定的呈现规格） */
+const NO_SOURCE_LABEL = '无音源';
 /** 播放模式偏好键（web localStorage `suenmusic.playMode` 同口径） */
 const MODE_KEY = 'play_mode';
 
@@ -927,7 +929,7 @@ export class MediaPlayerCore {
       if (pl !== null && pl.state === 'playing') {
         return;
       }
-      this.settleFailure('《' + name + '》没有可播放的匹配音源，可点「重试」或「更多 → 修正音源」手动锚定', false);
+      this.settleFailure('《' + name + '》无音源（可走「更多 → 修正音源」手动锚定）', false);
     }, FAIL_GRACE_MS);
   }
 
@@ -949,36 +951,40 @@ export class MediaPlayerCore {
     this.pendingAutoplay = false;
     this.wantPlay = false;
     AppStorage.setOrCreate<boolean>(K_PLAYING, false);
-    AppStorage.setOrCreate<string>('np_error', message);
-    // ⚠️ 必须把「已暂停」推给播控：否则系统媒体卡片会按上一次上报的 playing 状态**自行外推进度**，
-    // 表现为「app 已经停了、不出声不报错，系统组件却显示在播」（用户 2026-10-23 报的这条 bug 的一半）。
+    // ⚠️ 必须把「已暂停」推给播控：否则系统媒体卡片会按上一次上报的 playing 状态**自行外推进度**
     this.publishState();
 
+    const hasWayOut = this.index + 1 < this.queue.length
+      || this.playMode === 'list-loop'
+      || this.playMode === 'shuffle';
+
+    // 用户 2026-10-23 定的呈现规格：
+    //   · 列表连播失败 → **页面不显示任何报错**（清 np_error）+ 只发系统通知 + 跳过；
+    //   · 手动点这首歌失败 → **不跳、不弹任何按钮**，只在「正在播放」那行显示「无音源」。
     if (consecutive) {
+      AppStorage.setOrCreate<string>('np_error', '');
       Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
       this.av?.stopContinuousTask();
       return;
     }
 
-    // 自动装载（列表连播 / 切歌）：按 web 语义**跳过**，不打断收听
-    if (!this.manualLoad) {
-      const hasWayOut = this.index + 1 < this.queue.length
-        || this.playMode === 'list-loop'
-        || this.playMode === 'shuffle';
-      if (hasWayOut) {
-        Notifier.notify('没有匹配音源', '《' + this.currentName() + '》没有可播放的匹配音源，已自动跳过');
-        // 稍等再跳：服务端瞬时抖动时不至于把整条队列连跳掉
-        setTimeout(() => {
-          this.manualLoad = false;
-          // 用 advance(true) 而不是 next()：连播语义要保留（列表循环回绕 / 随机重洗 / 顺序到头停）
-          this.advance(true);
-        }, 600);
-        return;
-      }
+    if (!this.manualLoad && hasWayOut) {
+      // 连播：静默跳过（页面不留痕迹，只有系统通知）
+      AppStorage.setOrCreate<string>('np_error', '');
+      Notifier.notify('没有匹配音源', '《' + this.currentName() + '》没有可播放的匹配音源，已自动跳过');
+      // 稍等再跳：服务端瞬时抖动时不至于把整条队列连跳掉
+      setTimeout(() => {
+        this.manualLoad = false;
+        // advance(true)：保留连播/回绕/重洗语义
+        this.advance(true);
+      }, 600);
+      return;
     }
 
-    // 显式点播（手动点这首歌 / 重试 / 锚定后重装）或已无路可走：**停在当前曲**
-    Notifier.notify('没有匹配音源', message);
+    // 手动点播（或连播已无路可走）：停在当前曲，只在「正在播放」位置显示「无音源」
+    // 不发系统通知（用户就在页面上），也不弹重试/跳过按钮 —— 修音源入口是「更多 → 修正音源」。
+    AppStorage.setOrCreate<string>('np_error', NO_SOURCE_LABEL);
+    hilog.warn(DOMAIN, TAG, '停在当前曲且标记无音源：%{public}s', message);
     this.av?.stopContinuousTask();
   }
 

@@ -38,7 +38,7 @@ import { LyricLine } from '../common/NowPlaying';
 import { QueueView } from './QueueView';
 import { NeuInput } from './NeuInput';
 import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
-import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
 
 const TAG = 'SuenMusic_Player';
 
@@ -779,38 +779,9 @@ export struct PlayerPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
 
-      if (this.err.length > 0) {
-        Text(this.err)
-          .fontSize(Dim.fsMinor)
-          .fontColor('#E5484D')
-          .maxLines(2)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
-          .textAlign(TextAlign.Center)
-        // 失败处理（T4 + 2026-10-23 用户裁定）：内核不再自动跳过，动作交给用户
-        // 重试 = 重装当前曲；跳过 = 主动播下一首；「更多 → 修正音源」可就地锚定
-        Row({ space: Dim.s2 }) {
-          WebButton({
-            labelStr: '重试',
-            sizeKind: NeuBtnSize.MD,
-            onTap: () => {
-              this.err = '';
-              MediaPlayerCore.shared().retryCurrent();
-            }
-          })
-            .accessibilityText('重试播放当前歌曲')
-          WebButton({
-            labelStr: '跳过',
-            variantKind: NeuBtnVariant.GHOST,
-            sizeKind: NeuBtnSize.MD,
-            onTap: () => {
-              this.err = '';
-              MediaPlayerCore.shared().next();
-            }
-          })
-            .accessibilityText('跳过这首歌，播放下一首')
-        }
-      }
+      // 用户 2026-10-23 呈现规格：**不再显示错误横幅、也不放「重试 / 跳过」按钮**。
+      // 手动点播到无音源曲目时，只在顶栏「正在播放」那一行显示「无音源」（见 eyebrowText），
+      // 修音源入口统一走「更多 → 修正音源」；连播失败则在页面不留痕迹、只发系统通知。
 
       // 歌词 peek（web lyric-wrap：当前行 ±1，点开歌词 sheet）
       Column({ space: Dim.s1 }) {
