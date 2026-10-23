@@ -115,6 +115,15 @@ export class MediaPlayerCore {
   private static readonly MAX_FAIL_STREAK: number = 3;
   /** 失败挂起定时器（-1 = 无）；恢复播放或重新装载时清除 */
   private failTimer: number = -1;
+  /**
+   * 本次装载是否**用户显式点播**（点某首歌 / 点重试 / 锚定后重装）。
+   *
+   * 用户 2026-10-23 复述的既有规则（web `startCurrent({ noSkip: true })` 同口径）：
+   *   · **列表连播**（自然接续 / 切歌自动装载）拿不到音源 → **跳过下一首**（不打断收听）；
+   *   · **用户手动点这首歌**拿不到音源 → **不跳**，停在当前曲给重试 / 跳过 / 修正音源（锚定）入口。
+   * 否则「自动跳过」会把用户想锚定的那首直接切走，永远锚不上。
+   */
+  private manualLoad: boolean = false;
   /** 上次向 AVSession 推送进度的时间（节流用，见 timeUpdate） */
   private lastStatePushAt: number = 0;
   private releasing: boolean = false;
@@ -222,6 +231,8 @@ export class MediaPlayerCore {
     this.failStreak = 0;
     this.failHandled = false;
     this.bumpQueue();
+    // 用户点了某一行 = 显式点播：失败停在当前曲，不跳
+    this.manualLoad = true;
     await this.loadCurrent(autoplay);
   }
 
@@ -360,6 +371,8 @@ export class MediaPlayerCore {
       this.shuffleWholeQueue(true);
     }
     this.bumpQueue();
+    // 用户点歌起播 = 显式点播：失败不跳，留锚定入口
+    this.manualLoad = true;
     await this.loadCurrent(true);
   }
 
@@ -561,6 +574,8 @@ export class MediaPlayerCore {
    *   · 顺序                 → 到头停（自然结束）/ 手动到头不动
    */
   private async advance(auto: boolean): Promise<void> {
+    // 自动接续（auto）/ 用户点上一首下一首 = 自动装载：失败按 web 语义跳过
+    this.manualLoad = false;
     if (this.queue.length === 0) {
       await this.restoreSession('next');
       return;
@@ -619,6 +634,8 @@ export class MediaPlayerCore {
     if (this.current === null) { return; }
     this.failStreak = 0;
     this.failHandled = false;
+    // 用户点「重试」/ 锚定后重装 = 显式点播语义：再失败也不跳
+    this.manualLoad = true;
     this.bumpQueue();
     await this.loadCurrent(forcePlay || this.wantPlay);
   }
@@ -884,12 +901,38 @@ export class MediaPlayerCore {
     this.wantPlay = false;
     AppStorage.setOrCreate<boolean>(K_PLAYING, false);
     AppStorage.setOrCreate<string>('np_error', message);
+
     if (consecutive) {
       Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
-    } else {
-      Notifier.notify('没有匹配音源', message);
+      this.av?.stopContinuousTask();
+      return;
     }
+
+    // 自动装载（列表连播 / 切歌）：按 web 语义**跳过**，不打断收听
+    if (!this.manualLoad) {
+      const hasWayOut = this.index + 1 < this.queue.length
+        || this.playMode === 'list-loop'
+        || this.playMode === 'shuffle';
+      if (hasWayOut) {
+        Notifier.notify('没有匹配音源', '《' + this.currentName() + '》没有可播放的匹配音源，已自动跳过');
+        // 稍等再跳：服务端瞬时抖动时不至于把整条队列连跳掉
+        setTimeout(() => {
+          this.manualLoad = false;
+          this.next();
+        }, 600);
+        return;
+      }
+    }
+
+    // 显式点播（手动点这首歌 / 重试 / 锚定后重装）或已无路可走：**停在当前曲**
+    Notifier.notify('没有匹配音源', message);
     this.av?.stopContinuousTask();
+  }
+
+  /** 当前曲名（失败提示用；空队列给空串） */
+  private currentName(): string {
+    const t = this.current;
+    return t === null ? '' : t.name;
   }
 
   /** 离线优先：命中缓存走 `fd://`，否则走服务端流（带短期令牌） */
