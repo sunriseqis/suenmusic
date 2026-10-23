@@ -23,6 +23,7 @@ enum DesignTokens {
     static let posterScrimMid = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.420) // rgba(0, 0, 0, 0.42)
     static let dateChip = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.502) // rgba(0, 0, 0, 0.5)
     static let badgeInk = Color(red: 0.102, green: 0.071, blue: 0.024) // #1a1206
+    static let danger = Color(red: 0.831, green: 0.337, blue: 0.290) // web .v-danger 深色
 
     // ---- 浅色（纸白）—— 备用 ----
     static let bgLight = Color(red: 0.949, green: 0.941, blue: 0.918) // #f2f0ea
@@ -40,4 +41,5 @@ enum DesignTokens {
     static let posterScrimMidLight = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.420) // rgba(0, 0, 0, 0.42)
     static let dateChipLight = Color(red: 0.000, green: 0.000, blue: 0.000, opacity: 0.502) // rgba(0, 0, 0, 0.5)
     static let badgeInkLight = Color(red: 1.000, green: 1.000, blue: 1.000) // #ffffff
+    static let dangerLight = Color(red: 0.659, green: 0.196, blue: 0.165) // web .v-danger 浅色
 }
