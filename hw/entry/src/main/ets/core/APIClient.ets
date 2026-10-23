@@ -20,7 +20,8 @@ import {
   SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
   DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
-  SourceStatus, OkReply
+  SourceStatus, OkReply, AlbumDetail, ArtistSongs, ArtistAlbums, SimilarArtists,
+  QQPlaylistResult, ToplistDetail, BiliCandidatesResult, AnchorBody, TrackAnchorReply
 } from './Models';
 
 const TAG = 'SuenMusic_API';
@@ -519,6 +520,45 @@ export class APIClient {
     return this.request<SearchResult>(path, http.RequestMethod.GET, '', true, false);
   }
 
+  /** 专辑详情（`GET /api/albums/:id`；notice = 曲目为空时的版权限制说明） */
+  async albumDetail(id: string): Promise<AlbumDetail> {
+    return this.request<AlbumDetail>('/api/albums/' + encodeURIComponent(id),
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 歌手热门歌曲（`GET /api/artists/:id/songs`；name 建议一起传，省一次上游详情请求） */
+  async artistSongs(id: string, name: string, limit: number, page: number): Promise<ArtistSongs> {
+    const path = '/api/artists/' + encodeURIComponent(id) + '/songs'
+      + '?name=' + encodeURIComponent(name) + '&limit=' + limit + '&page=' + page;
+    return this.request<ArtistSongs>(path, http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 歌手专辑列表（`GET /api/artists/:id/albums`；与 songs 分开，限流状态独立） */
+  async artistAlbums(id: string, name: string, limit: number, page: number): Promise<ArtistAlbums> {
+    const path = '/api/artists/' + encodeURIComponent(id) + '/albums'
+      + '?name=' + encodeURIComponent(name) + '&limit=' + limit + '&page=' + page;
+    return this.request<ArtistAlbums>(path, http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 相似歌手（`GET /api/artists/:id/similar`；上游任何一步失败服务端返回空列表） */
+  async similarArtists(id: string, name: string): Promise<SimilarArtists> {
+    const path = '/api/artists/' + encodeURIComponent(id) + '/similar'
+      + '?name=' + encodeURIComponent(name);
+    return this.request<SimilarArtists>(path, http.RequestMethod.GET, '', true, false);
+  }
+
+  /** QQ 官方歌单详情（`GET /api/qq/playlist/:tid`） */
+  async qqPlaylist(tid: string): Promise<QQPlaylistResult> {
+    return this.request<QQPlaylistResult>('/api/qq/playlist/' + encodeURIComponent(tid),
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 榜单详情（`GET /api/toplist/:id`；limit 默认 200 一次拉齐） */
+  async toplistDetail(id: string, limit: number): Promise<ToplistDetail> {
+    return this.request<ToplistDetail>('/api/toplist/' + encodeURIComponent(id)
+      + '?limit=' + limit, http.RequestMethod.GET, '', true, false);
+  }
+
   /** 收藏（幂等：重复收藏返回 200 且 added=false） */
   async addFavorite(trackId: string, track: Track | null): Promise<FavoriteUpsertReply> {
     const payload: FavoritePostBody = { trackId: trackId, track: track };
@@ -656,5 +696,35 @@ export class APIClient {
   /** 网易云音源授权状态（只读，与 B 站同构） */
   async neteaseStatus(): Promise<SourceStatus> {
     return this.request<SourceStatus>('/api/netease/account', http.RequestMethod.GET, '', true, false);
+  }
+
+  // ---------------- 手动锚定（播放页修正音源，web api/playback.ts 同契约） ----------------
+
+  /** 搜 B 站候选（keyword 缺省时服务端用「歌名 + 主歌手」构造；要等 B 站搜索，20s 预算） */
+  async biliCandidates(trackId: string, keyword: string): Promise<BiliCandidatesResult> {
+    let path = '/api/tracks/' + encodeURIComponent(trackId) + '/bili-candidates';
+    const kw = keyword.trim();
+    if (kw.length > 0) {
+      path += '?keyword=' + encodeURIComponent(kw);
+    }
+    return this.request<BiliCandidatesResult>(path, http.RequestMethod.GET, '', true, false, 20000);
+  }
+
+  /** 锚定：把「这首曲 = 这个 B 站视频」永久入库，之后解析直接按锚点取流 */
+  async anchorTrack(trackId: string, body: AnchorBody): Promise<OkReply> {
+    return this.request<OkReply>('/api/tracks/' + encodeURIComponent(trackId) + '/anchor',
+      http.RequestMethod.POST, JSON.stringify(body), true, false);
+  }
+
+  /** 查询曲目当前锚点（锚定弹窗回显；未锚定时 anchor 为 null） */
+  async fetchTrackAnchor(trackId: string): Promise<TrackAnchorReply> {
+    return this.request<TrackAnchorReply>('/api/tracks/' + encodeURIComponent(trackId) + '/anchor',
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 解除锚定，该曲目回到自动匹配 */
+  async unanchorTrack(trackId: string): Promise<OkReply> {
+    return this.request<OkReply>('/api/tracks/' + encodeURIComponent(trackId) + '/anchor',
+      http.RequestMethod.DELETE, '', true, false);
   }
 }

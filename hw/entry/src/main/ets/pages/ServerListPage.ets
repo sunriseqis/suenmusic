@@ -14,6 +14,8 @@ import { Tokens } from '../common/Tokens';
 import { Dim } from '../common/Dimension';
 import { K_BASE_URL } from '../viewmodel/AppState';
 import { NeuInput } from './NeuInput';
+import { WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
+import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
 
 /** 探测四态 */
 const ST_UNKNOWN: number = 0;
@@ -368,49 +370,40 @@ export struct ServerListPage {
       }
       .width('100%')
 
-      // 行内操作键：ghost pill（透明底 + 发丝边，web 同款）；删除独立红色
+      // 行内操作键（第 ⑰ 条统一 WebButton 体系：ghost 切换 / 默认测试编辑 / 红字删除）
       Row({ space: Dim.s2 }) {
         if (s.url !== this.currentBase) {
-          Button('切换')
-            .height(Dim.btnMd)
-            .fontSize(Dim.fsMinor)
-            .backgroundColor(Color.Transparent)
-            .fontColor(Tokens.accentText)
-            .border({ width: Dim.hairline, color: Tokens.line })
-            .borderRadius(Dim.radiusPill)
+          WebButton({
+            labelStr: '切换',
+            variantKind: NeuBtnVariant.GHOST,
+            sizeKind: NeuBtnSize.SM,
+            onTap: () => { this.confirmSwitch(s.url); }
+          })
             .accessibilityText(`切换到 ${s.name}`)
-            .onClick(() => { this.confirmSwitch(s.url); })
         }
-        Button('测试')
-          .height(Dim.btnMd)
-          .fontSize(Dim.fsMinor)
-          .backgroundColor(Color.Transparent)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .borderRadius(Dim.radiusPill)
+        WebButton({
+          labelStr: '测试',
+          sizeKind: NeuBtnSize.SM,
+          onTap: () => { this.probeOne(i); }
+        })
           .accessibilityText(`测试 ${s.name} 的连接`)
-          .onClick(() => { this.probeOne(i); })
-        Button('编辑')
-          .height(Dim.btnMd)
-          .fontSize(Dim.fsMinor)
-          .backgroundColor(Color.Transparent)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .borderRadius(Dim.radiusPill)
+        WebButton({
+          labelStr: '编辑',
+          sizeKind: NeuBtnSize.SM,
+          onTap: () => { this.startEdit(i); }
+        })
           .accessibilityText(`编辑 ${s.name}`)
-          .onClick(() => { this.startEdit(i); })
         Blank()
-        Button('删除')
-          .height(Dim.btnMd)
-          .fontSize(Dim.fsMinor)
-          .backgroundColor(Color.Transparent)
-          .fontColor('#E5484D')
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .borderRadius(Dim.radiusPill)
+        WebButton({
+          labelStr: '删除',
+          variantKind: NeuBtnVariant.DANGER,
+          sizeKind: NeuBtnSize.SM,
+          onTap: () => { this.deleteServer(i); }
+        })
           .accessibilityText(`删除服务器 ${s.name}`)
-          .onClick(() => { this.deleteServer(i); })
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
@@ -432,30 +425,35 @@ export struct ServerListPage {
       NeuInput({ content: this.newUrl, placeholder: '地址，如 http://192.168.1.10:3210' })
         .width('100%')
       Row({ space: Dim.s2 }) {
-        Button('取消')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Color.Transparent)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .accessibilityText('取消编辑')
-          .onClick(() => {
-            this.adding = false;
-            this.editingIndex = -1;
-            this.newName = '';
-            this.newUrl = '';
+        Column() {
+          WebButton({
+            labelStr: '取消',
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => {
+              this.adding = false;
+              this.editingIndex = -1;
+              this.newName = '';
+              this.newUrl = '';
+            }
           })
-        Button(this.editingIndex >= 0 ? '保存' : '保存并检测')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Tokens.accent)
-          .fontColor(Tokens.bg)
-          .accessibilityText('保存服务器')
-          .onClick(() => { this.saveForm(); })
+        }
+        .layoutWeight(1)
+        .accessibilityText('取消编辑')
+        Column() {
+          WebButton({
+            labelStr: this.editingIndex >= 0 ? '保存' : '保存并检测',
+            variantKind: NeuBtnVariant.PRIMARY,
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => { this.saveForm(); }
+          })
+        }
+        .layoutWeight(1)
+        .accessibilityText('保存服务器')
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .padding(Dim.s4)
@@ -479,42 +477,38 @@ export struct ServerListPage {
       Column({ space: Dim.s3 }) {
         this.sheetGrip()
 
-        // 弹层头（与 SettingsPage sheetHead 同族：标题 + 右侧图标钮）
+        // 弹层头（与 SettingsPage sheetHead 同族：标题 + 右侧图标钮；
+        // 第 ⑱ 条：+ / 收起全部用 web 图标语言，收起 = chevron-down 向下收）
         Row() {
           Text('服务端管理')
             .fontSize(Dim.fsSection)
             .fontWeight(FontWeight.Medium)
             .fontColor(Tokens.text1)
             .layoutWeight(1)
-          Row() {
-            SymbolGlyph($r('sys.symbol.plus'))
-              .fontSize(Dim.iconMd)
-              .fontColor([Tokens.accentText])
-          }
-          .width(Dim.touchMin)
-          .height(Dim.touchMin)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .accessibilityText('新增服务器')
-          .onClick(() => {
-            this.editingIndex = -1;
-            this.newName = '';
-            this.newUrl = '';
-            this.adding = !this.adding;
+          WebIconButton({
+            iconName: WebIconName.PLUS,
+            boxSize: 36,
+            glyphColor: Tokens.accentText,
+            chromeKind: NeuBtnChrome.PLAIN,
+            onTap: () => {
+              this.editingIndex = -1;
+              this.newName = '';
+              this.newUrl = '';
+              this.adding = !this.adding;
+            }
           })
-          Row() {
-            SymbolGlyph($r('sys.symbol.xmark'))
-              .fontSize(Dim.iconMd)
-              .fontColor([Tokens.text2])
-          }
-          .width(Dim.touchMin)
-          .height(Dim.touchMin)
-          .justifyContent(FlexAlign.Center)
-          .alignItems(VerticalAlign.Center)
-          .accessibilityText('关闭')
-          .onClick(() => { this.onClose(); })
+            .accessibilityText('新增服务器')
+          WebIconButton({
+            iconName: WebIconName.CHEVRON_DOWN,
+            boxSize: 36,
+            glyphColor: Tokens.text2,
+            chromeKind: NeuBtnChrome.PLAIN,
+            onTap: () => { this.onClose(); }
+          })
+            .accessibilityText('收起')
         }
         .width('100%')
+        .alignItems(VerticalAlign.Center)
 
         Text('当前：' + this.currentName())
           .fontSize(Dim.fsMinor)

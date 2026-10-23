@@ -2,7 +2,8 @@ import { AppState } from '../viewmodel/AppState';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
-import { Dim, Motion } from '../common/Dimension';
+import { Dim } from '../common/Dimension';
+import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
 
 /** 登录页（S2：地址 + 账号 + 口令；多服务端编辑放 S3；S4：尺寸令牌/按压动效） */
 @Component
@@ -12,7 +13,6 @@ export struct LoginPage {
   @State password: string = '';
   @State busy: boolean = false;
   @State err: string = '';
-  @State loginPressed: boolean = false;
 
   // 窗口全屏布局下的系统避让区实时值（刘海/状态栏、底部手势条，随机型动态变化）
   @StorageProp('topAvoidHeight') topAvoidHeight: number = 0;
@@ -73,21 +73,15 @@ export struct LoginPage {
         Text(this.err).fontSize(Dim.fsMinor).fontColor('#E5484D').width('100%')
       }
 
-      Button(this.busy ? '登录中…' : '登录')
-        .width('100%')
-        .height(Dim.touchMin)
-        .fontSize(Dim.fsSub)
-        .enabled(!this.busy && this.username.length > 0 && this.password.length > 0)
-        .scale({ x: this.loginPressed ? Motion.pressScale : 1, y: this.loginPressed ? Motion.pressScale : 1 })
-        .onTouch((e: TouchEvent) => {
-          if (e.type === TouchType.Down) {
-            this.loginPressed = true;
-          } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
-            this.loginPressed = false;
-          }
-        })
+      WebButton({
+        labelStr: this.busy ? '登录中…' : '登录',
+        variantKind: NeuBtnVariant.PRIMARY,
+        sizeKind: NeuBtnSize.LG,
+        blockFlag: true,
+        disabledFlag: this.busy || this.username.length === 0 || this.password.length === 0,
+        onTap: () => { this.submit(); }
+      })
         .accessibilityText(this.busy ? '正在登录' : '登录')
-        .onClick(() => { this.submit(); })
     }
     .width('100%')
     .height('100%')

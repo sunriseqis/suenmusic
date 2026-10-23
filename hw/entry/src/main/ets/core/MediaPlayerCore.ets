@@ -34,11 +34,23 @@ const PLAYER_PREFS = 'suenmusic_player';
 const SESSION_KEY = 'session';
 const POS_KEY = 'pos';
 const POS_PERSIST_INTERVAL_MS = 5000;
+/** 播放模式偏好键（web localStorage `suenmusic.playMode` 同口径） */
+const MODE_KEY = 'play_mode';
+
+/** 播放模式环（web MODES 同序）：顺序 → 随机 → 单曲循环 → 列表循环 → 随机不重复 */
+const PLAY_MODES: string[] = ['order', 'shuffle', 'repeat-one', 'list-loop', 'shuffle-once'];
+
+/** 是否随机类模式（队列本体被洗过，原序存 sourceOrderIds） */
+function isShuffleMode(m: string): boolean {
+  return m === 'shuffle' || m === 'shuffle-once';
+}
 
 /** 持久化的播放会话形状（preferences 'session' 键的 JSON） */
 interface PersistedSession {
   tracks: Track[];
   index: number;
+  /** 装载时的原始队列顺序（id 列表）：切出随机模式按它摆回；旧会话可能缺 */
+  sourceIds?: string[];
 }
 
 /** AppStorage 键（UI 与卡片共用；卡片读的是 NowPlaying 快照，这里只服务 UI） */
@@ -54,6 +66,11 @@ export const K_SOURCE = 'np_source';
 export const K_HAS_TRACK = 'np_has_track';
 /** 队列版本号：队列内容（顺序/增删）每次变化都自增，UI 靠它刷新 */
 export const K_QUEUE_VERSION = 'np_queue_ver';
+/** 播放模式（T10 批次 F）：'order' | 'shuffle' | 'repeat-one' | 'list-loop' | 'shuffle-once' */
+export const K_PLAY_MODE = 'np_play_mode';
+/** 队列来源（T10 收官第 ④ 条）：setQueue 时由装载方写入（搜索/收藏/每日推荐/歌单/首页…），
+ *  播放页 eyebrow 用「状态 · 来源」口径展示；队列内切歌不改写（web FullPlayer 同口径） */
+export const K_ORIGIN = 'np_origin';
 
 export class MediaPlayerCore {
   private static instance: MediaPlayerCore | null = null;
@@ -100,6 +117,11 @@ export class MediaPlayerCore {
   private restoring: boolean = false;
   /** 歌词拉取序号：切歌后旧请求回来直接丢弃 */
   private lyricSeq: number = 0;
+  // ---- 播放模式（T10 批次 F，web player.ts 模式区同口径） ----
+  /** 当前播放模式（默认顺序；loadPrefs 从偏好恢复） */
+  private playMode: string = 'order';
+  /** 装载时的原始队列顺序：随机模式下队列本体已洗，切出随机按它摆回 */
+  private sourceOrderIds: string[] = [];
 
   init(context: common.Context, av: HarmonyAVSessionManager): void {
     this.av = av;
@@ -113,9 +135,15 @@ export class MediaPlayerCore {
   private async loadPrefs(context: common.Context): Promise<void> {
     try {
       this.prefs = await preferences.getPreferences(context, PLAYER_PREFS);
+      // 播放模式偏好恢复（web localStorage `suenmusic.playMode`）
+      const saved = this.prefs.getSync(MODE_KEY, 'order');
+      if (typeof saved === 'string' && PLAY_MODES.indexOf(saved) >= 0) {
+        this.playMode = saved;
+      }
     } catch (e) {
       hilog.warn(DOMAIN, TAG, '打开播放会话偏好失败: %{public}s', JSON.stringify(e));
     }
+    this.publishMode();
   }
 
   /** 队列快照（副本）—— UI 只读，不允许直接改内部数组 */
@@ -143,7 +171,11 @@ export class MediaPlayerCore {
   private persistSession(): void {
     const prefs = this.prefs;
     if (prefs === null) { return; }
-    const data: PersistedSession = { tracks: this.queue, index: this.index };
+    const data: PersistedSession = {
+      tracks: this.queue,
+      index: this.index,
+      sourceIds: this.sourceOrderIds
+    };
     prefs.put(SESSION_KEY, JSON.stringify(data))
       .then(() => {
         return prefs.flush();
@@ -194,8 +226,12 @@ export class MediaPlayerCore {
     if (target < 0 || target >= this.queue.length) { return; }
     const wasCurrent = target === this.index;
     const wasPlaying = this.wantPlay;
+    const removed = this.queue[target];
 
     this.queue.splice(target, 1);
+    // 装载原序同步摘除（web removeAt 过滤 sourceOrderIds），否则切出随机摆不干净
+    const k = this.sourceOrderIds.indexOf(removed.id);
+    if (k >= 0) { this.sourceOrderIds.splice(k, 1); }
 
     if (this.queue.length === 0) {
       this.index = -1;
@@ -250,6 +286,14 @@ export class MediaPlayerCore {
     }
     // 同 removeAt：下标修正后立刻同步给 UI，高亮才跟得住同一首歌
     AppStorage.setOrCreate<number>(K_INDEX, this.index);
+    // 非随机模式下拖拽 = 用户钦定的新原序（web moveItem 同口径）；
+    // 随机模式下队列本体是洗过的，保留 sourceOrderIds 供切出随机时摆回
+    if (!isShuffleMode(this.playMode)) {
+      this.sourceOrderIds = [];
+      for (let i = 0; i < this.queue.length; i++) {
+        this.sourceOrderIds.push(this.queue[i].id);
+      }
+    }
     this.bumpQueue();
   }
 
@@ -287,12 +331,24 @@ export class MediaPlayerCore {
     await this.loadCurrent(wasPlaying);
   }
 
-  /** 装载整条队列并从 startIndex 起播 */
-  async setQueue(tracks: Track[], startIndex: number, token: string): Promise<void> {
+  /** 装载整条队列并从 startIndex 起播；origin = 队列来源（播放页 eyebrow 显示用，见 K_ORIGIN） */
+  async setQueue(tracks: Track[], startIndex: number, token: string, origin: string): Promise<void> {
     this.queue = tracks;
     this.token = token;
-    this.bumpQueue();
+    AppStorage.setOrCreate<string>(K_ORIGIN, origin);
+    // ⚠️ bumpQueue 必须在 index 赋值之后：它内联 persistSession 整存「队列+下标」，
+    // 放在前面会把新队列配旧下标写进持久层（冷启动续播播错歌的根因）
     this.index = Math.max(0, Math.min(startIndex, tracks.length - 1));
+    // 记录装载原序：切出随机模式按它摆回（web sourceOrderIds）
+    this.sourceOrderIds = [];
+    for (let i = 0; i < tracks.length; i++) {
+      this.sourceOrderIds.push(tracks[i].id);
+    }
+    // 随机模式装载即洗（web playQueue：选中曲钉队首，其余随机）
+    if (isShuffleMode(this.playMode)) {
+      this.shuffleWholeQueue(true);
+    }
+    this.bumpQueue();
     await this.loadCurrent(true);
   }
 
@@ -351,29 +407,209 @@ export class MediaPlayerCore {
     }
   }
 
-  async next(): Promise<void> {
-    // 冷启动续播：空队列时 next = 恢复会话并播下一首（从头，位置不跨曲恢复）
+  // ---------------- 播放模式（T10 批次 F，web player.ts 模式区同口径） ----------------
+
+  /** 当前播放模式 */
+  get mode(): string { return this.playMode; }
+
+  private publishMode(): void {
+    AppStorage.setOrCreate<string>(K_PLAY_MODE, this.playMode);
+  }
+
+  private persistModePref(): void {
+    const doPut = (): void => {
+      const prefs = this.prefs;
+      if (prefs === null) { return; }
+      prefs.put(MODE_KEY, this.playMode)
+        .then(() => {
+          return prefs.flush();
+        })
+        .catch((e: BusinessError) => {
+          hilog.warn(DOMAIN, TAG, '持久化播放模式失败: %{public}s', JSON.stringify(e));
+        });
+    };
+    if (this.prefs !== null) {
+      doPut();
+      return;
+    }
+    // 偏好还没打开完（冷启动极早期切模式）：等装载完再补写
+    const ready = this.prefsReady;
+    if (ready !== null) { ready.then(() => { doPut(); }); }
+  }
+
+  /**
+   * 点模式钮循环切下一档（web cycleMode），返回切换后的模式。
+   * 进入随机类模式把「当前曲之后的尾部」就地打乱（正在播的不动）；
+   * 切出随机类模式把尾部按装载时的原序摆回。
+   */
+  cycleMode(): string {
+    const i = PLAY_MODES.indexOf(this.playMode);
+    const nextMode = PLAY_MODES[(i + 1) % PLAY_MODES.length];
+    this.setMode(nextMode);
+    return this.playMode;
+  }
+
+  setMode(m: string): void {
+    if (PLAY_MODES.indexOf(m) < 0 || m === this.playMode) { return; }
+    const wasShuffle = isShuffleMode(this.playMode);
+    const willShuffle = isShuffleMode(m);
+    this.playMode = m;
+    this.publishMode();
+    this.persistModePref();
+    if (this.queue.length === 0 || this.index < 0) { return; }
+    if (!wasShuffle && willShuffle) {
+      this.shuffleTail();
+    } else if (wasShuffle && !willShuffle) {
+      this.restoreTailOrder();
+    }
+  }
+
+  /** Fisher-Yates 就地洗牌 */
+  private shuffleArray(list: Track[]): void {
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = list[i];
+      list[i] = list[j];
+      list[j] = tmp;
+    }
+  }
+
+  /** 打乱当前曲之后的尾部（web reorderTail(false)）：正在播的不动，下标不变 */
+  private shuffleTail(): void {
+    const tailStart = this.index + 1;
+    if (tailStart + 1 >= this.queue.length) { return; } // 尾部不足 2 首洗不出新顺序
+    const head = this.queue.slice(0, tailStart);
+    const tail = this.queue.slice(tailStart);
+    this.shuffleArray(tail);
+    this.queue = head.concat(tail);
+    this.bumpQueue();
+  }
+
+  /** 尾部按装载原序摆回（web reorderTail(true)）；中途入队、不在原序里的曲目原样追加尾部 */
+  private restoreTailOrder(): void {
+    const tailStart = this.index + 1;
+    if (tailStart >= this.queue.length) { return; }
+    const head = this.queue.slice(0, tailStart);
+    const rest = this.queue.slice(tailStart);
+    const tail: Track[] = [];
+    for (let i = 0; i < this.sourceOrderIds.length; i++) {
+      const id = this.sourceOrderIds[i];
+      for (let j = 0; j < rest.length; j++) {
+        if (rest[j].id === id) {
+          tail.push(rest[j]);
+          rest.splice(j, 1);
+          break;
+        }
+      }
+    }
+    this.queue = head.concat(tail).concat(rest);
+    this.bumpQueue();
+  }
+
+  /**
+   * 整队重洗（web shuffleWholeQueue）：pinCurrent 时当前曲钉在队首（下标归 0），
+   * 其余全新随机；不 pin 时整队重洗并让当前曲跟到新位置。
+   */
+  private shuffleWholeQueue(pinCurrent: boolean): void {
+    if (this.queue.length < 2) { return; }
+    const cur = this.current;
+    if (pinCurrent && cur !== null) {
+      const others: Track[] = [];
+      for (let i = 0; i < this.queue.length; i++) {
+        if (this.queue[i].id !== cur.id) { others.push(this.queue[i]); }
+      }
+      this.shuffleArray(others);
+      const pinned: Track[] = [cur];
+      this.queue = pinned.concat(others);
+      this.index = 0;
+      return;
+    }
+    const copy = this.queue.slice();
+    this.shuffleArray(copy);
+    this.queue = copy;
+    if (cur !== null) {
+      for (let i = 0; i < this.queue.length; i++) {
+        if (this.queue[i].id === cur.id) { this.index = i; break; }
+      }
+    }
+  }
+
+  /** 自然到头停播（wantPlay 关 + 长时任务取消） */
+  private stopAtEnd(): void {
+    this.wantPlay = false;
+    this.publishState();
+    this.av?.stopContinuousTask();
+  }
+
+  /**
+   * 选曲推进（web advance(auto)）：
+   *   · 单曲循环 + 自然结束  → 重播本曲
+   *   · 列表循环             → 回绕到队首
+   *   · 随机类               → 队列本体已洗，顺序前进；播完一轮重洗续播 /
+   *                            随机不重复播完一轮停下
+   *   · 顺序                 → 到头停（自然结束）/ 手动到头不动
+   */
+  private async advance(auto: boolean): Promise<void> {
     if (this.queue.length === 0) {
       await this.restoreSession('next');
       return;
     }
-    if (this.index + 1 >= this.queue.length) { return; }
-    this.index += 1;
+    const n = this.queue.length;
+    const m = this.playMode;
+    if (n === 1) {
+      if (auto && (m === 'repeat-one' || m === 'list-loop')) {
+        await this.seek(0);
+        await this.play();
+        return;
+      }
+      if (auto) { this.stopAtEnd(); }
+      return;
+    }
+    if (m === 'repeat-one' && auto) {
+      await this.seek(0);
+      await this.play();
+      return;
+    }
+    if (m === 'list-loop') {
+      this.index = (this.index + 1) % n;
+    } else if (this.index + 1 < n) {
+      this.index += 1;
+    } else {
+      // 已在队尾
+      if (m === 'shuffle') {
+        // 随机一轮播完：当前曲钉队首整队重洗，接着播队首之后的第一首
+        this.shuffleWholeQueue(true);
+        this.index = 1;
+      } else {
+        // 顺序 / 随机不重复 / 单曲循环（手动）：到头停（自然结束）或不动（手动）
+        if (auto) { this.stopAtEnd(); }
+        return;
+      }
+    }
+    this.failStreak = 0;
+    this.failHandled = false;
     this.bumpQueue();
-    await this.loadCurrent(this.wantPlay);
+    await this.loadCurrent(auto || this.wantPlay);
+  }
+
+  async next(): Promise<void> {
+    await this.advance(false);
   }
 
   /**
    * 用户点「重试」（T4 第 6 项）：清掉失败计数后按当前意图重装这首。
    * 连续失败停播后 `wantPlay` 已是 false —— 重试只负责重装，是否起播
    * 跟随用户意图（想播就按播放键），不做隐式自动起播。
+   * forcePlay：锚定流程专用 —— 主播放可能正被试听暂停（wantPlay=false），
+   * 但「锚定」的语义就是换源立刻听；由 loadCurrent 的 prepared→play 链
+   * 确定性起播，绕开「装完再补 play()」与 prepared 的竞态（偶尔不起播的根因）。
    */
-  async retryCurrent(): Promise<void> {
+  async retryCurrent(forcePlay: boolean = false): Promise<void> {
     if (this.current === null) { return; }
     this.failStreak = 0;
     this.failHandled = false;
     this.bumpQueue();
-    await this.loadCurrent(this.wantPlay);
+    await this.loadCurrent(forcePlay || this.wantPlay);
   }
 
   async prev(): Promise<void> {
@@ -382,8 +618,14 @@ export class MediaPlayerCore {
       await this.restoreSession('prev');
       return;
     }
-    if (this.index - 1 < 0) { return; }
+    // 已在队首：回本曲开头（web prev 的 hasPrev=false 分支，列表循环也不回绕）
+    if (this.index - 1 < 0) {
+      await this.seek(0);
+      return;
+    }
     this.index -= 1;
+    this.failStreak = 0;
+    this.failHandled = false;
     this.bumpQueue();
     await this.loadCurrent(this.wantPlay);
   }
@@ -435,6 +677,19 @@ export class MediaPlayerCore {
         this.index = Math.min(this.index + 1, this.queue.length - 1);
       } else if (intent === 'prev') {
         this.index = Math.max(this.index - 1, 0);
+      }
+      // 恢复装载原序（旧会话缺 sourceIds 时按恢复后的队列顺序补）
+      if (saved.sourceIds !== undefined && saved.sourceIds !== null) {
+        this.sourceOrderIds = saved.sourceIds;
+      } else {
+        this.sourceOrderIds = [];
+        for (let i = 0; i < this.queue.length; i++) {
+          this.sourceOrderIds.push(this.queue[i].id);
+        }
+      }
+      // 随机模式冷启动续播重洗一次（web restoreSession：每次进来都是新顺序）
+      if (isShuffleMode(this.playMode)) {
+        this.shuffleWholeQueue(true);
       }
       this.token = tokenRes.token;
       if (intent === 'play') { this.pendingSeekMs = posMs; }
@@ -551,10 +806,13 @@ export class MediaPlayerCore {
       return;
     }
 
-    const canAdvance = this.index + 1 < this.queue.length;
+    // 还有路可走才自动跳下一首（列表循环可回绕、随机可重洗续播，web advance 同口径）
+    const hasWayOut = this.index + 1 < this.queue.length
+      || this.playMode === 'list-loop'
+      || this.playMode === 'shuffle';
     AppStorage.setOrCreate<string>('np_error',
-      canAdvance ? '《' + name + '》暂无可用音源，已跳过' : '《' + name + '》暂无可用音源');
-    if (canAdvance) {
+      hasWayOut ? '《' + name + '》暂无可用音源，已跳过' : '《' + name + '》暂无可用音源');
+    if (hasWayOut) {
       // 稍等一下再跳：避免服务端瞬时抖动时把整条队列连跳掉
       setTimeout(() => {
         this.next();
@@ -692,16 +950,9 @@ export class MediaPlayerCore {
     });
 
     p.on('endOfStream', () => {
-      // 自动接续：还有下一首就播，否则停下（单曲循环由 repeat 开关后续补）
-      if (this.index + 1 < this.queue.length) {
-        this.index += 1;
-        this.bumpQueue();
-        this.loadCurrent(true);
-      } else {
-        this.wantPlay = false;
-        this.publishState();
-        this.av?.stopContinuousTask();
-      }
+      // 自然结束接续全权交给播放模式（T10 批次 F advance(auto)）：
+      // 单曲循环重播 / 列表循环回绕 / 随机重洗续播 / 随机不重复与顺序到头停
+      this.advance(true);
     });
 
     p.on('error', (err: BusinessError) => {

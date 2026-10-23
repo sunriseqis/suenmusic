@@ -17,6 +17,7 @@ import { MediaPlayerCore, K_TRACKID, K_POS } from '../core/MediaPlayerCore';
 import { LyricLine, parseLyricLines, activeLyricIndex } from '../common/NowPlaying';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
 import { Dim } from '../common/Dimension';
 import { LyricRow, LyricRowSource } from '../common/TrackSources';
 import { EmptyState } from './EmptyState';
@@ -59,6 +60,65 @@ function alignTranslation(lines: LyricLine[], transLines: LyricLine[]): string[]
     out.push(text);
   }
   return out;
+}
+
+/** 缓存写入（带上限淘汰） */
+function cachePut(id: string, doc: LyricDoc): void {
+  if (LYRIC_CACHE.size >= CACHE_LIMIT) {
+    // 不用 keys().next().value（ArkTS 下是 any）：forEach 找最早写入的键淘汰
+    let oldestKey: string = '';
+    LYRIC_CACHE.forEach((value: LyricDoc, key: string) => {
+      if (oldestKey.length === 0) { oldestKey = key; }
+    });
+    if (oldestKey.length > 0) { LYRIC_CACHE.delete(oldestKey); }
+  }
+  LYRIC_CACHE.set(id, doc);
+}
+
+/**
+ * 取一首的完整歌词（缓存优先，未命中拉服务端并解析+对齐翻译）。
+ * 模块级导出：PlayerPage 歌词 peek 在歌词面板未打开时也走这里预热（T10 批次 F）。
+ */
+export async function fetchLyricDoc(id: string): Promise<LyricDoc | null> {
+  const cached = LYRIC_CACHE.get(id);
+  if (cached !== undefined) { return cached; }
+  try {
+    const r: LyricResult = await APIClient.shared().lyric(id);
+    const raw = r.lrc === undefined || r.lrc.lyric === undefined ? '' : r.lrc.lyric;
+    const rawTrans = r.tlyric === undefined || r.tlyric.lyric === undefined ? '' : r.tlyric.lyric;
+    const parsed = parseLyricLines(raw);
+    const doc: LyricDoc = {
+      lines: parsed,
+      trans: alignTranslation(parsed, parseLyricLines(rawTrans))
+    };
+    cachePut(id, doc);
+    return doc;
+  } catch (e) {
+    hilog.warn(DOMAIN, TAG, '歌词加载失败 %{public}s: %{public}s', id, JSON.stringify(e));
+    return null;
+  }
+}
+
+/** 歌词 peek 结果：当前行附近 3 行 + 当前行相对下标（-1 = 无歌词/未加载） */
+export interface LyricPeek {
+  lines: LyricLine[];
+  activeIndex: number;
+}
+
+/** 取当前行附近 3 行（web FullPlayer lyric-peek 同口径）：面板未开时 PlayerPage 底部预览用 */
+export function peekLyric(id: string, posMs: number): LyricPeek {
+  const empty: LyricPeek = { lines: [], activeIndex: -1 };
+  if (id.length === 0) { return empty; }
+  const doc = LYRIC_CACHE.get(id);
+  if (doc === undefined || doc.lines.length === 0) { return empty; }
+  const i = activeLyricIndex(doc.lines, posMs);
+  const from = Math.max(0, i - 1);
+  const to = Math.min(doc.lines.length - 1, i + 1);
+  const out: LyricLine[] = [];
+  for (let k = from; k <= to; k++) {
+    out.push(doc.lines[k]);
+  }
+  return { lines: out, activeIndex: i - from };
 }
 
 @Component
@@ -112,33 +172,15 @@ export struct LyricView {
     this.loadingId = id;
     this.status = 'loading';
     this.errText = '';
-    try {
-      const r: LyricResult = await APIClient.shared().lyric(id);
-      const raw = r.lrc === undefined || r.lrc.lyric === undefined ? '' : r.lrc.lyric;
-      const rawTrans = r.tlyric === undefined || r.tlyric.lyric === undefined ? '' : r.tlyric.lyric;
-      const parsed = parseLyricLines(raw);
-      const doc: LyricDoc = {
-        lines: parsed,
-        trans: alignTranslation(parsed, parseLyricLines(rawTrans))
-      };
-      if (LYRIC_CACHE.size >= CACHE_LIMIT) {
-        // 不用 keys().next().value（ArkTS 下是 any）：forEach 找最早写入的键淘汰
-        let oldestKey: string = '';
-        LYRIC_CACHE.forEach((value: LyricDoc, key: string) => {
-          if (oldestKey.length === 0) { oldestKey = key; }
-        });
-        if (oldestKey.length > 0) { LYRIC_CACHE.delete(oldestKey); }
-      }
-      LYRIC_CACHE.set(id, doc);
-      // 期间切歌了 → 丢弃这次结果，别把上一首的歌词盖到新曲目上
-      if (this.loadingId !== id || this.trackId !== id) { return; }
-      this.apply(id, doc);
-    } catch (e) {
-      if (this.loadingId !== id || this.trackId !== id) { return; }
+    const doc = await fetchLyricDoc(id);
+    // 期间切歌了 → 丢弃这次结果，别把上一首的歌词盖到新曲目上
+    if (this.loadingId !== id || this.trackId !== id) { return; }
+    if (doc === null) {
       this.status = 'error';
       this.errText = '歌词加载失败';
-      hilog.warn(DOMAIN, TAG, '歌词加载失败 %{public}s: %{public}s', id, JSON.stringify(e));
+      return;
     }
+    this.apply(id, doc);
   }
 
   private apply(id: string, doc: LyricDoc): void {
@@ -199,9 +241,11 @@ export struct LyricView {
       } else if (this.status === 'error') {
         Column({ space: Dim.s2 }) {
           Text(this.errText).fontSize(Dim.fsBody).fontColor('#E5484D')
-          Button('重试').height(Dim.btnMd).fontSize(Dim.fsMinor)
-            .backgroundColor(Tokens.panel2).fontColor(Tokens.text1)
-            .onClick(() => { this.onTrackChanged(); })
+          WebButton({
+            labelStr: '重试',
+            sizeKind: NeuBtnSize.SM,
+            onTap: () => { this.onTrackChanged(); }
+          })
         }
       } else {
         List({ scroller: this.scroller, space: 0 }) {

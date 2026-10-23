@@ -19,6 +19,8 @@ const DOMAIN = 0x0000;
 const PREF_NAME = 'suenmusic';
 
 export const K_LOGGED_IN = 'logged_in';
+/** 启动引导完成标记（AppStorage 通道，T10）：false 期间 NativeRoot 显示启动占位而非登录页，防冷启动闪登录页 */
+export const K_BOOTSTRAP_DONE = 'bootstrap_done';
 export const K_USER_NAME = 'user_name';
 /** 用户昵称（displayName，可空）—— 首页欢迎区第一行；空则回退 username */
 export const K_USER_DISPLAY = 'user_display';
@@ -36,6 +38,14 @@ export const K_HOME_REFRESH = 'home_refresh';
 export const K_DAILY_REFRESH = 'daily_refresh';
 /** 上一次画像调优提示词（AppStorage 通道，T10 批次 C）：调优区左侧回显，跨页面存活 */
 export const K_LAST_TUNE = 'last_tune_prompt';
+/** 收藏内搜索关键词（AppStorage 通道，T10 批次 E）：FavoritesPage 与 NativeRoot 返回手势共享——
+ *  页面 @StorageLink 双向绑定，NativeRoot onBackPress 读到非空先清它（web Favorites.vue
+ *  registerBackHandler：返回第一下退出筛选态而不是退出应用），清完再让系统处理 */
+export const K_FAV_KEYWORD = 'fav_search_keyword';
+/** 播放页内部浮层层级（T10 批次 F，web FullPlayer 返回键层级）：
+ *  'none' | 'dislike' | 'more' | 'queue' | 'lyrics' | 'anchor'，PlayerPage 唯一写入方，
+ *  NativeRoot onBackPress 读到非 'none' 先清它（返回第一下关浮层而不是关播放页） */
+export const K_PLAYER_SHEET = 'np_player_sheet';
 
 /** WebDAV 备份配置（JSON 字符串：{url,user,pass}）的偏好键（T10 批次 C） */
 const PREF_WEBDAV = 'webdav_config';
@@ -60,6 +70,18 @@ export class AppState {
 
   /** UIAbility 启动时调一次：读偏好 → 有刷新令牌就恢复登录 */
   async bootstrap(context: common.Context): Promise<void> {
+    try {
+      await this.bootstrapInner(context);
+    } catch (e) {
+      // bootstrap 整体异常（如 api.init 抛错）：登录态按未登录渲染，不拦启动
+      hilog.warn(DOMAIN, TAG, 'bootstrap 异常: %{public}s', JSON.stringify(e));
+    } finally {
+      // 无论走到哪条分支都要放行启动占位：否则 NativeRoot 永远停在启动屏
+      AppStorage.setOrCreate<boolean>(K_BOOTSTRAP_DONE, true);
+    }
+  }
+
+  private async bootstrapInner(context: common.Context): Promise<void> {
     if (this.pref === null) {
       try {
         this.pref = await preferences.getPreferences(context, PREF_NAME);

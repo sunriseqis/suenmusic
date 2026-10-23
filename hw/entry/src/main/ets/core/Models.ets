@@ -32,6 +32,8 @@ export interface TrackArtist {
   name: string;
   /** 网易云/QQ 歌手 mid —— 「不喜欢歌手」按它过滤（老快照可能缺） */
   mid?: string;
+  /** 歌手头像（T001 档；歌手页封面从召回曲目就地取，省一次详情请求） */
+  picUrl?: string;
 }
 
 export interface TrackAlbum {
@@ -66,8 +68,32 @@ export interface Album {
   publishTime?: string;
   /** 歌手列表（新碟接口给 `artists`；老快照可能缺）—— 海报副行用 */
   artists?: TrackArtist[];
+  /** 主歌手（详情/搜索接口给；搜索卡片副行用，取不到回退 artists） */
+  artist?: TrackArtist;
+  /** 发行公司（详情接口）—— 专辑页副行用 */
+  company?: string;
+  /** 专辑介绍（详情接口）—— 介绍折叠框用 */
+  description?: string;
+  /** 专辑类型（详情接口，如「专辑/EP」） */
+  type?: string;
+  /** 曲目数（详情接口） */
+  size?: number;
   /** @deprecated 服务端 `adaptQQAlbum` 不输出该字段，历史快照兼容保留 */
   singerName?: string;
+}
+
+/** 搜索的歌单条目（`/api/search?type=playlist` 分片，QQ 适配字段） */
+export interface Playlist {
+  id: string;
+  /** QQ 歌单 tid —— 打开详情用它（与 id 同值时可能缺省） */
+  tid?: string | number;
+  name: string;
+  picUrl: string;
+  coverImgUrl: string;
+  playCount: number;
+  copywriter?: string;
+  description?: string;
+  size?: number;
 }
 
 export interface HomeData {
@@ -105,6 +131,8 @@ export interface FavoritePage {
   items: FavoriteItem[];
   total: number;
   nextCursor?: string;
+  /** 收藏的 AI 摘要（首页才返回；空/缺省 = 没有，标题回退「收藏曲目」） */
+  summary?: string;
 }
 
 /** `GET /api/lyrics/:id` —— lrc 是原文，tlyric 是翻译（可能为空串） */
@@ -155,7 +183,7 @@ export interface SearchDegraded {
   retryAfterMs?: number;
 }
 
-/** `GET /api/search`。playlists / mvs 本增量不展示，按不透明对象占位 */
+/** `GET /api/search`。mv 本增量不展示，按不透明对象占位 */
 export interface SearchResult {
   query: string;
   type: string;
@@ -164,10 +192,80 @@ export interface SearchResult {
   songs: Track[];
   albums: Album[];
   artists: Artist[];
-  playlists: Object[];
+  playlists: Playlist[];
   mvs: Object[];
   hasMore: SearchHasMore;
   degraded: SearchDegraded | null;
+}
+
+/** `GET /api/albums/:id`。notice：曲目为空时上游给的版权限制说明（有则原样展示） */
+export interface AlbumDetail {
+  album: Album;
+  songs: Track[];
+  notice: string | null;
+}
+
+/** `GET /api/artists/:id/songs`（按名搜索召回，可能带 degraded） */
+export interface ArtistSongs {
+  id: string;
+  name: string;
+  songs: Track[];
+  hasMore: boolean;
+  degraded: SearchDegraded | null;
+}
+
+/** `GET /api/artists/:id/albums`（与 ArtistSongs 分开：两者限流状态独立） */
+export interface ArtistAlbums {
+  id: string;
+  name: string;
+  albums: Album[];
+  hasMore: boolean;
+  degraded: SearchDegraded | null;
+}
+
+/** 相似歌手条目（`/api/artists/:id/similar` 的 artists 元素，id 是 QQ 歌手 mid） */
+export interface SimiArtist {
+  id: string;
+  name: string;
+}
+
+/** `GET /api/artists/:id/similar`。上游任何一步失败服务端都返回空列表 */
+export interface SimilarArtists {
+  id: string;
+  name: string;
+  artists: SimiArtist[];
+}
+
+/** QQ 歌单创建者（QQPlaylistDetail.creator；无创建者时上游给 null） */
+export interface QQPlaylistCreator {
+  nickname: string;
+  userId: number;
+}
+
+/** QQ 官方歌单详情头（`/api/qq/playlist/:tid`） */
+export interface QQPlaylistDetail {
+  id: string;
+  name: string;
+  coverImgUrl: string;
+  picUrl: string;
+  description: string;
+  playCount: number;
+  trackCount: number;
+  creator: QQPlaylistCreator | null;
+}
+
+/** `GET /api/qq/playlist/:tid` */
+export interface QQPlaylistResult {
+  playlist: QQPlaylistDetail;
+  tracks: Track[];
+}
+
+/** `GET /api/toplist/:id`（topInfo 上游拿不到时为 null） */
+export interface ToplistDetail {
+  id: string;
+  topInfo: Toplist | null;
+  tracks: Track[];
+  hasMore: boolean;
 }
 
 /** `POST /api/favorites/check` 的返回 */
@@ -270,6 +368,63 @@ export interface ImportFavoritesReply {
   total: number;
 }
 
+// ---------------- 手动锚定（低置信曲目人工兜底，web api/playback.ts 同契约） ----------------
+
+/** B 站候选视频（锚定弹窗用）。score = 按本曲元数据算的置信分；durationDiff = 与曲目时长之差（秒） */
+export interface BiliCandidate {
+  bvid: string;
+  title: string;
+  author: string;
+  durationSec: number;
+  score: number;
+  durationDiff: number;
+  /** 封面缩略图（B 站 CDN，https），可能为空串 */
+  pic: string;
+  /** 试听流地址（相对路径，带短期令牌，需拼服务端基地址） */
+  previewUrl: string;
+}
+
+/** 曲目自身的 Q 音元数据（锚定弹窗的「原版参照」） */
+export interface AnchorTrackMeta {
+  id: string;
+  name: string;
+  artists: string[];
+  durationMs: number;
+  albumName: string;
+  albumPic: string;
+}
+
+/** `GET /api/tracks/:id/bili-candidates`（keyword 缺省时服务端用「歌名 + 主歌手」自动构造） */
+export interface BiliCandidatesResult {
+  keyword: string;
+  rejected: boolean;
+  message?: string;
+  track: AnchorTrackMeta;
+  candidates: BiliCandidate[];
+}
+
+/** `POST /api/tracks/:id/anchor` 的请求体（bvid 必填，其余选填快照） */
+export interface AnchorBody {
+  bvid: string;
+  title?: string;
+  author?: string;
+  durationSec?: number;
+}
+
+/** 曲目当前锚点（`GET /api/tracks/:id/anchor` 的 anchor 元素；未锚定时为 null） */
+export interface TrackAnchorInfo {
+  bvid: string;
+  title: string;
+  author: string;
+  durationSec: number;
+  pinned: boolean;
+}
+
+/** `GET /api/tracks/:id/anchor` 的返回 */
+export interface TrackAnchorReply {
+  anchor: TrackAnchorInfo | null;
+}
+
 /** `GET /api/ai/persona`（音乐画像；summary 为空 = 尚未生成） */
 export interface PersonaDetail {
   summary: string;
@@ -339,4 +494,28 @@ export function albumArtistLine(a: Album): string {
     return a.singerName;
   }
   return names.length > 0 ? names.join(' / ') : '未知歌手';
+}
+
+/**
+ * 毫秒 → `m:ss` / `h:mm:ss`（web `formatDuration` 同口径：向下取整到秒）。
+ * 负数 / 非有限值一律 `0:00` —— 流式响应下 duration 可能异常。
+ */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) { return '0:00'; }
+  const totalSec = Math.floor(ms / 1000);
+  const sec = totalSec % 60;
+  const min = Math.floor(totalSec / 60) % 60;
+  const hour = Math.floor(totalSec / 3600);
+  const pad = (n: number): string => (n < 10 ? '0' + n.toString() : n.toString());
+  return hour > 0 ? `${hour}:${pad(min)}:${pad(sec)}` : `${min}:${pad(sec)}`;
+}
+
+/** 播放量：1234 → `1234`，12345 → `1.2万`，过亿 → `1.2亿`（web `formatCount` 同口径） */
+export function formatCount(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) { return '0'; }
+  if (n < 10000) { return String(Math.floor(n)); }
+  if (n < 100000000) {
+    return (n / 10000).toFixed(1).replace(/\.0$/, '') + '万';
+  }
+  return (n / 100000000).toFixed(1).replace(/\.0$/, '') + '亿';
 }

@@ -4,9 +4,9 @@
  * 布局：
  *   2*2 = 封面 52 + 歌名两行 + 歌手；时间在进度线右上；下方三键（上一首/播放/下一首）
  *   2*4 = 三格：封面 / 信息（歌名、歌手、三行歌词、进度）/ 运输轨（三键纵向）
- *   收藏只在 2*4 的信息格右上角。
  *   没有翻转：歌词直接在 2*4 正面显示。
  *   空态：标题「暂无歌曲播放」，不显示歌手与歌词，控制键灰掉。
+ *   收藏红心已按用户 2026-10-22 反馈移除（2*4 不再显示）。
  *
  * ⚠️ 卡片页 API 白名单：@LocalStorageProp / postCardAction / animateTo 等可用，
  *    getUIContext / router / AppStorage 不可用（11706006）。
@@ -23,7 +23,6 @@ struct SuenFormCard {
   @LocalStorageProp('suen_artist') artist: string = '';
   @LocalStorageProp('suen_cover') coverUrl: string = '';
   @LocalStorageProp('suen_playing') playing: string = 'false';
-  @LocalStorageProp('suen_favorite') favorite: string = 'false';
   @LocalStorageProp('suen_lyric') lyric: string = '';
   @LocalStorageProp('suen_lyric_active') lyricActive: string = '-1';
   // ⚠️ 不能叫 `position`：那是 CustomComponent 的内置属性（用于设位置），
@@ -50,10 +49,6 @@ struct SuenFormCard {
 
   private isPlaying(): boolean {
     return this.playing === 'true';
-  }
-
-  private isFav(): boolean {
-    return this.favorite === 'true';
   }
 
   // ---- 进度与歌词 ----
@@ -131,16 +126,10 @@ struct SuenFormCard {
     if (btn === 'next') {
       return $r('app.media.card_next');
     }
-    if (btn === 'favorite') {
-      return this.isFav() ? $r('app.media.card_heart_filled') : $r('app.media.card_heart');
-    }
     return this.isPlaying() ? $r('app.media.card_pause') : $r('app.media.card_play');
   }
 
   private btnColor(btn: string): ResourceColor {
-    if (btn === 'favorite' && this.isFav()) {
-      return $r('app.color.card_accent_text');
-    }
     return $r('app.color.card_t2');
   }
 
@@ -333,34 +322,28 @@ struct SuenFormCard {
         .backgroundColor($r('app.color.card_line'))
 
       Column() {
-        Row() {
-          Column() {
-            Text(this.title)
-              .fontSize(14)
-              .fontWeight(FontWeight.Medium)
-              .fontColor($r('app.color.card_t1'))
+        Column() {
+          Text(this.title)
+            .fontSize(14)
+            .fontWeight(FontWeight.Medium)
+            .fontColor($r('app.color.card_t1'))
+            .lineHeight(16)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+
+          if (!this.isIdle()) {
+            Text(this.artist)
+              .fontSize(10)
+              .fontColor($r('app.color.card_t2'))
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
-
-            if (!this.isIdle()) {
-              Text(this.artist)
-                .fontSize(10)
-                .fontColor($r('app.color.card_t2'))
-                .maxLines(1)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-                .width('100%')
-                .margin({ top: 2 })
-            }
+              .margin({ top: 2 })
           }
-          .layoutWeight(1)
-          .alignItems(HorizontalAlign.Start)
-
-          // 收藏：只在宽卡、且只在信息格右上角
-          this.ctrlBtn('favorite')
         }
         .width('100%')
-        .alignItems(VerticalAlign.Top)
+        .alignItems(HorizontalAlign.Start)
 
         Column() {
           ForEach(this.lyricLines(), (line: string, idx: number) => {
@@ -379,7 +362,11 @@ struct SuenFormCard {
         }
         .layoutWeight(1)
         .width('100%')
+        // 与歌名/歌手留出阅读间距（歌名两行后贴得太近，2026-10-23 用户反馈）
+        .margin({ top: 5 })
         .justifyContent(FlexAlign.Center)
+        // 溢出防御：窗口行数异常时裁在本区域内，不再压到下方进度条
+        .clip(true)
 
         Row() {
           Text(this.elapsedText())

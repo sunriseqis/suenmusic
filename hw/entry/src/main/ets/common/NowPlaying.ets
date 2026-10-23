@@ -20,8 +20,8 @@ const DOMAIN = 0x0000;
 const STORE_NAME = 'suenmusic_widget';
 const KEY_NOW_PLAYING = 'now_playing';
 
-/** 卡片封面在 formImages 里登记的 key。卡片侧用 Image('memory://suen_cover_img') 显示。 */
-export const CARD_COVER_KEY = 'suen_cover_img';
+/** 卡片封面在 formImages 里登记的 key 前缀。实际 key 带版本号（见 NowPlayingSnapshot.coverKey）。 */
+export const CARD_COVER_KEY_PREFIX = 'suen_cover_';
 
 /** 封面字节落盘的文件名（相对 cacheDir）。与 Index.ets 的 CARD_COVER_PATH 保持一致。 */
 const CARD_COVER_PATH = '/card_cover.img';
@@ -73,6 +73,16 @@ export interface NowPlayingSnapshot {
   /** 封面字节是否已落盘到 cacheDir/card_cover.img（formImages 的前提） */
   coverReady: boolean;
   /**
+   * 本次封面的 formImages key（卡片 Image 的 memory:// 路径名；'' = 无封面）。
+   *
+   * ⚠️ 官方《刷新本地图片和网络图片》示例明确：刷新卡片图片时 formImages
+   * 的 key 必须换成新的（示例用 'file' + Date.now()），复用同一个 key 系统
+   * 不会重新拷贝图片字节 —— 「切歌后卡片封面不更新」的根因。
+   * key 由封面落盘方（AVSessionManager.attachCover）生成，随快照持久化，
+   * 保证 onAddForm / onUpdateForm / 主动推卡三条路用的都是同一个 key。
+   */
+  coverKey: string;
+  /**
    * 应用进程是否活着（且 WebView 已可受控）。
    * 卡片靠它在 call（后台直达）与 router（冷启动拉前台）之间分流：
    * alive=true → call，不惊动前台；alive=false → router，完整拉起。
@@ -97,6 +107,7 @@ export function emptySnapshot(): NowPlayingSnapshot {
     positionMs: 0,
     durationMs: 0,
     coverReady: false,
+    coverKey: '',
     alive: false,
     updatedAt: 0
   };
@@ -140,6 +151,7 @@ export function readSnapshotSync(ctx: common.Context): NowPlayingSnapshot {
       positionMs: typeof parsed.positionMs === 'number' ? parsed.positionMs : 0,
       durationMs: typeof parsed.durationMs === 'number' ? parsed.durationMs : 0,
       coverReady: parsed.coverReady === true,
+      coverKey: typeof parsed.coverKey === 'string' ? parsed.coverKey : '',
       alive: parsed.alive === true,
       updatedAt: typeof parsed.updatedAt === 'number' ? parsed.updatedAt : 0
     };
@@ -247,8 +259,13 @@ export function activeLyricIndex(lines: LyricLine[], positionMs: number): number
   return idx;
 }
 
-/** 卡片歌词窗口的行数。卡片数据有大小限制，窗口比全量歌词更稳 */
-const CARD_WINDOW_LINES = 6;
+/**
+ * 卡片歌词窗口的行数。
+ * 2*4 信息格的设计规格就是三行（2026-10-19 卡片设计定稿：封面 / 歌名 /
+ * 三行歌词 / 进度）；发 6 行时歌名转两行后总高度超出卡片，歌词溢出
+ * 覆盖进度条（2026-10-23 用户实测反馈）。
+ */
+const CARD_WINDOW_LINES = 3;
 
 /** 卡片歌词的长度上限。卡片推送数据有大小限制，歌词只当展示层、宁可截断 */
 const MAX_CARD_LYRIC_LEN = 800;
@@ -264,7 +281,7 @@ export interface LyricWindow {
 /**
  * 按播放位置裁一个"当前行附近"的歌词窗口。
  * 窗口 = max(0, 当前行-1) 起、共 CARD_WINDOW_LINES 行，当前行尽量靠前
- * （它后面还有 3 行可看，滚动感由此而来）。
+ * （它后面还有行可看，滚动感由此而来）。
  */
 export function buildLyricWindow(raw: string, positionMs: number): LyricWindow {
   const lines = parseLyricLines(raw);
@@ -305,7 +322,7 @@ export function buildLyricWindow(raw: string, positionMs: number): LyricWindow {
 export interface CardPayload {
   suen_title: string;
   suen_artist: string;
-  /** 'memory://suen_cover_img'（封面已落盘）或 ''（画占位块） */
+  /** 'memory://suen_cover_<版本>'（封面已落盘）或 ''（画占位块） */
   suen_cover: string;
   suen_playing: string;
   suen_favorite: string;
@@ -332,7 +349,8 @@ export function toCardPayload(snap: NowPlayingSnapshot, dimension: string): Card
   const p: CardPayload = {
     suen_title: snap.title,
     suen_artist: snap.artist,
-    suen_cover: snap.coverReady ? `memory://${CARD_COVER_KEY}` : '',
+    suen_cover: snap.coverReady && snap.coverKey.length > 0
+      ? `memory://${snap.coverKey}` : '',
     suen_playing: snap.playing ? 'true' : 'false',
     suen_favorite: snap.favorite ? 'true' : 'false',
     suen_lyric: win.text,
@@ -369,9 +387,11 @@ export function buildFormBindingObject(snap: NowPlayingSnapshot, dimension: stri
     'suen_alive': p.suen_alive,
     'suen_dimension': p.suen_dimension
   };
-  if (coverFd >= 0) {
-    // key 与 CARD_COVER_KEY 一致；卡片侧 Image('memory://suen_cover_img')
-    const imgs: Record<string, number> = { 'suen_cover_img': coverFd };
+  if (coverFd >= 0 && snap.coverReady && snap.coverKey.length > 0) {
+    // key 取快照里的版本化 key（见 NowPlayingSnapshot.coverKey 注释），
+    // 卡片侧 Image('memory://<coverKey>') 与此处必须一一对应
+    const imgs: Record<string, number> = {};
+    imgs[snap.coverKey] = coverFd;
     obj['formImages'] = imgs;
   }
   return obj;

@@ -7,6 +7,7 @@
  */
 import { Dim } from '../common/Dimension';
 import { Tokens } from '../common/Tokens';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
 
 @Component
 export struct EmptyState {
@@ -33,12 +34,11 @@ export struct EmptyState {
           .fontColor(Tokens.text2)
       }
       if (this.actionLabel.length > 0) {
-        Button(this.actionLabel)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Tokens.panel)
-          .fontColor(Tokens.text1)
-          .onClick(() => { this.onAction(); })
+        WebButton({
+          labelStr: this.actionLabel,
+          sizeKind: NeuBtnSize.MD,
+          onTap: () => { this.onAction(); }
+        })
       }
     }
     .width('100%')

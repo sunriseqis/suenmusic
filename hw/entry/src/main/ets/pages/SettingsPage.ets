@@ -13,7 +13,7 @@
  * 经参数传值不会建立依赖、状态变了 UI 不刷（T10 实测口径，与 NativeRoot tabItem 同款）。
  */
 
-import { AppState, K_USER_NAME, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE } from '../viewmodel/AppState';
+import { AppState, K_USER_NAME, K_USER_DISPLAY, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE } from '../viewmodel/AppState';
 import { APIClient, ApiError } from '../core/APIClient';
 import { WebDavClient } from '../core/WebDavClient';
 import { Tokens } from '../common/Tokens';
@@ -22,6 +22,9 @@ import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
+import { NeuTabs } from '../common/NeuTabs';
+import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
+import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
 
 /** WebDAV 配置的持久化形态（JSON 三字段） */
 interface DavCfg {
@@ -58,6 +61,8 @@ class MdLine {
 @Component
 export struct SettingsPage {
   @StorageLink(K_USER_NAME) userName: string = '';
+  /** 账号昵称（第 ⑪ 条：账号行优先显示昵称，回退登录名） */
+  @StorageLink(K_USER_DISPLAY) userDisplay: string = '';
   /** 显示歌词翻译（默认开，LyricView 消费同一 AppStorage 键；hw 专属条目，web 设置页无此项） */
   @StorageLink(K_LYRIC_TRANS) lyricTrans: boolean = true;
   /** 自动切换服务器（默认开，APIClient.failoverIfNeeded 首行判断；hw 专属条目） */
@@ -65,8 +70,6 @@ export struct SettingsPage {
 
   /** 0 = 本机 / 1 = 智能 / 2 = 高级（web NeuTabs） */
   @State seg: number = 0;
-  /** seg 正在按压的格子下标（-1 = 无）：机械按键 1vp 下沉的驱动状态 */
-  @State segPressed: number = -1;
   /** 当前弹层：'' / dislikes / import / dedupe / backup */
   @State sheet: string = '';
 
@@ -508,15 +511,18 @@ export struct SettingsPage {
       const st = await APIClient.shared().bilibiliStatus();
       this.biliLabel = st.account !== null && st.account.name !== undefined && st.account.name.length > 0
         ? st.account.name
-        : (st.account !== null ? '已授权' : '未授权');
+        : (st.configured ? '已授权' : '未授权');
     } catch (e) {
       this.biliLabel = '未授权';
     }
     try {
       const st = await APIClient.shared().neteaseStatus();
+      // 第 ⑫ 条（2026-10-23 验收）：服务端 netease 的 account 元数据可能缺失（account: null）
+      // 但 configured: true（curl 实测）—— 授权与否以 configured 为准；
+      // 有名字显示名字，缺名字但已配置显示「已授权」（web neteaseOn=!!st.account 的同款 bug 记档）
       this.neteaseLabel = st.account !== null && st.account.name !== undefined && st.account.name.length > 0
         ? st.account.name
-        : (st.account !== null ? '已授权' : '未授权');
+        : (st.configured ? '已授权' : '未授权');
     } catch (e) {
       this.neteaseLabel = '未授权';
     }
@@ -587,39 +593,6 @@ export struct SettingsPage {
       : { width: { top: Dim.hairline }, color: { top: Tokens.line } })
   }
 
-  /** 分段控件格子（NeuTabs：active = panel2 底 + 顶沿内高光 + t1 Medium；机械按键 100ms 色变 + 按压 1vp 下沉） */
-  @Builder
-  segCell(label: string, idx: number) {
-    Row() {
-      Text(label)
-        .fontSize(Dim.fsBody)
-        .fontWeight(this.seg === idx ? FontWeight.Medium : FontWeight.Normal)
-        .fontColor(this.seg === idx ? Tokens.text1 : Tokens.text2)
-        .animation({ duration: Motion.fast, curve: Motion.curve })
-    }
-    .height(Dim.segH)
-    .layoutWeight(1)
-    .justifyContent(FlexAlign.Center)
-    .borderRadius(Dim.radiusTab)
-    .backgroundColor(this.seg === idx ? Tokens.panel2 : Color.Transparent)
-    .border(this.seg === idx
-      ? { width: { top: Dim.hairline }, color: { top: Tokens.hi } }
-      : { width: 0 })
-    .translate({ y: this.segPressed === idx ? 1 : 0 })
-    .animation({ duration: Motion.fast, curve: Motion.curve })
-    .accessibilityText(label)
-    .onClick(() => {
-      this.seg = idx;
-    })
-    .onTouch((e: TouchEvent) => {
-      if (e.type === TouchType.Down) {
-        this.segPressed = idx;
-      } else {
-        this.segPressed = -1;
-      }
-    })
-  }
-
   /** 弹层顶把手（web Sheet .grip：36×3 圆头浅条） */
   @Builder
   sheetGrip() {
@@ -630,7 +603,11 @@ export struct SettingsPage {
       .backgroundColor(Tokens.line)
   }
 
-  /** 弹层头：标题 + 关闭钮（web Sheet） */
+  /**
+   * 弹层头：标题 + 收起钮。
+   * 第 ⑱ 条全局令：浮窗关闭一律「向下收起」（chevron-down），不再是 X ——
+   * 底部抽屉的语义是「滑下去」，收起图标与动效方向一致。
+   */
   @Builder
   sheetHead(title: string) {
     Row() {
@@ -639,21 +616,19 @@ export struct SettingsPage {
         .fontWeight(FontWeight.Medium)
         .fontColor(Tokens.text1)
         .layoutWeight(1)
-      Row() {
-        SymbolGlyph($r('sys.symbol.xmark'))
-          .fontSize(Dim.iconMd)
-          .fontColor([Tokens.text2])
-      }
-      .width(Dim.btnMd)
-      .height(Dim.btnMd)
-      .justifyContent(FlexAlign.Center)
-      .alignItems(VerticalAlign.Center)
-      .accessibilityText('关闭')
-      .onClick(() => {
-        this.sheet = '';
+      WebIconButton({
+        iconName: WebIconName.CHEVRON_DOWN,
+        boxSize: 36,
+        glyphColor: Tokens.text2,
+        chromeKind: NeuBtnChrome.PLAIN,
+        onTap: () => {
+          this.sheet = '';
+        }
       })
+        .accessibilityText('收起')
     }
     .width('100%')
+    .alignItems(VerticalAlign.Center)
   }
 
   /** 弹层容器通用样式（底部圆角面板 + 上滑转场） */
@@ -748,9 +723,7 @@ export struct SettingsPage {
           .fontSize(Dim.fsBody)
           .fontColor(Tokens.text1)
           .layoutWeight(1)
-        SymbolGlyph(this.personaOpen ? $r('sys.symbol.chevron_up') : $r('sys.symbol.chevron_down'))
-          .fontSize(Dim.iconMd)
-          .fontColor([Tokens.text2])
+        WebIcon(this.personaOpen ? WebIconName.CHEVRON_UP : WebIconName.CHEVRON_DOWN, 18, Tokens.text2)
       }
       .width('100%')
       .height(Dim.touchMin)
@@ -872,17 +845,14 @@ export struct SettingsPage {
                   .maxLines(1)
                   .textOverflow({ overflow: TextOverflow.Ellipsis })
                   .layoutWeight(1)
-                Button('恢复')
-                  .height(Dim.btnSm)
-                  .fontSize(Dim.fsMinor)
-                  .backgroundColor(Color.Transparent)
-                  .fontColor(Tokens.text2)
-                  .border({ width: Dim.hairline, color: Tokens.line })
-                  .borderRadius(Dim.radiusPill)
-                  .accessibilityText('恢复 ' + row.name)
-                  .onClick(() => {
+                WebButton({
+                  labelStr: '恢复',
+                  sizeKind: NeuBtnSize.SM,
+                  onTap: () => {
                     this.undoDislike(row);
-                  })
+                  }
+                })
+                  .accessibilityText('恢复 ' + row.name)
               }
               .width('100%')
               .height(Dim.touchMin)
@@ -912,17 +882,17 @@ export struct SettingsPage {
       this.sheetHead('歌单导入')
       NeuInput({ content: this.importLink, placeholder: 'QQ 歌单链接或 id' })
         .width('100%')
-      Button(this.importing ? '导入中…' : '导入')
-        .width('100%')
-        .height(Dim.touchMin)
-        .fontSize(Dim.fsSub)
-        .backgroundColor(Tokens.accent)
-        .fontColor(Tokens.bg)
-        .enabled(!this.importing && this.importLink.trim().length > 0)
-        .accessibilityText(this.importing ? '正在导入' : '导入')
-        .onClick(() => {
+      WebButton({
+        labelStr: this.importing ? '导入中…' : '导入',
+        variantKind: NeuBtnVariant.PRIMARY,
+        blockFlag: true,
+        sizeKind: NeuBtnSize.MD,
+        disabledFlag: this.importing || this.importLink.trim().length === 0,
+        onTap: () => {
           this.doImport();
-        })
+        }
+      })
+        .accessibilityText(this.importing ? '正在导入' : '导入')
       if (this.importMsg.length > 0) {
         Text(this.importMsg)
           .fontSize(Dim.fsMinor)
@@ -992,16 +962,16 @@ export struct SettingsPage {
         .constraintSize({ maxHeight: Dim.sheetListMax })
         .width('100%')
 
-        Button(`清理 ${this.dupRemoveTotal()} 首`)
-          .width('100%')
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Tokens.accent)
-          .fontColor(Tokens.bg)
-          .accessibilityText('清理重复收藏')
-          .onClick(() => {
+        WebButton({
+          labelStr: `清理 ${this.dupRemoveTotal()} 首`,
+          variantKind: NeuBtnVariant.PRIMARY,
+          blockFlag: true,
+          sizeKind: NeuBtnSize.MD,
+          onTap: () => {
             this.runDedup();
-          })
+          }
+        })
+          .accessibilityText('清理重复收藏')
       }
     }
     .width('100%')
@@ -1019,30 +989,35 @@ export struct SettingsPage {
       this.sheetGrip()
       this.sheetHead('数据备份')
       Row({ space: Dim.s2 }) {
-        Button(this.backupBusy ? '处理中…' : '导出文件')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Tokens.panel2)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .accessibilityText('导出备份文件')
-          .onClick(() => {
-            this.exportBackup();
+        Column() {
+          WebButton({
+            labelStr: this.backupBusy ? '处理中…' : '导出文件',
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            disabledFlag: this.backupBusy,
+            onTap: () => {
+              this.exportBackup();
+            }
           })
-        Button('导入文件')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Color.Transparent)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .accessibilityText('导入备份文件')
-          .onClick(() => {
-            this.pickBackup();
+        }
+        .layoutWeight(1)
+        .accessibilityText('导出备份文件')
+        Column() {
+          WebButton({
+            labelStr: '导入文件',
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            disabledFlag: this.backupBusy,
+            onTap: () => {
+              this.pickBackup();
+            }
           })
+        }
+        .layoutWeight(1)
+        .accessibilityText('导入备份文件')
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
 
       if (this.backupMsg.length > 0) {
         Text(this.backupMsg)
@@ -1087,29 +1062,34 @@ export struct SettingsPage {
       .width('100%')
 
       Row({ space: Dim.s2 }) {
-        Button('上传')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Color.Transparent)
-          .fontColor(Tokens.text1)
-          .border({ width: Dim.hairline, color: Tokens.line })
-          .accessibilityText('上传备份到 WebDAV')
-          .onClick(() => {
-            this.uploadWebdav();
+        Column() {
+          WebButton({
+            labelStr: '上传',
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => {
+              this.uploadWebdav();
+            }
           })
-        Button('下载')
-          .layoutWeight(1)
-          .height(Dim.touchMin)
-          .fontSize(Dim.fsSub)
-          .backgroundColor(Tokens.accent)
-          .fontColor(Tokens.bg)
-          .accessibilityText('从 WebDAV 下载备份')
-          .onClick(() => {
-            this.downloadWebdav();
+        }
+        .layoutWeight(1)
+        .accessibilityText('上传备份到 WebDAV')
+        Column() {
+          WebButton({
+            labelStr: '下载',
+            variantKind: NeuBtnVariant.PRIMARY,
+            blockFlag: true,
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => {
+              this.downloadWebdav();
+            }
           })
+        }
+        .layoutWeight(1)
+        .accessibilityText('从 WebDAV 下载备份')
       }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s4 })
@@ -1131,16 +1111,13 @@ export struct SettingsPage {
             .fontColor(Tokens.text1)
             .width('100%')
 
-          Row({ space: Dim.s0 }) {
-            this.segCell('本机', 0)
-            this.segCell('智能', 1)
-            this.segCell('高级', 2)
-          }
-          .width('100%')
-          .padding(Dim.s1)
-          .borderRadius(Dim.radiusMd)
-          .backgroundColor(Tokens.bg)
-          .border({ width: Dim.hairline, color: Tokens.line })
+          // 三分段（第 ⑰⑱ 条统一：共享 NeuTabs，与搜索页四分片同质感）
+          NeuTabs({
+            labels: ['本机', '智能', '高级'],
+            activeIndex: this.seg,
+            onSelect: (i: number) => { this.seg = i; }
+          })
+            .width('100%')
 
           // ==================== 本机 ====================
           if (this.seg === 0) {
@@ -1245,21 +1222,20 @@ export struct SettingsPage {
             Column() {
               if (this.userName.length > 0) {
                 Row() {
-                  Text(this.userName)
+                  // 第 ⑪ 条：优先显示服务端昵称（K_USER_DISPLAY），缺失回退登录名
+                  Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
                     .fontSize(Dim.fsBody)
                     .fontColor(Tokens.text1)
                     .layoutWeight(1)
-                  Button('登出')
-                    .height(Dim.btnSm)
-                    .fontSize(Dim.fsMinor)
-                    .backgroundColor(Color.Transparent)
-                    .fontColor('#E5484D')
-                    .border({ width: Dim.hairline, color: Tokens.line })
-                    .borderRadius(Dim.radiusPill)
-                    .accessibilityText('退出登录')
-                    .onClick(() => {
+                  WebButton({
+                    labelStr: '登出',
+                    variantKind: NeuBtnVariant.DANGER,
+                    sizeKind: NeuBtnSize.SM,
+                    onTap: () => {
                       AppState.shared().signOut();
-                    })
+                    }
+                  })
+                    .accessibilityText('退出登录')
                 }
                 .width('100%')
                 .height(Dim.touchMin)
@@ -1296,16 +1272,16 @@ export struct SettingsPage {
                 }
                 .alignItems(HorizontalAlign.Start)
                 .layoutWeight(1)
-                Button(this.tuning ? '调优中…' : '提交')
-                  .height(Dim.btnMd)
-                  .fontSize(Dim.fsMinor)
-                  .backgroundColor(Tokens.accent)
-                  .fontColor(Tokens.bg)
-                  .enabled(!this.tuning && this.guidance.trim().length > 0)
-                  .accessibilityText(this.tuning ? '正在调优' : '提交调优意见')
-                  .onClick(() => {
+                WebButton({
+                  labelStr: this.tuning ? '调优中…' : '提交',
+                  variantKind: NeuBtnVariant.PRIMARY,
+                  sizeKind: NeuBtnSize.MD,
+                  disabledFlag: this.tuning || this.guidance.trim().length === 0,
+                  onTap: () => {
                     this.submitTune();
-                  })
+                  }
+                })
+                  .accessibilityText(this.tuning ? '正在调优' : '提交调优意见')
               }
               .width('100%')
               .alignItems(VerticalAlign.Center)
@@ -1327,9 +1303,7 @@ export struct SettingsPage {
                   .fontSize(Dim.fsBody)
                   .fontColor(Tokens.text1)
                   .layoutWeight(1)
-                SymbolGlyph($r('sys.symbol.chevron_right'))
-                  .fontSize(Dim.iconMd)
-                  .fontColor([Tokens.text2])
+                WebIcon(WebIconName.CHEVRON_RIGHT, 18, Tokens.text2)
               }
               .width('100%')
               .height(Dim.touchMin)
@@ -1348,7 +1322,7 @@ export struct SettingsPage {
 
             this.secLabel('音源授权')
             Column() {
-              this.rowStatic('B 站', this.biliLabel, true)
+              this.rowStatic('bilibili', this.biliLabel, true)
               this.rowStatic('网易云', this.neteaseLabel, false)
             }
             .width('100%')

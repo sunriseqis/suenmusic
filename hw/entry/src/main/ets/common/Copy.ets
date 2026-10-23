@@ -67,6 +67,13 @@ export class Copy {
   static readonly emptyQueueTitle: string = '队列是空的';
   static readonly emptyQueueSub: string = '去首页挑一首';
 
+  // ---- 播放模式标签（web PLAYBACK_MODE_LABEL 同口径；点模式钮 toast 用） ----
+  static readonly modeOrder: string = '顺序播放';
+  static readonly modeShuffle: string = '随机播放';
+  static readonly modeRepeatOne: string = '单曲循环';
+  static readonly modeListLoop: string = '列表循环';
+  static readonly modeShuffleOnce: string = '随机不重复';
+
   /** 详情页占位 Toast（T5.5）：专辑/榜单详情页尚未落地（并入后续单子），点击先给口头的「有回应」 */
   static readonly comingSoon: string = '即将上线';
   /** 榜单卡 badge（web CoverCard `badge="榜"`） */

@@ -8,6 +8,7 @@ import { Dim } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
 import { SkeletonList } from './SkeletonList';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
 import { AppState, K_DAILY_REFRESH } from '../viewmodel/AppState';
 
 const TAG = 'SuenMusic_Daily';
@@ -200,7 +201,7 @@ export struct DailyPage {
       hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
     }
     try {
-      await MediaPlayerCore.shared().setQueue(data.tracks, index, token);
+      await MediaPlayerCore.shared().setQueue(data.tracks, index, token, '每日推荐');
     } catch (e) {
       this.err = Copy.describeError(e);
       hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
@@ -215,12 +216,11 @@ export struct DailyPage {
       } else if (this.err.length > 0 && this.data === null) {
         Column({ space: Dim.s3 }) {
           Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
-          Button('重试')
-            .height(Dim.touchMin)
-            .fontSize(Dim.fsSub)
-            .backgroundColor(Tokens.panel)
-            .fontColor(Tokens.text1)
-            .onClick(() => { this.load(); })
+          WebButton({
+            labelStr: '重试',
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => { this.load(); }
+          })
         }
         .width('100%')
         .layoutWeight(1)
@@ -244,6 +244,9 @@ export struct DailyPage {
         }
         .width('100%')
         .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
+        // 第 ⑮ 条：推荐语与曲目列表的间距（web `.daily{gap:sp-4}` = 16px），
+        // List 空间不够时间距也会被压没 —— 用 margin 保底
+        .margin({ bottom: Dim.s4 })
 
         if (this.data.tracks.length > 0) {
           List({ space: 0 }) {
@@ -252,7 +255,6 @@ export struct DailyPage {
                 TrackItem({
                   track: t,
                   index: i + 1,
-                  coverSize: Dim.s5 * 2,
                   isFav: this.favIds.indexOf(t.id) >= 0,
                   dislikeable: true,
                   onDislikeTrack: () => { this.dislikeTrack(t); },
@@ -280,12 +282,11 @@ export struct DailyPage {
           Column({ space: Dim.s3 }) {
             Text(this.data.message === undefined ? '今日歌单生成失败' : this.data.message)
               .fontSize(Dim.fsBody).fontColor(Tokens.text2)
-            Button('重试')
-              .height(Dim.touchMin)
-              .fontSize(Dim.fsSub)
-              .backgroundColor(Tokens.panel)
-              .fontColor(Tokens.text1)
-              .onClick(() => { this.load(); })
+            WebButton({
+              labelStr: '重试',
+              sizeKind: NeuBtnSize.MD,
+              onTap: () => { this.load(); }
+            })
           }
           .width('100%')
           .layoutWeight(1)

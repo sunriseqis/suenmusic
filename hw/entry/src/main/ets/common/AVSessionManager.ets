@@ -25,6 +25,7 @@ import {
   NowPlayingSnapshot,
   writeSnapshot,
   buildFormBindingObject,
+  CARD_COVER_KEY_PREFIX,
   LyricLine,
   parseLyricLines,
   activeLyricIndex
@@ -99,6 +100,12 @@ class HarmonyAVSessionManager {
   private currentPositionMs: number = 0;
   /** 封面字节是否已落盘（卡片 formImages 的前提） */
   private coverFileReady: boolean = false;
+  /**
+   * 当前封面的 formImages key（'suen_cover_<版本>'，'' = 尚无）。
+   * 官方要求刷新卡片图片必须换新 key（复用同一个 key 不重拷字节）——
+   * 每次新封面落盘生成一个，随快照走，三条推卡路径共用同一个。
+   */
+  private currentCoverKey: string = '';
   /** 最新下载的封面原始字节（写盘 + 解码共用一次下载） */
   private cachedCoverBuffer: ArrayBuffer | undefined = undefined;
   /** 卡片上次推送时的歌词活跃行（-2 = 尚未算过；行变化才推卡片） */
@@ -402,6 +409,9 @@ class HarmonyAVSessionManager {
 
     try {
       await session.setAVMetadata(metadata);
+      // 只有真正落地成功才记「已上报」——失败/会话未就绪时这里不记，
+      // 下一次同曲上报必须还能走完整链路（否则播控中心永久空白）
+      this.lastMetaAssetId = assetId;
       hilog.info(DOMAIN, TAG,
         'setAVMetadata(文本) success: seq=%{public}d, title=%{public}s, artist=%{public}s, hasLyric=%{public}s',
         seq, metadata.title || '', metadata.artist || '', metadata.lyric ? 'true' : 'false');
@@ -432,9 +442,10 @@ class HarmonyAVSessionManager {
    *
    * 封面走官方 formImages 机制（卡片 Image 不能加载网络 URL）：
    * 字节先落盘 cacheDir/card_cover.img → 每次推送前开 fd →
-   * `{'formImages': {'suen_cover_img': fd}}` 随 payload 一起送 →
-   * 卡片侧 Image('memory://suen_cover_img') 显示。fd 在 IPC 中被系统
+   * `{'formImages': {'suen_cover_<版本>': fd}}` 随 payload 一起送 →
+   * 卡片侧 Image('memory://suen_cover_<版本>') 显示。fd 在 IPC 中被系统
    * 复制，await updateForm 之后关掉自己这份是安全的。
+   * key 每次新封面换新值（NowPlayingSnapshot.coverKey），复用旧 key 不刷新。
    *
    * 失败不外抛：卡片是附加功能，不该因为它拖垮播控中心那条主链路。
    */
@@ -450,6 +461,7 @@ class HarmonyAVSessionManager {
       positionMs: this.currentPositionMs,
       durationMs: hasTrack && this.currentMetadata ? (this.currentMetadata.duration || 0) : 0,
       coverReady: hasTrack && this.coverFileReady,
+      coverKey: hasTrack && this.coverFileReady ? this.currentCoverKey : '',
       alive: true,
       updatedAt: new Date().getTime()
     };
@@ -582,6 +594,9 @@ class HarmonyAVSessionManager {
     this.coverFileReady = await this.saveCoverFile(buffer);
     if (!this.coverFileReady) {
       hilog.warn(DOMAIN, TAG, '封面落盘失败，卡片本次按无封面显示');
+    } else {
+      // 新封面换新 key：formImages 复用旧 key 时系统不重拷字节，卡片会一直显示旧图
+      this.currentCoverKey = CARD_COVER_KEY_PREFIX + Date.now();
     }
 
     // 2) 解码 PixelMap 给播控中心

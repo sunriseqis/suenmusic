@@ -14,12 +14,17 @@ import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
 import { Dim } from '../common/Dimension';
 import { EmptyState } from './EmptyState';
+import { WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
+import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
 
 @Component
 export struct QueueView {
   @StorageLink(K_QUEUE_VERSION) @Watch('onQueueChanged') queueVersion: number = 0;
   @StorageLink(K_INDEX) currentIndex: number = -1;
   @State items: Track[] = [];
+  /** 队列 sheet 形态（T10 批次 F）：显示右上关闭钮（web QueuePanel head-close） */
+  showClose: boolean = false;
+  onClose: () => void = () => {};
 
   aboutToAppear(): void {
     this.refresh();
@@ -53,9 +58,23 @@ export struct QueueView {
         Text('播放队列').fontSize(Dim.fsTitle).fontColor(Tokens.text1).fontWeight(FontWeight.Medium)
         Blank()
         Text(`${this.items.length} 首`).fontSize(Dim.fsCaption).fontColor(Tokens.text2)
+        if (this.showClose) {
+          // 第 ⑱ 条全局令：浮窗收起一律「向下收起」（chevron-down），不再是 X
+          WebIconButton({
+            iconName: WebIconName.CHEVRON_DOWN,
+            boxSize: 36,
+            glyphColor: Tokens.text2,
+            chromeKind: NeuBtnChrome.PLAIN,
+            onTap: () => {
+              this.onClose();
+            }
+          })
+            .accessibilityText('收起队列')
+            .margin({ left: Dim.s2 })
+        }
       }
       .width('100%')
-      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s2 })
+      .padding({ left: Dim.s4, right: Dim.s3, top: Dim.s3, bottom: Dim.s2 })
 
       if (this.items.length === 0) {
         // 队列空：统一空态（S4 §五）
@@ -91,16 +110,16 @@ export struct QueueView {
                 if (i === this.currentIndex) {
                   Text('播放中').fontSize(Dim.fsCaption).fontColor(Tokens.accent)
                 }
-                // 删除键：可点区域扩到 44vp（S4 §三 touchMin，原来 28vp 太小）
-                Button('删除')
-                  .height(Dim.touchMin)
-                  .fontSize(Dim.fsCaption)
-                  .backgroundColor(Tokens.panel2)
-                  .fontColor(Tokens.text2)
-                  .accessibilityText(`从队列删除 ${item.name}`)
-                  .onClick(() => {
+                // 删除键：行内危险操作（web .v-danger 同语义：透明底红字）
+                WebButton({
+                  labelStr: '删除',
+                  variantKind: NeuBtnVariant.DANGER,
+                  sizeKind: NeuBtnSize.SM,
+                  onTap: () => {
                     MediaPlayerCore.shared().removeAt(i);
-                  })
+                  }
+                })
+                  .accessibilityText(`从队列删除 ${item.name}`)
               }
               .width('100%')
               .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })

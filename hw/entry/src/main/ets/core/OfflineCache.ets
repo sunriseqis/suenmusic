@@ -1,19 +1,17 @@
 /**
- * 鸿蒙端离线缓存（S2 第一版：整首下载 + LRU 配额）。
+ * 鸿蒙端离线缓存（T10 收官第 ⑩ 条重造：流式下载 + LRU 配额）。
  *
  * 官方硬约束（docs/memory/2026-10-21-六端重审修复与死码清理.md §7.4）：
  *   · 必须落 **filesDir** —— `cacheDir` 会被系统按配额自动清理，音频缓存放那里会"莫名消失"；
- *   · `http.request` 单次响应默认 5MB（API 23 起 50MB），整首歌必须走下载任务而不是普通请求；
- *   · 用 `request.agent` 做下载（官方就是给它设计的），完成事件里再登记为"可离线播放"。
+ *   · `http.request` 单次响应默认 5MB（API 23 起 50MB），整首歌不能走普通请求。
  *
- * 断点续传（`FileSpec.begins/ends` → HTTP Range）留在 S2.1：那需要精确的 API 形状，
- * 这一版先保证"完整下载过的歌能离线播"这条命脉，不做半成品续传。
- *
- * SysCap 提示（build 的 request WARN，源自 `request.agent.create`）：
- * deviceTypes 仅 phone/tablet，SystemCapability.Request.FileDownloadAgent 在这些设备上必然具备，不做降级。
+ * 下载通道（2026-10-23 验收第 10 条裁定）：**后台静默下载、用户无需管理、零系统通知**。
+ * 原 `request.agent` 通道会强制弹系统下载通知、且无法关闭 —— 改 `http.requestInStream`
+ * 流式分块写盘：`dataReceive` 边收边写 `.part` 临时文件，`dataEnd` 后校验、改名、登记。
+ * 缓存页只留用量 + 清空，不做逐条管理（设计意图见 CachePage）。
  */
 
-import { request } from '@kit.BasicServicesKit';
+import { http } from '@kit.NetworkKit';
 import { fileIo } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
@@ -300,40 +298,108 @@ export class OfflineCache {
   }
 
   /**
-   * 确保这首歌在缓存里。**不阻塞播放**：起个下载任务就返回，
+   * 确保这首歌在缓存里。**不阻塞播放**：起个流式下载就返回，
    * 播放在线流的同时把字节落到 filesDir，下完登记为可离线。
-   * `name`/`artist` 供缓存面板显示（下载完成时落旁挂 `.meta`）。
+   * `name`/`artist` 供缓存页统计旁挂（下载完成时落 `.meta`）。
+   *
+   * `http.requestInStream` 通道（第 ⑩ 条）：无系统通知、后台静默；
+   * 分块写到 `<id>.bin.part`，流结束校验非残片后改名登记。
    */
   ensureDownload(trackId: string, streamUrl: string, name: string, artist: string): void {
     if (!this.ready || this.isCached(trackId) || this.downloading.has(trackId)) { return; }
     this.downloading.add(trackId);
     const target = this.pathOf(trackId);
+    const tmp = target + '.part';
 
     (async () => {
-      try {
-        const ctx = this.ctx;
-        if (ctx === null) { return; }
-        const task = await request.agent.create(ctx, {
-          action: request.agent.Action.DOWNLOAD,
-          url: streamUrl,
-          overwrite: true,
-          saveas: target
-        });
-        task.on('completed', () => {
-          this.downloading.delete(trackId);
-          this.complete.set(trackId, target);
-          this.writeMeta(trackId, name, artist);
-          hilog.info(DOMAIN, TAG, '缓存完成 %{public}s', trackId);
-          this.enforceQuota();
-        });
-        task.on('failed', (progress: object) => {
-          this.downloading.delete(trackId);
-          hilog.warn(DOMAIN, TAG, '缓存失败 %{public}s: %{public}s', trackId, JSON.stringify(progress));
-        });
-        await task.start();
-      } catch (e) {
+      const session = http.createHttp();
+      let file: fileIo.File | null = null;
+      let settled = false;
+      const cleanup = (): void => {
+        try {
+          session.destroy();
+        } catch (e) {
+          // 会话已释放无须处理
+        }
+        if (file !== null) {
+          try {
+            fileIo.closeSync(file);
+          } catch (e) {
+            // fd 已关无须处理
+          }
+          file = null;
+        }
+      };
+      const settle = (ok: boolean): void => {
+        if (settled) { return; }
+        settled = true;
         this.downloading.delete(trackId);
-        hilog.error(DOMAIN, TAG, '起下载任务失败: %{public}s', JSON.stringify(e));
+        cleanup();
+        if (!ok) {
+          try {
+            if (fileIo.accessSync(tmp)) {
+              fileIo.unlinkSync(tmp);
+            }
+          } catch (e) {
+            // 残片清理失败不影响主流程
+          }
+          hilog.warn(DOMAIN, TAG, '缓存下载失败 %{public}s', trackId);
+          return;
+        }
+        try {
+          fileIo.renameSync(tmp, target);
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, '缓存改名失败 %{public}s: %{public}s', trackId, JSON.stringify(e));
+          try {
+            if (fileIo.accessSync(tmp)) {
+              fileIo.unlinkSync(tmp);
+            }
+          } catch (err) {
+            // ignore
+          }
+          return;
+        }
+        this.complete.set(trackId, target);
+        this.writeMeta(trackId, name, artist);
+        hilog.info(DOMAIN, TAG, '缓存完成 %{public}s', trackId);
+        this.enforceQuota();
+      };
+      try {
+        try {
+          if (fileIo.accessSync(tmp)) {
+            fileIo.unlinkSync(tmp);
+          }
+        } catch (e) {
+          // 旧残片清不掉不致命，继续写
+        }
+        file = fileIo.openSync(tmp,
+          fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        session.on('dataReceive', (chunk: ArrayBuffer) => {
+          if (file !== null) {
+            fileIo.writeSync(file.fd, chunk);
+          }
+        });
+        session.on('dataEnd', () => {
+          // 流结束：小于 32KB 的一律当残片（一首歌不可能这么小，scan 同口径）
+          let sizeOk = false;
+          try {
+            sizeOk = fileIo.statSync(tmp).size > 32 * 1024;
+          } catch (e) {
+            sizeOk = false;
+          }
+          settle(sizeOk);
+        });
+        // requestInStream 的 Promise 解析值 = HTTP 状态码（number），不是 HttpResponse
+        const code: number = await session.requestInStream(streamUrl, {
+          method: http.RequestMethod.GET,
+          connectTimeout: 15000,
+          readTimeout: 60000
+        });
+        if (code !== 200) {
+          settle(false);
+        }
+      } catch (e) {
+        settle(false);
       }
     })();
   }

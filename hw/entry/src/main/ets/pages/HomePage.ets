@@ -9,6 +9,8 @@ import { Dim, Motion } from '../common/Dimension';
 import { TrackItem } from './TrackItem';
 import { TrackRow, TrackRowSource } from '../common/TrackSources';
 import { SkeletonList } from './SkeletonList';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
+import { openCollection } from '../common/CollectionNav';
 
 /** 新歌列表实际展示行数（web 移动端 `slice(0, 8)`；点击任意一首 = 全量 newSongs 进队列） */
 const NEW_SONG_ROWS = 8;
@@ -208,22 +210,10 @@ export struct HomePage {
     if (index < 0) { return; }
     const token = await this.acquireToken();
     try {
-      await MediaPlayerCore.shared().setQueue(songs, index, token);
+      await MediaPlayerCore.shared().setQueue(songs, index, token, '首页');
     } catch (e) {
       this.err = Copy.describeError(e);
       hilog.error(0x0000, 'HomePage', 'setQueue 失败: %{public}s', JSON.stringify(e));
-    }
-  }
-
-  /** 专辑/榜单详情页未落地（后续单子）：点击先给「有回应」的占位 Toast */
-  private toastComingSoon(): void {
-    try {
-      this.getUIContext().getPromptAction().showToast({
-        message: Copy.comingSoon,
-        duration: 2000
-      });
-    } catch (toastErr) {
-      hilog.warn(0x0000, 'HomePage', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));
     }
   }
 
@@ -305,7 +295,7 @@ export struct HomePage {
     .border({ width: Dim.hairline, color: Tokens.line })
     .clip(true)
     .margin({ left: Dim.s2, right: Dim.s2, bottom: Dim.s5 })
-    .onClick(() => { this.toastComingSoon(); })
+    .onClick(() => { openCollection('album', a.id, a.name); })
   }
 
   /**
@@ -347,7 +337,7 @@ export struct HomePage {
     }
     .layoutWeight(1)
     .alignItems(HorizontalAlign.Start)
-    .onClick(() => { this.toastComingSoon(); })
+    .onClick(() => { openCollection('toplist', t.id, t.name); })
   }
 
   build() {
@@ -358,12 +348,11 @@ export struct HomePage {
       } else if (this.err.length > 0 && this.home === null) {
         Column({ space: Dim.s3 }) {
           Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
-          Button('重试')
-            .height(Dim.touchMin)
-            .fontSize(Dim.fsSub)
-            .backgroundColor(Tokens.panel)
-            .fontColor(Tokens.text1)
-            .onClick(() => { this.load(); })
+          WebButton({
+            labelStr: '重试',
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => { this.load(); }
+          })
         }.width('100%').margin({ top: Dim.s5 })
       } else if (this.home !== null) {
         // 下拉刷新（S4 §10.3）：阻尼以 Refresh 默认手感为准，轻拉即刷、刷完即收
@@ -433,6 +422,7 @@ export struct HomePage {
                     track: row.track,
                     index: row.no,
                     isFav: row.fav,
+                    showDur: true,
                     onSwipeToggle: () => this.toggleFav(row.track),
                     onTap: () => { this.playAt(row.track.id); }
                   })

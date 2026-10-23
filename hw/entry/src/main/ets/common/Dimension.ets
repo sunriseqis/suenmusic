@@ -34,6 +34,8 @@ export class Dim {
   static readonly fsSection = 16;
   static readonly fsHeadline = 18;
   static readonly fsDisplay = 20;
+  /** 播放页曲名（web FullPlayer `.t-name` 24px，T10 批次 F） */
+  static readonly fsHero = 24;
   static readonly fsBrand = 28;
 
   // ---- 行高 / 可点区域（vp） ----
@@ -58,8 +60,15 @@ export class Dim {
   static readonly btnMd = 36;
   static readonly btnBar = 40;
   static readonly btnPlayW = 96;
+  /** 播放页主播放键圆形直径（web FullPlayer `.play-btn` 64px，T10 批次 F） */
+  static readonly btnPlayCircle = 64;
+  /** 播放页环境光晕模糊半径（web `.ambient` blur 60px，T10 批次 F） */
+  static readonly glowBlur = 60;
+  /** 播放页歌词 peek 区最小高（web `.lyric-wrap` min-height 58px，T10 批次 F） */
+  static readonly peekH = 58;
   static readonly inputH = 40;
-  static readonly seqW = 24;
+  /** 序号列宽（web 移动端 .idx 26px） */
+  static readonly seqW = 26;
   /** 两级不喜欢浮层宽（web dislike-popover 210px） */
   static readonly popW = 210;
   /** 迷你条底部内嵌进度条高（web mini-progress 2px） */

@@ -54,6 +54,41 @@ function walk(dir, out = []) {
  * 只剥注释，**保留字符串内容**（路径、颜色、API 名字面量都在字符串里，
  * 全剥掉会让相关规则变成永远不触发的死规则 —— 首版就踩过，险些假绿）。
  */
+/**
+ * 判断 src[i]（==='/'，且不是 // 与 /*）是否为正则字面量的起点。
+ * 经典启发式：看前一个有效字符 —— 出现在「(,=:[!&|?{}; 运算符」或
+ * return/typeof 等关键字之后的是正则；出现在标识符/`)` 之后的是除法。
+ * 不识别正则的后果（实测，批次C 起误报）：/["“”'‘’]/g 字符类里的引号被
+ * 当成字符串起点，扫描器吞掉后面的代码，括号平衡规则成片误报。
+ */
+function isRegexStart(src, i) {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(src[j])) j--;
+  if (j < 0) return true;
+  const prev = src[j];
+  if ('(,=:[!&|?{};+-*%~^<>'.includes(prev)) return true;
+  const tail = src.slice(Math.max(0, j - 6), j + 1);
+  if (/(return|typeof|case|delete|void|instanceof|in|of|do|else|new)$/.test(tail)) return true;
+  return false;
+}
+
+/** 整段跳过一个正则字面量（保留原文：量词里的 {2,3} 本就成对，不影响平衡计数） */
+function skipRegex(src, i, out) {
+  out += src[i]; i++; // 起始 '/'
+  let inClass = false;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === '\\') { out += ch; if (i + 1 < src.length) out += src[i + 1]; i += 2; continue; }
+    if (ch === '\n') { out += '\n'; i++; break; } // 正则不跨行：防御性退出，避免吞整文件
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) { out += ch; i++; break; }
+    out += ch; i++;
+  }
+  while (i < src.length && /[a-z]/i.test(src[i])) { out += src[i]; i++; } // flags
+  return i;
+}
+
 function stripComments(src) {
   let out = '';
   let i = 0;
@@ -66,6 +101,7 @@ function stripComments(src) {
       while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) { if (src[i] === '\n') out += '\n'; i++; }
       i += 2; continue;
     }
+    if (c === '/' && isRegexStart(src, i)) { i = skipRegex(src, i, out); continue; }
     if (c === "'" || c === '"' || c === '`') {
       const q = c; out += q; i++;
       while (i < src.length && src[i] !== q) {
@@ -86,6 +122,7 @@ function strip(src) {
   let i = 0;
   while (i < noComments.length) {
     const c = noComments[i];
+    if (c === '/' && isRegexStart(noComments, i)) { i = skipRegex(noComments, i, out); continue; }
     if (c === "'" || c === '"' || c === '`') {
       const q = c; out += q; i++;
       while (i < noComments.length && noComments[i] !== q) {

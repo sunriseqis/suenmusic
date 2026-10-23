@@ -15,7 +15,11 @@ import { SettingsPage } from './SettingsPage';
 import { PlayerPage } from './PlayerPage';
 import { ServerListPage } from './ServerListPage';
 import { CachePage } from './CachePage';
-import { AppState, K_LOGGED_IN, K_FAV_REV } from '../viewmodel/AppState';
+import { CollectionPage } from './CollectionPage';
+import {
+  K_COLLECTION_REQ, K_COLLECTION_DEPTH, K_COLLECTION_BACK
+} from '../common/CollectionNav';
+import { AppState, K_LOGGED_IN, K_BOOTSTRAP_DONE, K_FAV_REV, K_FAV_KEYWORD, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import {
   MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_HAS_TRACK, K_POS, K_DUR, K_TRACKID
 } from '../core/MediaPlayerCore';
@@ -26,6 +30,7 @@ import { applyPendingCardControl } from '../common/PlayerControlHub';
 import { common } from '@kit.AbilityKit';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
+import { WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
 
 /** 迷你条滑动切歌阈值（web SWIPE_TH = 60px） */
 const MINI_SWIPE_TH = 60;
@@ -33,11 +38,15 @@ const MINI_SWIPE_TH = 60;
 const MINI_DRAG_CLAMP = 80;
 /** 手势结束后吞掉合成 click 的时间窗（TrackItem CLICK_GUARD_MS 同款保险） */
 const MINI_CLICK_GUARD_MS = 350;
+/** 启动占位图标边长（vp） */
+const SPLASH_ICON_SIZE = 80;
 
 @Entry
 @Component
 struct NativeRoot {
   @StorageLink(K_LOGGED_IN) loggedIn: boolean = false;
+  // bootstrap（恢复登录态）完成前显示启动占位：冷启动不再先画一帧登录页再翻转
+  @StorageLink(K_BOOTSTRAP_DONE) bootstrapDone: boolean = false;
   @StorageLink(K_HAS_TRACK) hasTrack: boolean = false;
   @StorageLink(K_TITLE) title: string = '';
   @StorageLink(K_ARTIST) artist: string = '';
@@ -53,8 +62,18 @@ struct NativeRoot {
   @State showPlayer: boolean = false;
   @State showServers: boolean = false;
   @State showCache: boolean = false;
+  // 集合详情浮层（T10 批次 D）：任意页 openCollection() 写信号，这里监听拉起
+  @State showCollection: boolean = false;
+  @State collKind: string = 'album';
+  @State collId: string = '';
+  @State collName: string = '';
+  @StorageProp(K_COLLECTION_REQ) @Watch('onCollectionReq') collReq: number = 0;
   // ⚠️ 不能叫 `tabIndex`：ArkUI 的 Tabs 有同名属性修饰符，重名会报类型冲突
   @State currentTab: number = 0;
+  /** Tab 栏导轨实测宽（滑块定位用，onAreaChange 回填；第 ⑭ 条滑块层） */
+  @State barW: number = 0;
+  /** 按压中的 tab 下标（按压下沉反馈；-1 = 无） */
+  @State pressedTab: number = -1;
   /** 迷你条拖拽实时位移（钳制 ±80，web miniDragX） */
   @State miniDragX: number = 0;
   // 窗口全屏布局（EntryAbility setWindowLayoutFullScreen）后系统避让区实时值：
@@ -167,10 +186,40 @@ struct NativeRoot {
     }
   }
 
-  /** 返回手势/返回键：先关最上层浮层，全关了才交给系统 */
+  /** 收到打开集合详情的信号：读参数并拉起浮层（重复打开同一目标也刷新） */
+  private onCollectionReq(): void {
+    const kind = AppStorage.get<string>('collection_kind');
+    const id = AppStorage.get<string>('collection_id');
+    const name = AppStorage.get<string>('collection_name');
+    if (kind === undefined || id === undefined || name === undefined) { return; }
+    this.collKind = kind;
+    this.collId = id;
+    this.collName = name;
+    this.showCollection = true;
+  }
+
+  /** 返回手势/返回键：按视觉层级从顶往下关（播放页内部浮层 > 播放页 > 集合 > 服务端 > 缓存），全关了才交给系统 */
   onBackPress(): boolean {
     if (this.showPlayer) {
+      // 播放页内部浮层（dislike/more/queue/lyrics，T10 批次 F web FullPlayer 返回层级）：
+      // 返回第一下关最上层浮层，全关了才轮到关播放页
+      const layer = AppStorage.get<string>(K_PLAYER_SHEET);
+      if (layer !== undefined && layer !== 'none') {
+        AppStorage.setOrCreate(K_PLAYER_SHEET, 'none');
+        return true;
+      }
       this.showPlayer = false;
+      return true;
+    }
+    if (this.showCollection) {
+      // 集合浮层有内部栈：深度 > 1 先弹内层（信号转发给 CollectionPage），否则整层关闭
+      const d = AppStorage.get<number>(K_COLLECTION_DEPTH);
+      if (d !== undefined && d > 1) {
+        const b = AppStorage.get<number>(K_COLLECTION_BACK);
+        AppStorage.setOrCreate(K_COLLECTION_BACK, b === undefined ? 1 : b + 1);
+      } else {
+        this.showCollection = false;
+      }
       return true;
     }
     if (this.showServers) {
@@ -181,49 +230,92 @@ struct NativeRoot {
       this.showCache = false;
       return true;
     }
+    // 收藏 Tab：先退出收藏内搜索的筛选态，而不是退出应用（web Favorites.vue
+    // registerBackHandler：页面内临时状态没有自己的路由，返回第一下天然应该清掉）
+    if (this.currentTab === 2) {
+      const kw = AppStorage.get<string>(K_FAV_KEYWORD);
+      if (kw !== undefined && kw.length > 0) {
+        AppStorage.setOrCreate(K_FAV_KEYWORD, '');
+        return true;
+      }
+    }
     return false;
   }
 
-  // ---------------- 底部 Tab 栏（web MobileShell.vue .tabbar：凹槽导轨 + 纯文字标签） ----------------
+  // ---------------- 底部 Tab 栏（web MobileShell.vue .tabbar：凹槽导轨 + 活动滑块） ----------------
 
-  /** 单个 Tab：44 触摸高、active = panel2 底色 + 顶沿内高光 + t1 文字 + 琥珀短指示条 */
+  /** 单个 Tab 格子：纯文字层（背景/描边/指示条全部抽到滑块层，第 ⑭ 条） */
   @Builder
-  tabItem(label: string, idx: number) {
+  tabCell(label: string, idx: number) {
     Column() {
       Text(label)
         .fontSize(Dim.fsMinor)
         .fontWeight(this.currentTab === idx ? FontWeight.Medium : FontWeight.Normal)
         .fontColor(this.currentTab === idx ? Tokens.text1 : Tokens.text2)
-      // active 琥珀指示条（web .tab.active::after 12×2）；非 active 保留占位，文字位置稳定
-      Row()
-        .width(Dim.tabIndicatorW)
-        .height(Dim.tabIndicatorH)
-        .backgroundColor(this.currentTab === idx ? Tokens.accent : Color.Transparent)
-        .margin({ top: Dim.s2, bottom: Dim.s1 })
+        // web `.tab{padding:0 0 8px}`：文字上移，给滑块底部的琥珀指示条让位
+        .margin({ bottom: Dim.s2 })
     }
     .layoutWeight(1)
     .height(Dim.touchMin)
     .justifyContent(FlexAlign.Center)
-    .borderRadius(Dim.radiusTab)
-    .backgroundColor(this.currentTab === idx ? Tokens.panel2 : Color.Transparent)
-    .border(this.currentTab === idx
-      ? { width: { top: Dim.hairline }, color: { top: Tokens.hi } }
-      : { width: 0 })
+    // 按压下沉（第 ⑭ 条机械反馈，与 web NeuIconButton :active translateY(1) 同语言）
+    .translate({ y: this.pressedTab === idx ? 1 : 0 })
     .accessibilityText(label)
+    .accessibilityLevel(this.currentTab === idx ? 'yes' : 'no')
     .onClick(() => {
-      this.currentTab = idx;
+      // 切 tab = 路由导航（web 点 tabbar 换路由）：先收掉所有详情浮层再切页。
+      // 滑块平移 + 文字变色都收进 animateTo（第 ⑭ 条：原先是硬切，零过渡）
+      this.showCollection = false;
+      this.showServers = false;
+      this.showCache = false;
+      this.getUIContext().animateTo({ duration: Motion.fast, curve: Motion.curve }, () => {
+        this.currentTab = idx;
+      });
+    })
+    .onTouch((e: TouchEvent) => {
+      if (e.type === TouchType.Down) {
+        this.pressedTab = idx;
+      } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+        this.pressedTab = -1;
+      }
     })
   }
 
-  /** Tab 栏容器：整条是凹槽导轨（bg 底 + 发丝线描边 + 大圆角；web 内阴影无等价物，以描边近似） */
+  /**
+   * 活动滑块（第 ⑭ 条）：panel2 底 + 顶沿内高光 + 底部琥珀指示条 12×2，
+   * 独立层随 currentTab 平移（animateTo 驱动），不占格子文档流。
+   */
+  @Builder
+  tabSlider() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Row()
+        .width(Dim.tabIndicatorW)
+        .height(Dim.tabIndicatorH)
+        .backgroundColor(Tokens.accent)
+        .margin({ bottom: Dim.s1 })
+    }
+    .width(this.tabSliderW())
+    .height(Dim.touchMin)
+    .borderRadius(Dim.radiusTab)
+    .backgroundColor(Tokens.panel2)
+    .border({ width: { top: Dim.hairline }, color: { top: Tokens.hi } })
+    .translate({ x: this.tabSliderX() })
+  }
+
+  /** Tab 栏容器：整条凹槽导轨（bg 底 + 发丝线描边 + 大圆角），滑块垫底、格子层在上 */
   @Builder
   tabBar() {
-    Row({ space: Dim.s1 }) {
-      this.tabItem('发现', 0)
-      this.tabItem('专属', 1)
-      this.tabItem('收藏', 2)
-      this.tabItem('搜索', 3)
-      this.tabItem('设置', 4)
+    Stack({ alignContent: Alignment.Start }) {
+      this.tabSlider()
+      Row({ space: Dim.s1 }) {
+        this.tabCell('发现', 0)
+        this.tabCell('专属', 1)
+        this.tabCell('收藏', 2)
+        this.tabCell('搜索', 3)
+        this.tabCell('设置', 4)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
     .padding(Dim.s1)
@@ -231,6 +323,24 @@ struct NativeRoot {
     .borderRadius(Dim.radiusMd)
     .backgroundColor(Tokens.bg)
     .border({ width: Dim.hairline, color: Tokens.line })
+    .onAreaChange((_old: Area, area: Area) => {
+      // area.width 是 Length（string|number|Resource），实测布局宽必为 vp 数值，typeof 收窄
+      const w: Length = area.width;
+      if (typeof w === 'number') {
+        this.barW = w;
+      }
+    })
+  }
+
+  /** 滑块宽：导轨内容区五等分（内容区 = 实测宽 - 两侧 padding - 4 个 gap） */
+  private tabSliderW(): number {
+    if (this.barW <= 0) { return 0; }
+    return (this.barW - 6 * Dim.s1) / 5;
+  }
+
+  /** 滑块 x：内容区起点 + 当前下标 × (滑块宽 + gap) */
+  private tabSliderX(): number {
+    return this.currentTab * (this.tabSliderW() + Dim.s1);
   }
 
   // ---------------- 迷你播放条（web PlayerBar.vue compact 形态逐元素对齐） ----------------
@@ -272,37 +382,25 @@ struct NativeRoot {
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
 
-        // 红心（web mini-action heart，fav-on 点亮 accent）
-        Row() {
-          SymbolGlyph(this.barFav ? $r('sys.symbol.heart_fill') : $r('sys.symbol.heart'))
-            .fontSize(Dim.iconSm)
-            .fontColor([this.barFav ? Tokens.accent : Tokens.text2])
-        }
-        .width(Dim.btnSm)
-        .height(Dim.btnSm)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .borderRadius(Dim.radiusPill)
-        .border({ width: Dim.hairline, color: Tokens.line })
-        .backgroundColor(Tokens.panel)
-        .accessibilityText(this.barFav ? '取消收藏' : '收藏')
-        .onClick(() => { this.toggleBarFav(); })
+        // 红心（web mini-action heart，fav-on 点亮 accent；第 ③ 条 web 自绘图标配 chrome 键）
+        WebIconButton({
+          iconName: this.barFav ? WebIconName.HEART_FILLED : WebIconName.HEART,
+          boxSize: 28,
+          glyphColor: this.barFav ? Tokens.accent : Tokens.text2,
+          chromeKind: NeuBtnChrome.CHROME,
+          onTap: () => { this.toggleBarFav(); }
+        })
+          .accessibilityText(this.barFav ? '取消收藏' : '收藏')
 
-        // 播放/暂停图标键（web：播放键必须留在条上，滑动切歌不可发现）
-        Row() {
-          SymbolGlyph(this.playing ? $r('sys.symbol.pause') : $r('sys.symbol.play_fill'))
-            .fontSize(Dim.iconMd)
-            .fontColor([Tokens.text1])
-        }
-        .width(Dim.btnMd)
-        .height(Dim.btnMd)
-        .justifyContent(FlexAlign.Center)
-        .alignItems(VerticalAlign.Center)
-        .borderRadius(Dim.radiusPill)
-        .border({ width: Dim.hairline, color: Tokens.line })
-        .backgroundColor(Tokens.panel)
-        .accessibilityText(this.playing ? '暂停' : '播放')
-        .onClick(() => { MediaPlayerCore.shared().toggle(); })
+        // 播放/暂停图标键（web：播放键必须留在条上，滑动切歌不可发现；第 ③ 条）
+        WebIconButton({
+          iconName: this.playing ? WebIconName.PAUSE : WebIconName.PLAY,
+          boxSize: 36,
+          glyphColor: Tokens.text1,
+          chromeKind: NeuBtnChrome.CHROME,
+          onTap: () => { MediaPlayerCore.shared().toggle(); }
+        })
+          .accessibilityText(this.playing ? '暂停' : '播放')
       }
       .width('100%')
       .padding({ left: Dim.s3, right: Dim.s3, top: Dim.s2, bottom: Dim.s2 })
@@ -360,34 +458,102 @@ struct NativeRoot {
 
   build() {
     Stack() {
-      if (!this.loggedIn) {
+      if (!this.bootstrapDone) {
+        // 启动占位：中性底色 + 居中应用图标，bootstrap 恢复登录态期间不闪登录页
+        Column() {
+          Image($r('app.media.app_icon'))
+            .width(SPLASH_ICON_SIZE)
+            .height(SPLASH_ICON_SIZE)
+            .borderRadius(Dim.radiusLg)
+        }
+        .width('100%')
+        .height('100%')
+        .justifyContent(FlexAlign.Center)
+        .alignItems(HorizontalAlign.Center)
+      } else if (!this.loggedIn) {
         LoginPage()
       } else {
         Column() {
-          // barHeight(0)：系统 tabBar 整条隐藏，改用下方自建 tabBar（web .tabbar 对齐）；
-          // scrollable(false)：禁用 Tabs 自带横滑切页，避免抢走列表行右滑收藏手势
-          Tabs({ index: this.currentTab, barPosition: BarPosition.End }) {
-            TabContent() { HomePage() }
-            TabContent() { DailyPage() }
-            TabContent() { FavoritesPage() }
-            TabContent() { SearchPage() }
-            TabContent() {
-              SettingsPage({
-                onOpenServers: (): void => { this.showServers = true; },
-                onOpenCache: (): void => { this.showCache = true; }
-              })
+          // 内容层 + 浮层层收进内层 Stack（T10 批次 D 反馈2）：
+          // 迷你条与 Tab 栏是壳件（web MobileShell .mini-dock fixed / .tabbar 网格行），
+          // 必须永远盖在详情浮层之上 —— 浮层只允许占据 dock 以上的内容区。
+          Stack() {
+            // barHeight(0)：系统 tabBar 整条隐藏，改用下方自建 tabBar（web .tabbar 对齐）；
+            // scrollable(false)：禁用 Tabs 自带横滑切页，避免抢走列表行右滑收藏手势
+            Tabs({ index: this.currentTab, barPosition: BarPosition.End }) {
+              TabContent() { HomePage() }
+              TabContent() { DailyPage() }
+              TabContent() { FavoritesPage() }
+              TabContent() { SearchPage() }
+              TabContent() {
+                SettingsPage({
+                  onOpenServers: (): void => { this.showServers = true; },
+                  onOpenCache: (): void => { this.showCache = true; }
+                })
+              }
+            }
+            .barHeight(0)
+            .onChange((i: number) => {
+              this.currentTab = i;
+            })
+            // 页面零动效：切 tab 无滑动无渐变（web 移动端同口径）
+            .animationDuration(0)
+            .scrollable(false)
+            .width('100%')
+            .height('100%')
+
+            // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板不关浮层（避免误触丢输入/状态）
+            if (this.showServers || this.showCache || this.showCollection) {
+              Column()
+                .width('100%')
+                .height('100%')
+                .backgroundColor(Tokens.scrim)
+                .transition(TransitionEffect.OPACITY
+                  .animation({ duration: Motion.standard, curve: Motion.curve }))
+                .onClick(() => {})
+            }
+
+            // 服务端管理 / 缓存面板 / 集合详情：底部上滑转场（S4 §二，200ms EaseOut），
+            // 只占内容区（dock 之上），不再遮挡迷你条与 Tab 栏
+            if (this.showServers) {
+              Column() {
+                ServerListPage({ onClose: () => { this.showServers = false; } })
+              }
+              .width('100%')
+              .height('100%')
+              .transition(TransitionEffect.translate({ y: '100%' })
+                .animation({ duration: Motion.standard, curve: Motion.curve }))
+            }
+
+            if (this.showCache) {
+              Column() {
+                CachePage({ onClose: () => { this.showCache = false; } })
+              }
+              .width('100%')
+              .height('100%')
+              .transition(TransitionEffect.translate({ y: '100%' })
+                .animation({ duration: Motion.standard, curve: Motion.curve }))
+            }
+
+            if (this.showCollection) {
+              Column() {
+                CollectionPage({
+                  kind: this.collKind,
+                  entryId: this.collId,
+                  name: this.collName,
+                  onClose: () => { this.showCollection = false; }
+                })
+              }
+              .width('100%')
+              .height('100%')
+              .transition(TransitionEffect.translate({ y: '100%' })
+                .animation({ duration: Motion.standard, curve: Motion.curve }))
             }
           }
-          .barHeight(0)
-          .onChange((i: number) => {
-            this.currentTab = i;
-          })
-          // 页面零动效：切 tab 无滑动无渐变（web 移动端同口径）
-          .animationDuration(0)
-          .scrollable(false)
           .layoutWeight(1)
 
-          // 底部 dock（web MobileShell：迷你条叠于 Tab 栏上方；此处为流内堆叠，见回执偏离记录）
+          // 底部 dock（web MobileShell：迷你条浮于 Tab 栏上方；流内置底，
+          // 因浮层已收进内层 Stack，dock 天然置顶于所有详情页）
           if (this.hasTrack) {
             Row() { this.playerBar() }
               .width('100%')
@@ -402,40 +568,21 @@ struct NativeRoot {
         })
       }
 
-      // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板不关浮层（避免误触丢输入/状态）
-      if (this.showPlayer || this.showServers || this.showCache) {
+      // 播放页专属背板：播放页是全屏浮层（盖住 dock，web FullPlayer 同口径），背板也全屏
+      if (this.showPlayer) {
         Column()
           .width('100%')
           .height('100%')
           .backgroundColor(Tokens.scrim)
-          .transition(TransitionEffect.OPACITY.animation({ duration: Motion.standard, curve: Motion.curve }))
+          .transition(TransitionEffect.OPACITY
+            .animation({ duration: Motion.standard, curve: Motion.curve }))
           .onClick(() => {})
       }
 
-      // 播放页 / 服务端管理 / 缓存面板：底部上滑转场（S4 §二，200ms EaseOut）
+      // 全屏播放页：唯一允许盖住迷你条与 Tab 栏的浮层
       if (this.showPlayer) {
         Column() {
           PlayerPage({ onClose: () => { this.showPlayer = false; } })
-        }
-        .width('100%')
-        .height('100%')
-        .transition(TransitionEffect.translate({ y: '100%' })
-          .animation({ duration: Motion.standard, curve: Motion.curve }))
-      }
-
-      if (this.showServers) {
-        Column() {
-          ServerListPage({ onClose: () => { this.showServers = false; } })
-        }
-        .width('100%')
-        .height('100%')
-        .transition(TransitionEffect.translate({ y: '100%' })
-          .animation({ duration: Motion.standard, curve: Motion.curve }))
-      }
-
-      if (this.showCache) {
-        Column() {
-          CachePage({ onClose: () => { this.showCache = false; } })
         }
         .width('100%')
         .height('100%')

@@ -1,7 +1,8 @@
-import { Track, artistLine } from '../core/Models';
+import { Track, artistLine, formatDuration } from '../core/Models';
 import { K_TRACKID } from '../core/MediaPlayerCore';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
+import { WebIcon, WebIconName } from '../common/WebIcons';
 
 // ---------------------------------------------------------------------------
 // 移动端右滑：收藏 / 取消收藏（§一点六，与 web TrackRow.vue 逐一对齐，单位 vp≈web CSS px）
@@ -27,6 +28,68 @@ const SWIPE_ANIM_MS = Motion.standard;
 /** 手势结束后吞掉合成 click 的时间窗（手势仲裁之外再加一道保险，防误切歌） */
 const CLICK_GUARD_MS = 350;
 
+// ---------------------------------------------------------------------------
+// 在播指示三竖条（web TrackRow .bars：高 60%/100%/45% × 容器 14px，
+// bounce 1s 无限循环、相位差 0/160/320ms）。循环指示灯不受 S4 §二 300ms
+// 过渡禁令约束（那是针对转场动效；这里是不间断的播放状态灯）。
+// ---------------------------------------------------------------------------
+const BOUNCE_MS = 1000;
+const BAR_BOX = 14;
+const BAR_H_TALL = 14;
+const BAR_H_MID = 8;
+const BAR_H_SHORT = 6;
+const BAR_DELAY_MID = 160;
+const BAR_DELAY_SHORT = 320;
+/** web @keyframes bounce：scaleY 0.5 ↔ 1 */
+const SCALE_LOW = 0.5;
+const SCALE_HIGH = 1;
+/** 在播行琥珀薄染浓度（web color-mix(accent 7%, panel)） */
+const CUR_TINT = 0.07;
+/** 行尾时长列宽（web 移动端 .dur 46px） */
+const DUR_W = 46;
+/** 行尾「不喜欢」双钮图标尺寸（web 移动端 NeuIcon dislike-* 16px） */
+const DISLIKE_ICON = 16;
+
+/**
+ * 在播三竖条（web TrackRow .bars）：序号列的播放指示灯。
+ * 三根条各跑一段无限 alternate 动画（相位差 0/160/320ms），组件销毁自动停。
+ */
+@Component
+struct PlayingBars {
+  @State sLeft: number = SCALE_LOW;
+  @State sCenter: number = SCALE_LOW;
+  @State sRight: number = SCALE_LOW;
+  private started: boolean = false;
+
+  private startBars(): void {
+    if (this.started) { return; }
+    this.started = true;
+    this.getUIContext().animateTo(
+      { duration: BOUNCE_MS, curve: Motion.curve, iterations: -1, playMode: PlayMode.Alternate },
+      () => { this.sLeft = SCALE_HIGH; });
+    this.getUIContext().animateTo(
+      { duration: BOUNCE_MS, curve: Motion.curve, iterations: -1, playMode: PlayMode.Alternate, delay: BAR_DELAY_MID },
+      () => { this.sCenter = SCALE_HIGH; });
+    this.getUIContext().animateTo(
+      { duration: BOUNCE_MS, curve: Motion.curve, iterations: -1, playMode: PlayMode.Alternate, delay: BAR_DELAY_SHORT },
+      () => { this.sRight = SCALE_HIGH; });
+  }
+
+  build() {
+    Row({ space: Dim.s0 }) {
+      Column().width(Dim.s0).height(BAR_H_MID).borderRadius(Dim.hairline).backgroundColor(Tokens.accent)
+        .scale({ x: 1, y: this.sLeft, centerX: '50%', centerY: '100%' })
+      Column().width(Dim.s0).height(BAR_H_TALL).borderRadius(Dim.hairline).backgroundColor(Tokens.accent)
+        .scale({ x: 1, y: this.sCenter, centerX: '50%', centerY: '100%' })
+      Column().width(Dim.s0).height(BAR_H_SHORT).borderRadius(Dim.hairline).backgroundColor(Tokens.accent)
+        .scale({ x: 1, y: this.sRight, centerX: '50%', centerY: '100%' })
+    }
+    .height(BAR_BOX)
+    .alignItems(VerticalAlign.Bottom)
+    .onAppear(() => { this.startBars(); })
+  }
+}
+
 /**
  * 公共曲目行：序号 / 封面 / 标题 / 歌手 / 当前播放高亮 / 右滑收藏手势。
  *
@@ -51,8 +114,8 @@ export struct TrackItem {
   track: Track = { id: '', name: '', ar: [], al: { id: '', name: '', picUrl: '' }, dt: 0 };
   /** 序号（1 起）；< 0 不显示序号列 */
   index: number = -1;
-  /** 封面边长（vp）。默认 44（新歌/搜索行）；收藏/专属行传 48 提权重（T5.5 §2.2） */
-  coverSize: number = Dim.coverSm;
+  /** 封面边长（vp）。移动端统一 40（web 移动端 .cov 40px，T10 收官第 ① 条） */
+  coverSize: number = Dim.coverBar;
   /** 当前曲目是否已收藏：决定动作区文案、底色与序号染色 */
   @Prop isFav: boolean = false;
   /** 已收藏时把序号染琥珀；收藏页传 false（每行都是收藏，全染没有信息量） */
@@ -64,6 +127,8 @@ export struct TrackItem {
   onTap: () => void = () => {};
   /** 专属页（每日推荐）行：行尾常显「不喜欢」双图标钮（web TrackRow act-wide 同构，时长列让位、双钮常显） */
   dislikeable: boolean = false;
+  /** 行尾时长列（web 移动端行尾 .dur 46px；每日推荐行因双钮常显自动让位，与 web 一致） */
+  showDur: boolean = false;
   /** 「不喜欢这首歌」（web dislike-track） */
   onDislikeTrack: () => void = () => {};
   /** 「不喜欢该歌手」（web dislike-artist） */
@@ -103,39 +168,62 @@ export struct TrackItem {
       .alignItems(VerticalAlign.Center)
       .justifyContent(FlexAlign.Start)
       .backgroundColor(this.isFav ? '#8A1F18' : Tokens.accentText)
-      .borderRadius(Dim.radiusRow)
+      .borderRadius(Dim.radiusMd)
 
-      // 行内容：底色必须不透明 —— 下面就是动作区，透明会整行透出那条色
-      Row({ space: Dim.s2 }) {
-        if (this.index >= 0) {
-          Text(this.index.toString())
-            .fontSize(Dim.fsMinor)
-            .fontColor(this.isFav && this.markFav ? Tokens.accent : Tokens.text2)
-            .width(Dim.seqW)
-            .textAlign(TextAlign.Center)
-        }
-        Image(this.track.al.picUrl.length > 0 ? this.track.al.picUrl : $r('app.media.app_icon'))
-          .width(this.coverSize).height(this.coverSize).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
-        Column({ space: Dim.s0 }) {
-          Text(this.track.name)
-            .fontSize(Dim.fsTitle)
-            .fontColor(this.currentTrackId === this.track.id ? Tokens.accent : Tokens.text1)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-          Text(artistLine(this.track))
-            .fontSize(Dim.fsCaption)
-            .fontColor(Tokens.text2)
-            .maxLines(1)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .alignItems(HorizontalAlign.Start)
-        .layoutWeight(1)
-        // 每日推荐行：行尾常显双「不喜欢」钮（点击吞掉冒泡，不触发行点击切歌）
+      // 行内容：底色必须不透明 —— 下面就是动作区，透明会整行透出那条色。
+      // 外层 Stack：在播时叠加 7% 琥珀薄染（web color-mix(accent 7%, panel) 等价物）
+      Stack() {
+        Row({ space: Dim.s2 }) {
+          if (this.index >= 0) {
+            if (this.currentTrackId === this.track.id) {
+              // 在播：序号列换成三根跳动竖条（web .bars 播放指示灯）
+              Column() {
+                PlayingBars()
+              }
+              .width(Dim.seqW)
+              .justifyContent(FlexAlign.Center)
+            } else {
+              Text(this.index.toString())
+                .fontSize(Dim.fsMinor)
+                .fontColor(this.isFav && this.markFav ? Tokens.accent : Tokens.text2)
+                .width(Dim.seqW)
+                .textAlign(TextAlign.Center)
+            }
+          }
+          Image(this.track.al.picUrl.length > 0 ? this.track.al.picUrl : $r('app.media.app_icon'))
+            .width(this.coverSize).height(this.coverSize).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
+          Column({ space: Dim.s0 }) {
+            Text(this.track.name)
+              .fontSize(Dim.fsSub)
+              .fontWeight(this.currentTrackId === this.track.id ? FontWeight.Medium : FontWeight.Normal)
+              .fontColor(this.currentTrackId === this.track.id ? Tokens.accentText : Tokens.text1)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+            Text(artistLine(this.track))
+              .fontSize(Dim.fsMinor)
+              .fontColor(Tokens.text2)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+          // 行尾时长列（web 移动端 .dur 46px）：每日推荐行让位给双「不喜欢」钮，与 web 同口径
+          if (this.showDur && !this.dislikeable) {
+            Text(formatDuration(this.track.dt))
+              .fontSize(Dim.fsMinor)
+              .fontColor(Tokens.text2)
+              .width(DUR_W)
+              .textAlign(TextAlign.End)
+          }
+        // 每日推荐行：行尾常显双「不喜欢」钮（点击吞掉冒泡，不触发行点击切歌）。
+        // 图标走 Web 图标库（web NeuIcon dislike-song/dislike-artist，T10 收官第 ⑰⑱ 条统一）
         if (this.dislikeable) {
           Row({ space: Dim.s1 }) {
-            SymbolGlyph($r('sys.symbol.heart_slash'))
-              .fontSize(Dim.iconSm)
-              .fontColor([this.disTrackPressed ? Tokens.accent : Tokens.text2])
+            // WebIcon 是全局 @Builder（void 返回），不能链属性 —— 触摸区/按压态由外层 Row 承载
+            Row() {
+              WebIcon(WebIconName.DISLIKE_SONG, DISLIKE_ICON,
+                this.disTrackPressed ? Tokens.accent : Tokens.text2)
+            }
               .height('100%')
               .padding({ left: Dim.s2, right: Dim.s2 })
               .alignSelf(ItemAlign.Center)
@@ -150,9 +238,10 @@ export struct TrackItem {
                   this.disTrackPressed = false;
                 }
               })
-            SymbolGlyph($r('sys.symbol.person_xmark'))
-              .fontSize(Dim.iconSm)
-              .fontColor([this.disArtistPressed ? Tokens.accent : Tokens.text2])
+            Row() {
+              WebIcon(WebIconName.DISLIKE_ARTIST, DISLIKE_ICON,
+                this.disArtistPressed ? Tokens.accent : Tokens.text2)
+            }
               .height('100%')
               .padding({ left: Dim.s2, right: Dim.s2 })
               .alignSelf(ItemAlign.Center)
@@ -170,18 +259,32 @@ export struct TrackItem {
           }
           .height('100%')
         }
+        }
+        .width('100%')
+        .height('100%')
+        .padding({ left: Dim.s2, right: Dim.s2 })
+        .backgroundColor(this.pressed ? Tokens.panel : Tokens.bg)
+        // 在播薄染层（叠最上：7% 琥珀罩整行，视觉=掺进底色）
+        if (this.currentTrackId === this.track.id) {
+          Column()
+            .width('100%')
+            .height('100%')
+            .backgroundColor(Tokens.accent)
+            .opacity(CUR_TINT)
+        }
       }
       .width('100%')
       .height(Dim.rowHeight)
-      .padding({ left: Dim.s4, right: Dim.s4 })
-      .backgroundColor(this.pressed ? Tokens.panel : Tokens.bg)
-      .borderRadius(Dim.radiusRow)
+      .border({
+        // 左 2px 在播琥珀条（web inset 2px box-shadow）+ 底沿发丝分割线（web border-bottom）
+        width: { left: this.currentTrackId === this.track.id ? Dim.s0 : 0, bottom: Dim.hairline },
+        color: { left: Tokens.accent, bottom: Tokens.line }
+      })
       .translate({ x: this.swipeX })
     }
     .width('100%')
     .height(Dim.rowHeight)
     .clip(true)
-    .borderRadius(Dim.radiusRow)
     .onTouch((e: TouchEvent) => {
       if (e.type === TouchType.Down) {
         this.pressed = true;

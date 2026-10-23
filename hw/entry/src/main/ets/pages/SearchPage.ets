@@ -3,7 +3,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { APIClient, ApiError } from '../core/APIClient';
 import { MediaPlayerCore } from '../core/MediaPlayerCore';
-import { Track, Album, Artist } from '../core/Models';
+import { Track, Album, Artist, Playlist, formatCount } from '../core/Models';
 import { Tokens } from '../common/Tokens';
 import { Copy } from '../common/Copy';
 import { Dim } from '../common/Dimension';
@@ -12,6 +12,11 @@ import { TrackItem } from './TrackItem';
 import { EmptyState } from './EmptyState';
 import { SkeletonList } from './SkeletonList';
 import { AppState } from '../viewmodel/AppState';
+import { openCollection } from '../common/CollectionNav';
+import { NeuInput } from './NeuInput';
+import { NeuTabs } from '../common/NeuTabs';
+import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
+import { WebButton, NeuBtnSize } from '../common/WebButtons';
 
 const TAG = 'SuenMusic_Search';
 const PREF_NAME = 'suenmusic';
@@ -19,7 +24,22 @@ const KEY_RECENT = 'recent_search';
 const PAGE_LIMIT = 30;
 const RECENT_MAX = 10;
 /** 分片：type 用服务端命名（artist 分片在响应里叫 artists/hasMore.artist） */
-const SLICE_TYPES: string[] = ['song', 'album', 'artist'];
+const SLICE_TYPES: string[] = ['song', 'album', 'artist', 'playlist'];
+/**
+ * 结果网格列数：4 列（用户裁定 2026-10-23「看得清也不至于信息密度太低」，
+ * 与 CollectionPage 歌手页专辑网格同密度；web neu-grid 移动端 2 列在网格节作废）。
+ */
+const SEARCH_GRID_COLS = 4;
+
+/** 网格卡片视图模型（专辑/歌手/歌单三片共用） */
+class CoverCell {
+  key: string = '';
+  cover: string = '';
+  title: string = '';
+  sub: string = '';
+  circle: boolean = false;
+  onTap: () => void = () => {};
+}
 
 /**
  * 搜索页：搜索框 + 分片切换（单曲/专辑/歌手）+ 翻页 + 最近搜索。
@@ -32,7 +52,7 @@ const SLICE_TYPES: string[] = ['song', 'album', 'artist'];
 @Component
 export struct SearchPage {
   @State keyword: string = '';
-  /** 0 = 单曲 / 1 = 专辑 / 2 = 歌手 */
+  /** 0 = 单曲 / 1 = 专辑 / 2 = 歌手 / 3 = 歌单 */
   @State activeSlice: number = 0;
   @State searched: boolean = false;
   @State searching: boolean = false;
@@ -40,7 +60,8 @@ export struct SearchPage {
   @State songs: Track[] = [];
   @State albums: Album[] = [];
   @State artists: Artist[] = [];
-  @State hasMore: boolean[] = [false, false, false];
+  @State playlists: Playlist[] = [];
+  @State hasMore: boolean[] = [false, false, false, false];
   @State page: number = 1;
   @State err: string = '';
   @State recent: string[] = [];
@@ -135,7 +156,8 @@ export struct SearchPage {
   private sliceCount(): number {
     if (this.activeSlice === 0) { return this.songs.length; }
     if (this.activeSlice === 1) { return this.albums.length; }
-    return this.artists.length;
+    if (this.activeSlice === 2) { return this.artists.length; }
+    return this.playlists.length;
   }
 
   private sliceHasMore(): boolean {
@@ -163,7 +185,8 @@ export struct SearchPage {
         this.songs = [];
         this.albums = [];
         this.artists = [];
-        this.hasMore = [false, false, false];
+        this.playlists = [];
+        this.hasMore = [false, false, false, false];
         this.searching = false;
         this.loadingMore = false;
         this.err = '';
@@ -195,16 +218,18 @@ export struct SearchPage {
         this.refreshFavMarks(res.songs);
       } else if (slice === 1) {
         this.albums = first ? res.albums : this.mergeAlbums(this.albums, res.albums);
-      } else {
+      } else if (slice === 2) {
         this.artists = first ? res.artists : this.mergeArtists(this.artists, res.artists);
+      } else {
+        this.playlists = first ? res.playlists : this.mergePlaylists(this.playlists, res.playlists);
       }
-      this.hasMore = [res.hasMore.song, res.hasMore.album, res.hasMore.artist];
+      this.hasMore = [res.hasMore.song, res.hasMore.album, res.hasMore.artist, res.hasMore.playlist];
       this.page = res.page;
       this.searched = true;
       this.syncSongRows();
       // 空结果 + degraded = QQ 上游限流（2001）：显示服务端给的人话 + 记下冷却窗做节流。
       // 有结果时部分分片可能也在限流，但不打扰用户（与 web Search.vue 同口径）。
-      const total = res.songs.length + res.albums.length + res.artists.length;
+      const total = res.songs.length + res.albums.length + res.artists.length + res.playlists.length;
       if (res.degraded !== null && res.degraded.code !== null && total === 0) {
         this.degradedText = res.degraded.message === undefined
           ? 'QQ 音乐搜索被限流，请稍后重试' : res.degraded.message;
@@ -261,6 +286,101 @@ export struct SearchPage {
       if (!seen.has(incoming[i].id)) { merged.push(incoming[i]); }
     }
     return merged;
+  }
+
+  private mergePlaylists(base: Playlist[], incoming: Playlist[]): Playlist[] {
+    const seen = new Set<string>();
+    for (let i = 0; i < base.length; i++) { seen.add(base[i].id); }
+    const merged: Playlist[] = [];
+    for (let i = 0; i < base.length; i++) { merged.push(base[i]); }
+    for (let i = 0; i < incoming.length; i++) {
+      if (!seen.has(incoming[i].id)) { merged.push(incoming[i]); }
+    }
+    return merged;
+  }
+
+  /** 计数文案：QQ 搜索响应没有总数，上游还有下一页时如实标 `N+`（web countLabel） */
+  private countLabel(n: number, more: boolean): string {
+    return more ? `${n}+` : `${n}`;
+  }
+
+  // ---------------- 结果网格（4 列，用户裁定密度；三片共用 CoverCell 投影） ----------------
+
+  /** 专辑 → 网格卡（副行 = 歌手名） */
+  private albumCells(): CoverCell[] {
+    const cells: CoverCell[] = [];
+    for (let i = 0; i < this.albums.length; i++) {
+      const a = this.albums[i];
+      const c = new CoverCell();
+      c.key = a.id;
+      c.cover = a.picUrl;
+      c.title = a.name;
+      c.sub = a.artist === undefined ? '' : a.artist.name;
+      c.circle = false;
+      const target = a;
+      c.onTap = (): void => { openCollection('album', target.id, target.name); };
+      cells.push(c);
+    }
+    return cells;
+  }
+
+  /** 歌手 → 网格卡（圆形头像，副行 = N 首作品） */
+  private artistCells(): CoverCell[] {
+    const cells: CoverCell[] = [];
+    for (let i = 0; i < this.artists.length; i++) {
+      const a = this.artists[i];
+      const c = new CoverCell();
+      c.key = a.id;
+      c.cover = a.picUrl;
+      c.title = a.name;
+      c.sub = a.musicSize > 0 ? `${a.musicSize} 首作品` : '';
+      c.circle = true;
+      const target = a;
+      c.onTap = (): void => { openCollection('artist', target.id, target.name); };
+      cells.push(c);
+    }
+    return cells;
+  }
+
+  /** 歌单 → 网格卡（副行 = N 次播放） */
+  private playlistCells(): CoverCell[] {
+    const cells: CoverCell[] = [];
+    for (let i = 0; i < this.playlists.length; i++) {
+      const p = this.playlists[i];
+      const c = new CoverCell();
+      c.key = p.id;
+      c.cover = p.picUrl.length > 0 ? p.picUrl : p.coverImgUrl;
+      c.title = p.name;
+      c.sub = `${formatCount(p.playCount)} 次播放`;
+      c.circle = false;
+      const target = p;
+      c.onTap = (): void => {
+        openCollection('playlist', String(target.tid ?? target.id), target.name);
+      };
+      cells.push(c);
+    }
+    return cells;
+  }
+
+  /** 一维卡列表 → 4 列行 */
+  private gridRows(cells: CoverCell[]): CoverCell[][] {
+    const rows: CoverCell[][] = [];
+    for (let i = 0; i < cells.length; i += SEARCH_GRID_COLS) {
+      const row: CoverCell[] = [cells[i]];
+      for (let j = 1; j < SEARCH_GRID_COLS && i + j < cells.length; j++) {
+        row.push(cells[i + j]);
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  /** 不足一整行的空位数（占位保持前几张宽度稳定） */
+  private padSlots(count: number): number[] {
+    const n = (SEARCH_GRID_COLS - (count % SEARCH_GRID_COLS)) % SEARCH_GRID_COLS;
+    const out: number[] = [];
+    for (let i = 0; i < n; i++) { out.push(i); }
+    return out;
   }
 
   private switchSlice(slice: number): void {
@@ -357,7 +477,24 @@ export struct SearchPage {
       hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
     }
     try {
-      await MediaPlayerCore.shared().setQueue(this.songs, index, token);
+      await MediaPlayerCore.shared().setQueue(this.songs, index, token, '搜索');
+    } catch (e) {
+      this.err = Copy.describeError(e);
+      hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
+    }
+  }
+
+  /** 播放全部（web Search playAll：把当前单曲分片整页入队） */
+  private async playAllSongs(): Promise<void> {
+    if (this.songs.length === 0) { return; }
+    let token = '';
+    try {
+      token = (await APIClient.shared().streamSessionToken()).token;
+    } catch (e) {
+      hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
+    }
+    try {
+      await MediaPlayerCore.shared().setQueue(this.songs, 0, token, '搜索');
     } catch (e) {
       this.err = Copy.describeError(e);
       hilog.error(0x0000, TAG, 'setQueue 失败: %{public}s', JSON.stringify(e));
@@ -366,56 +503,103 @@ export struct SearchPage {
 
   // ---------------- UI ----------------
 
+  /** 顶沿内高光（web neu-raised 的 inset hi 等价物，HomePage topSheen 同款） */
   @Builder
-  sliceButton(label: string, slice: number) {
-    Text(label)
-      .fontSize(Dim.fsBody)
-      .fontColor(this.activeSlice === slice ? Tokens.accent : Tokens.text2)
-      .padding({ left: Dim.s3, right: Dim.s3 })
-      .constraintSize({ minHeight: Dim.touchMin })
-      .borderRadius(Dim.radiusPill)
-      .backgroundColor(this.activeSlice === slice ? Tokens.panel : Color.Transparent)
-      .onClick(() => { this.switchSlice(slice); })
+  topSheen() {
+    Row()
+      .height(Dim.hairline)
+      .width('100%')
+      .backgroundColor(Tokens.hi)
+      .position({ x: 0, y: 0 })
   }
 
+  /**
+   * 封面卡（web `CoverCard.vue`）：1:1 封面 + 发丝线 + 顶沿内高光 +
+   * 标题两行 + 副行单行；circle = 歌手圆头像。
+   */
   @Builder
-  albumRow(album: Album) {
-    Row({ space: Dim.s2 }) {
-      Image(album.picUrl.length > 0 ? album.picUrl : $r('app.media.app_icon'))
-        .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusSm).objectFit(ImageFit.Cover)
-      Column({ space: Dim.s0 }) {
-        Text(album.name)
-          .fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(album.singerName === undefined ? '' : album.singerName)
-          .fontSize(Dim.fsCaption).fontColor(Tokens.text2).maxLines(1)
+  coverCard(cover: string, title: string, sub: string, circle: boolean, onTap: () => void) {
+    Column({ space: Dim.s2 }) {
+      Stack() {
+        Image(cover.length > 0 ? cover : $r('app.media.app_icon'))
+          .width('100%')
+          .aspectRatio(1)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(circle ? Dim.radiusPill : Dim.radiusMd)
+        this.topSheen()
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
+      .width('100%')
+      .backgroundColor(Tokens.panel2)
+      .borderRadius(circle ? Dim.radiusPill : Dim.radiusMd)
+      .border({ width: Dim.hairline, color: Tokens.line })
+      .clip(true)
+      Text(title)
+        .fontSize(Dim.fsBody)
+        .fontColor(Tokens.text1)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+      if (sub.length > 0) {
+        Text(sub)
+          .fontSize(Dim.fsCaption)
+          .fontColor(Tokens.text2)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
     }
-    .width('100%')
-    .height(Dim.rowHeight)
-    .padding({ left: Dim.s4, right: Dim.s4 })
+    // ⚠️ 不能用 width('100%')：在 Row 里会解析成整行宽（两张卡各 100% → 溢出超大）。
+    // layoutWeight(1) 才是半宽自适应等价物。
+    .layoutWeight(1)
+    .alignItems(HorizontalAlign.Start)
+    .accessibilityText(title)
+    .onClick(() => { onTap(); })
   }
 
+  /** 网格单行：4 张卡 + 不足整行的占位（专辑/歌手/歌单三片共用） */
   @Builder
-  artistRow(artist: Artist) {
+  coverRow(row: CoverCell[]) {
     Row({ space: Dim.s2 }) {
-      Image(artist.picUrl.length > 0 ? artist.picUrl : $r('app.media.app_icon'))
-        .width(Dim.coverSm).height(Dim.coverSm).borderRadius(Dim.radiusAvatar).objectFit(ImageFit.Cover)
-      Column({ space: Dim.s0 }) {
-        Text(artist.name)
-          .fontSize(Dim.fsTitle).fontColor(Tokens.text1).maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(`单曲 ${artist.musicSize} · 专辑 ${artist.albumSize}`)
-          .fontSize(Dim.fsCaption).fontColor(Tokens.text2).maxLines(1)
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
+      ForEach(row, (c: CoverCell) => {
+        this.coverCard(c.cover, c.title, c.sub, c.circle, c.onTap)
+      }, (c: CoverCell) => c.key)
+      ForEach(this.padSlots(row.length), (n: number) => {
+        Column().layoutWeight(1)
+      }, (n: number) => 'pad' + n.toString())
     }
     .width('100%')
-    .height(Dim.rowHeight)
-    .padding({ left: Dim.s4, right: Dim.s4 })
+    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s2, bottom: Dim.s2 })
+  }
+
+  /** 分块头（web .block-head：11px 宽字距小标 + 计数 + 右侧「播放全部」） */
+  @Builder
+  blockHead(label: string, count: number, more: boolean, showPlayAll: boolean) {
+    Row() {
+      Text(`${label} ${this.countLabel(count, more)}`)
+        .fontSize(Dim.fsCaption)
+        .letterSpacing(Dim.s0)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(Tokens.text2)
+      Blank()
+      if (showPlayAll) {
+        Row({ space: Dim.s2 }) {
+          WebIcon(WebIconName.PLAY, Dim.iconSm, Tokens.accentText)
+          Text('播放全部')
+            .fontSize(Dim.fsBody)
+            .fontWeight(FontWeight.Medium)
+            .fontColor(Tokens.accentText)
+        }
+        .padding({ left: Dim.s3, right: Dim.s3 })
+        .constraintSize({ minHeight: Dim.btnMd })
+        .justifyContent(FlexAlign.Center)
+        .alignItems(VerticalAlign.Center)
+        .borderRadius(Dim.radiusMd)
+        .border({ width: Dim.hairline, color: Tokens.line })
+        .backgroundColor(Tokens.panel)
+        .accessibilityText('播放全部')
+        .onClick(() => { this.playAllSongs(); })
+      }
+    }
+    .width('100%')
+    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s2, bottom: Dim.s2 })
   }
 
   @Builder
@@ -493,25 +677,36 @@ export struct SearchPage {
 
   build() {
     Column() {
-      Search({ value: this.keyword, placeholder: '搜索歌曲、歌手、专辑' })
-        .searchButton('搜索')
-        .onChange((v: string) => { this.keyword = v; })
-        .onSubmit((v: string) => { this.doSearch(v, 1); })
-        .placeholderColor(Tokens.text2)
-        .fontColor(Tokens.text1)
-        .caretStyle({ color: Tokens.accent })
-        .backgroundColor(Tokens.panel)
-        .height(Dim.inputH)
-        .margin({ left: Dim.s4, right: Dim.s4, top: Dim.s3 })
-
-      Row({ space: Dim.s1 }) {
-        this.sliceButton('单曲', 0)
-        this.sliceButton('专辑', 1)
-        this.sliceButton('歌手', 2)
+      // 搜索条（第 ⑨⑯ 条，web Search `.bar`：NeuInput + 琥珀图标主钮并排，gap sp-3）
+      Row({ space: Dim.s3 }) {
+        NeuInput({
+          content: this.keyword,
+          placeholder: '歌名、歌手、专辑、歌单',
+          searchIcon: true,
+          enterKey: EnterKeyType.Search,
+          onSubmit: (v: string) => { this.doSearch(v, 1); }
+        })
+          .layoutWeight(1)
+        WebIconButton({
+          iconName: WebIconName.SEARCH,
+          boxSize: 44,
+          glyphColor: Tokens.badgeInk,
+          chromeKind: NeuBtnChrome.PRIMARY,
+          onTap: () => { this.doSearch(this.keyword, 1); }
+        })
+          .accessibilityText('搜索')
       }
       .width('100%')
-      .justifyContent(FlexAlign.Center)
-      .padding({ top: Dim.s2, bottom: Dim.s2 })
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s5 })
+
+      // 四分片分段（第 ⑯ 条：换共享 NeuTabs，导轨 + 凸起滑块，非 accent）
+      NeuTabs({
+        labels: ['单曲', '专辑', '歌手', '歌单'],
+        activeIndex: this.activeSlice,
+        onSelect: (i: number) => { this.switchSlice(i); }
+      })
+        .margin({ left: Dim.s4, right: Dim.s4, top: Dim.s4 })
 
       if (this.searching && this.sliceCount() === 0) {
         // 首次搜索加载：骨架屏替代转圈（S4 §六）。
@@ -539,12 +734,11 @@ export struct SearchPage {
       } else if (this.err.length > 0 && this.sliceCount() === 0) {
         Column({ space: Dim.s3 }) {
           Text(this.err).fontSize(Dim.fsBody).fontColor('#E5484D')
-          Button('重试')
-            .height(Dim.touchMin)
-            .fontSize(Dim.fsSub)
-            .backgroundColor(Tokens.panel)
-            .fontColor(Tokens.text1)
-            .onClick(() => { this.doSearch(this.lastQuery, 1); })
+          WebButton({
+            labelStr: '重试',
+            sizeKind: NeuBtnSize.MD,
+            onTap: () => { this.doSearch(this.lastQuery, 1); }
+          })
         }
         .width('100%')
         .layoutWeight(1)
@@ -559,6 +753,8 @@ export struct SearchPage {
       } else {
         List({ space: 0 }) {
           if (this.activeSlice === 0) {
+            // 单曲块头：计数 + 播放全部（web Search 单曲 section）
+            ListItem() { this.blockHead('单曲', this.songs.length, this.sliceHasMore(), true) }
             // 单曲长列表懒加载（S4 §四）
             LazyForEach(this.songRows, (row: TrackRow) => {
               ListItem() {
@@ -566,19 +762,27 @@ export struct SearchPage {
                   track: row.track,
                   index: row.no,
                   isFav: row.fav,
+                  showDur: true,
                   onSwipeToggle: () => this.toggleFav(row.track),
                   onTap: () => { this.playAt(row.track.id); }
                 })
               }
             }, (row: TrackRow) => row.track.id)
           } else if (this.activeSlice === 1) {
-            ForEach(this.albums, (a: Album) => {
-              ListItem() { this.albumRow(a) }
-            }, (a: Album) => a.id)
+            ListItem() { this.blockHead('专辑', this.albums.length, this.sliceHasMore(), false) }
+            ForEach(this.gridRows(this.albumCells()), (row: CoverCell[]) => {
+              ListItem() { this.coverRow(row) }
+            }, (row: CoverCell[]) => row.length > 0 ? row[0].key : '')
+          } else if (this.activeSlice === 2) {
+            ListItem() { this.blockHead('歌手', this.artists.length, this.sliceHasMore(), false) }
+            ForEach(this.gridRows(this.artistCells()), (row: CoverCell[]) => {
+              ListItem() { this.coverRow(row) }
+            }, (row: CoverCell[]) => row.length > 0 ? row[0].key : '')
           } else {
-            ForEach(this.artists, (a: Artist) => {
-              ListItem() { this.artistRow(a) }
-            }, (a: Artist) => a.id)
+            ListItem() { this.blockHead('歌单', this.playlists.length, this.sliceHasMore(), false) }
+            ForEach(this.gridRows(this.playlistCells()), (row: CoverCell[]) => {
+              ListItem() { this.coverRow(row) }
+            }, (row: CoverCell[]) => row.length > 0 ? row[0].key : '')
           }
           ListItem() { this.listFooter() }
         }
