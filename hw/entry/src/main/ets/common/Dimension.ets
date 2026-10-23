@@ -50,6 +50,12 @@ export class Dim {
   static readonly coverReco = 194;
   /** 迷你条封面（web mini-cover 42px） */
   static readonly coverMini = 42;
+  /** web 行内裸图标档位（NeuIcon 移动断点实际用值；按钮档位见 WebIconButton 的 28/36/44/60） */
+  static readonly icon12 = 12;
+  static readonly icon13 = 13;
+  static readonly icon14 = 14;
+  static readonly icon16 = 16;
+  static readonly icon18 = 18;
   static readonly iconSm = 15;
   static readonly iconMd = 20;
   static readonly iconLg = 22;

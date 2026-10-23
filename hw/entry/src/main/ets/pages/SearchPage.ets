@@ -575,7 +575,7 @@ export struct SearchPage {
       Blank()
       if (showPlayAll) {
         Row({ space: Dim.s2 }) {
-          WebIcon(WebIconName.PLAY, Dim.iconSm, Tokens.accentText)
+          WebIcon(WebIconName.PLAY, Dim.icon13, Tokens.accentText)
           Text('播放全部')
             .fontSize(Dim.fsBody)
             .fontWeight(FontWeight.Medium)

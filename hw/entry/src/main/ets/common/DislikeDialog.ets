@@ -56,7 +56,7 @@ export struct DislikeDialog {
 
         // ① 不喜欢这首歌
         Row({ space: Dim.s3 }) {
-          WebIcon(WebIconName.DISLIKE_SONG, Dim.iconMd, DANGER)
+          WebIcon(WebIconName.DISLIKE_SONG, Dim.icon13, DANGER)
           Column({ space: Dim.s0 }) {
             Text('不喜欢这首歌')
               .fontSize(Dim.fsBody)
@@ -82,7 +82,7 @@ export struct DislikeDialog {
 
         // ② 不喜欢这位歌手（无歌手信息置灰）
         Row({ space: Dim.s3 }) {
-          WebIcon(WebIconName.DISLIKE_ARTIST, Dim.iconMd, this.hasArtist() ? DANGER : Tokens.text2)
+          WebIcon(WebIconName.DISLIKE_ARTIST, Dim.icon13, this.hasArtist() ? DANGER : Tokens.text2)
           Column({ space: Dim.s0 }) {
             Text('不喜欢这位歌手')
               .fontSize(Dim.fsBody)

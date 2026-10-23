@@ -595,7 +595,7 @@ export struct PlayerPage {
         // 点击展开两级浮层选「这首歌 / 这位歌手」，默认不替用户选歌手）。
         // 触控区 44（Dim.touchMin），与全端图标键口径一致。
         Row() {
-          WebIcon(WebIconName.DISLIKE_SONG, 16,
+          WebIcon(WebIconName.DISLIKE_SONG, Dim.icon12,
             this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
         }
         .width(Dim.touchMin)

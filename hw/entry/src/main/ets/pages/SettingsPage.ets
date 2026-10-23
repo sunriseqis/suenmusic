@@ -1349,7 +1349,7 @@ export struct SettingsPage {
                   .fontSize(Dim.fsBody)
                   .fontColor(Tokens.text1)
                   .layoutWeight(1)
-                WebIcon(WebIconName.CHEVRON_RIGHT, 18, Tokens.text2)
+                WebIcon(WebIconName.CHEVRON_RIGHT, Dim.icon16, Tokens.text2)
               }
               .width('100%')
               .height(Dim.touchMin)

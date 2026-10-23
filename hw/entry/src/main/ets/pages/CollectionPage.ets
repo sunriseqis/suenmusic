@@ -621,7 +621,7 @@ export struct CollectionPage {
   @Builder
   backButton() {
     Row() {
-      WebIcon(WebIconName.CHEVRON_LEFT, Dim.iconMd, Tokens.text1)
+      WebIcon(WebIconName.CHEVRON_LEFT, Dim.icon18, Tokens.text1)
     }
     .width(Dim.btnBar)
     .height(Dim.btnBar)
@@ -644,7 +644,7 @@ export struct CollectionPage {
   @Builder
   playAllButton() {
     Row({ space: Dim.s2 }) {
-      WebIcon(WebIconName.PLAY, Dim.iconSm, Tokens.badgeInk)
+      WebIcon(WebIconName.PLAY, Dim.icon14, Tokens.badgeInk)
       Text(this.queueFilling ? '装载中…' : '播放全部')
         .fontSize(Dim.fsBody)
         .fontWeight(FontWeight.Medium)
