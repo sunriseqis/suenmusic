@@ -1,32 +1,24 @@
 {
   "color": [
     {
-      "name": "start_window_background",
-      "value": "#0E0F11"
-    },
-    {
-      "name": "card_bg",
-      "value": "#FAF8F3"
-    },
-    {
-      "name": "card_t1",
-      "value": "#1B1916"
-    },
-    {
-      "name": "card_t2",
-      "value": "#6E675C"
-    },
-    {
       "name": "card_accent",
       "value": "#B0650F"
+    },
+    {
+      "name": "card_accent_on",
+      "value": "#FFFFFF"
     },
     {
       "name": "card_accent_text",
       "value": "#8F4F08"
     },
     {
-      "name": "card_accent_on",
-      "value": "#FFFFFF"
+      "name": "card_bg",
+      "value": "#FAF8F3"
+    },
+    {
+      "name": "card_line",
+      "value": "#1F1B1916"
     },
     {
       "name": "card_sd",
@@ -37,12 +29,80 @@
       "value": "#F2FFFFFF"
     },
     {
+      "name": "card_t1",
+      "value": "#1B1916"
+    },
+    {
+      "name": "card_t2",
+      "value": "#6E675C"
+    },
+    {
       "name": "card_well",
       "value": "#EDEAE2"
     },
     {
-      "name": "card_line",
-      "value": "#1F1B1916"
+      "name": "start_window_background",
+      "value": "#0E0F11"
+    },
+    {
+      "name": "t_accent",
+      "value": "#E8A33D"
+    },
+    {
+      "name": "t_accent_text",
+      "value": "#E8A33D"
+    },
+    {
+      "name": "t_badge_ink",
+      "value": "#1A1206"
+    },
+    {
+      "name": "t_bg",
+      "value": "#0E0F11"
+    },
+    {
+      "name": "t_date_chip",
+      "value": "#80000000"
+    },
+    {
+      "name": "t_hi",
+      "value": "#0FFFFFFF"
+    },
+    {
+      "name": "t_line",
+      "value": "#2A2C30"
+    },
+    {
+      "name": "t_panel",
+      "value": "#17181B"
+    },
+    {
+      "name": "t_panel2",
+      "value": "#1D1F23"
+    },
+    {
+      "name": "t_poster_scrim",
+      "value": "#C7000000"
+    },
+    {
+      "name": "t_poster_scrim_mid",
+      "value": "#6B000000"
+    },
+    {
+      "name": "t_scrim",
+      "value": "#A8000000"
+    },
+    {
+      "name": "t_text1",
+      "value": "#E9E7E2"
+    },
+    {
+      "name": "t_text2",
+      "value": "#8A8D93"
+    },
+    {
+      "name": "t_track",
+      "value": "#2A2C30"
     }
   ]
 }

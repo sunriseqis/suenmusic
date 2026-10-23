@@ -95,7 +95,7 @@ export struct ServerListPage {
     return '未知';
   }
 
-  private statusColor(i: number): string {
+  private statusColor(i: number): ResourceColor {
     const v = i >= 0 && i < this.status.length ? this.status[i] : ST_UNKNOWN;
     if (v === ST_OK) { return Tokens.accent; }
     if (v === ST_BAD) { return '#E5484D'; }
