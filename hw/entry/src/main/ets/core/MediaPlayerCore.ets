@@ -24,6 +24,7 @@ import { preferences } from '@kit.ArkData';
 import { Track, artistLine } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
+import { Notifier } from '../common/Notifier';
 import { APIClient } from './APIClient';
 
 const TAG = 'SuenMusic_Player';
@@ -802,6 +803,7 @@ export class MediaPlayerCore {
       this.wantPlay = false;
       AppStorage.setOrCreate<boolean>(K_PLAYING, false);
       AppStorage.setOrCreate<string>('np_error', '连续多首找不到可播放音源，请检查网络或稍后再试');
+      Notifier.notify('连续多首没有匹配音源', '已暂停播放，请检查网络或稍后再试');
       this.av?.stopContinuousTask();
       return;
     }
@@ -812,6 +814,9 @@ export class MediaPlayerCore {
       || this.playMode === 'shuffle';
     AppStorage.setOrCreate<string>('np_error',
       hasWayOut ? '《' + name + '》暂无可用音源，已跳过' : '《' + name + '》暂无可用音源');
+    // 2026-10-23 用户裁定：**不弹应用内弹窗**，改发系统通知告知「没有匹配音源」，随后照常跳下一首
+    Notifier.notify('没有匹配音源',
+      hasWayOut ? '《' + name + '》没有可播放的匹配音源，已自动跳过' : '《' + name + '》没有可播放的匹配音源');
     if (hasWayOut) {
       // 稍等一下再跳：避免服务端瞬时抖动时把整条队列连跳掉
       setTimeout(() => {

@@ -5,6 +5,7 @@ import { rpc } from '@kit.IPCKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider, formInfo } from '@kit.FormKit';
 import { dispatchCardControl, CardControlRequest } from '../common/PlayerControlHub';
+import { Notifier } from '../common/Notifier';
 import {
   NowPlayingSnapshot,
   readSnapshotSync,
@@ -40,6 +41,8 @@ class CardControlResult implements rpc.Parcelable {
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onCreate');
+    // 系统通知落地口需要 UIAbilityContext（首次发布时才真正请求授权）
+    Notifier.init(this.context);
     this.registerCardCallee();
     // router 事件（或未来的其他前台拉起）可以带 control 参数进来
     this.dispatchControlFromWant(want);
