@@ -24,7 +24,7 @@ import {
   type UpdatePlatform,
 } from '../services/update-types.ts';
 import { signUpdateToken, verifyUpdateToken } from '../utils/update-token.ts';
-import { cachedFilePath, readCachedArtifact, refreshPlatform } from '../services/github-update.ts';
+import { cachedFilePath, readCachedArtifact, refreshPlatform, versionCodeOf } from '../services/github-update.ts';
 import {
   getUpdateProxySettings,
   saveUpdateProxySettings,
@@ -97,9 +97,15 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
     if (!artifact) return noUpdate;
 
     // GitHub 没有 versionCode（恒 0）→ 退回按 versionName 比较
+    /**
+     * 比对**单一轴**：versionCode（2026-10-24 用户裁定）。
+     * latest 的 code 由 `versionCodeOf(versionName)` 推导（上游恒 0）；客户端上报自己的 code。
+     * 兜底：任一侧拿不到 code（越界/老客户端上报 0）才退回按版本名比较。
+     */
+    const latestCode = artifact.versionCode > 0 ? artifact.versionCode : versionCodeOf(artifact.versionName);
     const available =
-      artifact.versionCode > 0 && currentCode > 0
-        ? artifact.versionCode > currentCode
+      latestCode > 0 && currentCode > 0
+        ? latestCode > currentCode
         : compareVersionName(artifact.versionName, currentName) > 0;
 
     return {

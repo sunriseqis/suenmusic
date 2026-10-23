@@ -2,8 +2,8 @@
   "app": {
     "bundleName": "com.suenmusic.app",
     "vendor": "suenmusic",
-    "versionCode": 20175,
-    "versionName": "1.6.0",
+    "versionCode": 2000000,
+    "versionName": "2.0.0",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

@@ -63,6 +63,23 @@ interface GithubRelease {
  * 例：`suenmusic-1.6.0.hap` / `suenmusic-1.6.0.ipa` / `suenmusic-1.6.0.fpk`。
  * 版本号只由仓库根 `VERSION` 决定，改版本才换名。
  */
+/**
+ * versionName → versionCode（与客户端/CI 同一公式，2026-10-24 用户裁定）：
+ *     major*1_000_000 + minor*10_000 + patch*100
+ * 服务端不再依赖上游给的 code（GitHub 恒 0），一律自己推导 → 单一比较轴。
+ * 越界（如 minor ≥ 100）时回落 0，路由层再退回按版本名比较兜底。
+ */
+export function versionCodeOf(versionName: string): number {
+  const parts = versionName.split('.').map(Number);
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const patch = parts[2] ?? 0;
+  if (![major, minor, patch].every(Number.isInteger)) return 0;
+  if (minor >= 100 || patch >= 100) return 0;
+  const code = major * 1000000 + minor * 10000 + patch * 100;
+  return code > 0 && code <= 2147483647 ? code : 0;
+}
+
 function artifactName(versionName: string, platform: UpdatePlatform): string {
   return `suenmusic-${versionName}.${EXTENSIONS[platform]}`;
 }
@@ -101,7 +118,9 @@ export function readCachedArtifact(platform: UpdatePlatform): UpdateArtifact | n
     if (!meta || typeof meta.fileName !== 'string') return null;
     const file = join(cacheDir(platform), meta.fileName);
     if (!existsSync(file)) return null;
-    return { ...meta, path: file, size: statSync(file).size };
+    // 旧缓存里 versionCode 可能是 0（当年上游不给）→ 用 versionName 现算，保证单轴比较
+    const code = meta.versionCode > 0 ? meta.versionCode : versionCodeOf(meta.versionName);
+    return { ...meta, versionCode: code, path: file, size: statSync(file).size };
   } catch {
     return null;
   }
@@ -243,8 +262,8 @@ export async function refreshPlatform(
     fileName,
     path: target,
     versionName: picked.versionName,
-    // GitHub 没有 versionCode：回 0，路由层会退回按 versionName 比较
-    versionCode: 0,
+    // 上游不提供 versionCode（GitHub 恒 0）→ 用 versionName 按统一公式推导
+    versionCode: versionCodeOf(picked.versionName),
     size,
     sha256: digest.startsWith('sha256:') ? digest.slice(7) : null,
   };

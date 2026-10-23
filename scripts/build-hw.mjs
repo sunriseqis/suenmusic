@@ -7,7 +7,7 @@
  * 只有在需要手工回退验证 WebView 壳时，才显式加 `--with-web`。
  *
  * 用法：
- *   node scripts/build-hw.mjs               # 编译未签名 HAP → output/SuenMusic-v<版本>-unsigned.hap
+ *   node scripts/build-hw.mjs               # 编译未签名 HAP → output/suenmusic-<版本>.hap
  *   node scripts/build-hw.mjs --with-web    # 额外把 web/dist 同步进 rawfile（仅回退壳用）
  *   node scripts/build-hw.mjs --sync-only   # 只做 web → rawfile 同步
  *
@@ -53,20 +53,30 @@ async function readVersionName() {
   return raw;
 }
 
+/**
+ * versionCode 由 `VERSION` 唯一推导（2026-10-24 用户裁定，替换旧的「20000 + git 提交数」）：
+ *
+ *     code = major*1_000_000 + minor*10_000 + patch*100
+ *
+ * 例：`2.0.0 → 2000000`、`1.6.0 → 1060000`、`1.6.1 → 1060100`。
+ * 同一版本永远得同一个 code（旧口径下同一 VERSION 每次提交都会变号，服务端会误判有更新）。
+ *
+ * ⚠️ 撞号守卫：minor / patch 必须 < 100，否则 `1.6.100` 会与 `1.7.0` 同号、`1.100.0` 与 `2.0.0` 同号 ——
+ *    发出去就收不回来，所以这里直接 fail 构建。
+ */
 function readVersionCode(versionName) {
-  try {
-    const count = Number(output('git', ['rev-list', '--count', 'HEAD'], { cwd: ROOT }));
-    if (Number.isInteger(count) && count > 0) {
-      return { code: 20000 + count, source: `20000 + git 提交数 ${count}` };
-    }
-  } catch {
-    /* 无法执行 git 时回退到版本号推导 */
-  }
   const [major = 0, minor = 0, patch = 0] = versionName.split('.').map(Number);
-  return {
-    code: 20000 + major * 100 + minor * 10 + patch,
-    source: `按版本号推导`,
-  };
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)) {
+    fail(`VERSION 不是三段式版本号：${JSON.stringify(versionName)}（应为 major.minor.patch）`);
+  }
+  if (minor >= 100 || patch >= 100) {
+    fail(`VERSION 的 minor/patch 必须 < 100（当前 ${versionName} 会与更高版本撞号）`);
+  }
+  const code = major * 1000000 + minor * 10000 + patch * 100;
+  if (code <= 0 || code > 2147483647) {
+    fail(`versionCode 越界：${code}（需 1..2147483647）`);
+  }
+  return { code, source: `major*1000000+minor*10000+patch*100 → ${code}` };
 }
 
 async function syncWeb() {
@@ -142,7 +152,9 @@ async function assembleHap(versionName, versionCode) {
   }
 
   await mkdir(OUTPUT_DIR, { recursive: true });
-  const targetHap = join(OUTPUT_DIR, `SuenMusic-v${versionName}-unsigned.hap`);
+  // 发行命名（用户 2026-10-24 裁定）：`suenmusic-<版本>.hap`，同版本永远覆盖同名。
+  // 包本身不签名（用户用移动端侧载工具自行安装），所以本地产物名 = 发行名。
+  const targetHap = join(OUTPUT_DIR, `suenmusic-${versionName}.hap`);
 
   await copyFile(foundHap, targetHap);
 

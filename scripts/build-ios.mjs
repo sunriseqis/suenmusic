@@ -145,20 +145,24 @@ async function readVersionName() {
  * 取 0、更新判定走版本名比较（见 server/src/services/ugreen-update.ts），
  * 所以两端 code 数值不一致没有影响，单调性够用就行。
  */
+/**
+ * versionCode 由 `VERSION` 唯一推导（2026-10-24 用户裁定，与鸿蒙/安卓同一公式）：
+ *     code = major*1_000_000 + minor*10_000 + patch*100
+ * 同一版本永远同号；minor/patch ≥ 100 会撞号 → 直接 fail。
+ */
 function readVersionCode(versionName) {
-  try {
-    const count = Number(output('git', ['rev-list', '--count', 'HEAD'], { cwd: ROOT }));
-    if (Number.isInteger(count) && count > 0) {
-      return { code: 20000 + count, source: `20000 + 提交数 ${count}` };
-    }
-  } catch {
-    /* 不是 git 工作树 → 走下面的回退 */
-  }
   const [major = 0, minor = 0, patch = 0] = versionName.split('.').map(Number);
-  return {
-    code: 20000 + major * 100 + minor * 10 + patch,
-    source: `按版本号推导（当前目录不是 git 工作树）`,
-  };
+  if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)) {
+    fail(`VERSION 不是三段式版本号：${JSON.stringify(versionName)}（应为 major.minor.patch）`);
+  }
+  if (minor >= 100 || patch >= 100) {
+    fail(`VERSION 的 minor/patch 必须 < 100（当前 ${versionName} 会与更高版本撞号）`);
+  }
+  const code = major * 1000000 + minor * 10000 + patch * 100;
+  if (code <= 0 || code > 2147483647) {
+    fail(`versionCode 越界：${code}（需 1..2147483647）`);
+  }
+  return { code, source: `major*1000000+minor*10000+patch*100 → ${code}` };
 }
 
 /**
