@@ -91,6 +91,15 @@ npm run hw:build    # 读根 VERSION → 注入 versionName/versionCode → 未�
 - 版本源是根 `VERSION` 文件（不要手改 `AppScope/app.json5`，构建脚本会注入）
 - `npm run hw:sync`（web/dist → rawfile）是 WebView 壳时代遗留，壳已删，不再需要
 
+## 三点五、服务端使用规约（2026-10-23）
+
+- 服务端 `http://192.168.89.10:3210` 由 **Lead 常驻管理**；日志 `/tmp/suenmusic-server.log`
+- **执行方环境禁止自行启动服务端**（`node-run.mjs` / `strip-types` 等一律不跑）——
+  已发生两次抢 3210 端口、起不监听占进程的事故
+- 客户端测试连 Lead 实例（`suenqi / suenmusic2026`）；异常写回执由 Lead 处理
+- 需要隔离后端 → 向 Lead 申请独立端口+独立库的实例，不自起
+- 数据库 `server/data/suenmusic.db` 是生产数据（真实账号+767 收藏）
+
 ## 四、本机静态自检（没有 SDK 也能查）
 
 本机无法编译（官方 DevEco 只有 Windows/macOS，`hvigor` 随 IDE 分发，npm/ohpm 上都没有），
