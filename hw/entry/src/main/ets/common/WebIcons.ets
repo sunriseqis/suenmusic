@@ -234,14 +234,10 @@ export struct WebIconButton {
         .fontSize(this.autoGlyph())
         .fontColor([this.glyphColor])
         .fontWeight(FontWeight.Medium)
-      // 顶沿内高光（web inset hi 近似，NativeRoot barSheen 同款）；plain 平时不画
-      if (this.chromeKind !== NeuBtnChrome.PLAIN) {
-        Row()
-          .height(Dim.hairline)
-          .width('100%')
-          .position({ x: 0, y: 0 })
-          .backgroundColor(Tokens.hi)
-      }
+      // ⚠️ 2026-10-23 删除：原来这里有一条 1vp 顶沿内高光（`Row().width('100%')` + Tokens.hi），
+      // 只在非 PLAIN 键（= GRADIENT：播放页主播放键、搜索键）上画 —— 用户在播放键上看到
+      // 「按钮上方有一条横线」就是它。GRADIENT 键本身已有 linearGradient 提供厚度感，不需要这条线。
+      // 连同迷你条那处 barSheen（同款实现）一起，本端不再有「键顶高光横线」。
     }
     .width(this.boxSize)
     .height(this.boxSize)
