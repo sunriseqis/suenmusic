@@ -445,7 +445,8 @@ export struct SearchPage {
       try {
         this.getUIContext().getPromptAction().showToast({
           message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000
+          duration: 2000,
+          alignment: Alignment.Bottom
         });
       } catch (toastErr) {
         hilog.warn(0x0000, 'SuenMusic_Fav', 'toast 显示失败: %{public}s', JSON.stringify(toastErr));

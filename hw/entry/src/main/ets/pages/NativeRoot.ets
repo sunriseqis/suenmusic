@@ -132,7 +132,11 @@ struct NativeRoot {
       this.barFav = was;
       const err = e as ApiError;
       try {
-        this.getUIContext().getPromptAction().showToast({ message: err.message, duration: 2000 });
+        this.getUIContext().getPromptAction().showToast({
+          message: err.message,
+          duration: 2000,
+          alignment: Alignment.Bottom
+        });
       } catch (toastErr) {
         // toast 失败不再兜底
       }

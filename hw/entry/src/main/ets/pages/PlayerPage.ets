@@ -495,7 +495,12 @@ export struct PlayerPage {
 
   private showToast(message: string): void {
     try {
-      this.getUIContext().getPromptAction().showToast({ message: message, duration: 2000 });
+      // 显式钉底部：不传 alignment 时 toast 会漂到顶部偏右（T11 第 3 条）
+      this.getUIContext().getPromptAction().showToast({
+        message: message,
+        duration: 2000,
+        alignment: Alignment.Bottom
+      });
     } catch (e) {
       hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(e));
     }
@@ -642,20 +647,20 @@ export struct PlayerPage {
           .fontWeight(FontWeight.Medium)
           .fontColor(Tokens.text2)
         Blank()
-        // 两级不喜欢入口（web dislike-trigger-btn）：子组件消费点击，不会冒泡到 dislike 背板
-        Row({ space: Dim.s1 }) {
-          WebIcon(WebIconName.DISLIKE_SONG, 14, this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
-          Text('不喜欢')
-            .fontSize(Dim.fsCaption)
-            .fontColor(this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
-          WebIcon(this.sheet === 'dislike'
-            ? WebIconName.CHEVRON_UP : WebIconName.CHEVRON_DOWN, 12, Tokens.text2)
+        // 单图标「不喜欢」入口（T11 第 3 条：此处不需要文字，也不带展开箭头；
+        // 点击展开两级浮层选「这首歌 / 这位歌手」，默认不替用户选歌手）。
+        // 触控区 44（Dim.touchMin），与全端图标键口径一致。
+        Row() {
+          WebIcon(WebIconName.DISLIKE_SONG, 16,
+            this.sheet === 'dislike' ? '#E5484D' : Tokens.text2)
         }
-        .constraintSize({ minHeight: Dim.btnMd })
-        .padding({ left: Dim.s2, right: Dim.s2 })
+        .width(Dim.touchMin)
+        .height(Dim.touchMin)
+        .justifyContent(FlexAlign.Center)
         .borderRadius(Dim.radiusSm)
         .border({ width: Dim.hairline, color: Tokens.line })
-        .backgroundColor(Tokens.panel)
+        .backgroundColor(this.sheet === 'dislike' ? Tokens.panel2 : Tokens.panel)
+        .accessibilityText('不喜欢')
         .onClick(() => {
           this.sheet = this.sheet === 'dislike' ? 'none' : 'dislike';
         })
@@ -893,8 +898,8 @@ export struct PlayerPage {
           .layoutWeight(1)
         WebIconButton({
           iconName: WebIconName.CHEVRON_DOWN,
-          boxSize: 36,
-          glyphColor: Tokens.text2,
+          boxSize: Dim.touchMin,
+          glyphColor: Tokens.text1,
           chromeKind: NeuBtnChrome.PLAIN,
           onTap: () => {
             this.sheet = 'none';
@@ -905,6 +910,11 @@ export struct PlayerPage {
       .width('100%')
       .alignItems(VerticalAlign.Center)
       .padding({ bottom: Dim.s2 })
+      // T11 第 1 条：歌词层整页盖住 tab 栏时，顶栏整条也可点收起（不再只靠右上角小钮）
+      .accessibilityText('收起歌词')
+      .onClick(() => {
+        this.sheet = 'none';
+      })
 
       LyricView()
     }
@@ -1307,10 +1317,11 @@ export struct PlayerPage {
       Column() {
         // 顶栏三件（web head）：收起 / eyebrow / 更多（第 ③⑧ 条 web 图标键）
         Row() {
+          // T11 第 1 条：逃生口加大到 44 触控区 + 主文字色（原先 36 键 + 次级灰，找不到）
           WebIconButton({
             iconName: WebIconName.CHEVRON_DOWN,
-            boxSize: 36,
-            glyphColor: Tokens.text2,
+            boxSize: Dim.touchMin,
+            glyphColor: Tokens.text1,
             chromeKind: NeuBtnChrome.PLAIN,
             onTap: () => {
               this.onClose();

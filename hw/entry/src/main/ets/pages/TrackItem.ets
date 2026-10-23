@@ -134,10 +134,8 @@ export struct TrackItem {
   /** 「不喜欢该歌手」（web dislike-artist） */
   onDislikeArtist: () => void = () => {};
 
-  /** 「不喜欢这首歌」按钮按压染色（accent 反馈） */
-  @State disTrackPressed: boolean = false;
-  /** 「不喜欢该歌手」按钮按压染色 */
-  @State disArtistPressed: boolean = false;
+  /** 单「不喜欢」钮按压染色（accent 反馈；T11 第 4 条：双钮合并为单钮 + 弹窗选范围） */
+  @State disPressed: boolean = false;
 
   /** 最近一次手势结束时间：吞掉手势结束后的合成 click */
   private lastSwipeEndAt: number = 0;
@@ -145,6 +143,42 @@ export struct TrackItem {
   private animateSwipeTo(target: number): void {
     this.getUIContext().animateTo({ duration: SWIPE_ANIM_MS, curve: Motion.curve }, () => {
       this.swipeX = target;
+    });
+  }
+
+  /**
+   * 「不喜欢」单钮 → 弹窗选范围（T11 第 4 条）。
+   * 只负责选范围；落地动作仍由父级 onDislikeTrack / onDislikeArtist 承担
+   * （toast / 队列摘除 / 通知每日页重拉都在父级）。
+   * 没有歌手信息时「这位歌手」置灰（web dislike-artist 同口径：拿不到 mid 不能提交）。
+   */
+  private openDislikeDialog(): void {
+    const artist = this.track.ar.length > 0 ? this.track.ar[0].name : '';
+    const hasArtist = artist.length > 0;
+    this.getUIContext().showAlertDialog({
+      title: '不喜欢',
+      message: hasArtist
+        ? '《' + this.track.name + '》· 歌手「' + artist + '」'
+        : '《' + this.track.name + '》没有歌手信息，只能不喜欢这首歌',
+      buttons: [
+        {
+          value: '不喜欢这首歌',
+          action: (): void => {
+            this.onDislikeTrack();
+          }
+        },
+        {
+          value: '不喜欢这位歌手',
+          enabled: hasArtist,
+          action: (): void => {
+            this.onDislikeArtist();
+          }
+        },
+        {
+          value: '取消',
+          action: (): void => {}
+        }
+      ]
     });
   }
 
@@ -215,49 +249,30 @@ export struct TrackItem {
               .width(DUR_W)
               .textAlign(TextAlign.End)
           }
-        // 每日推荐行：行尾常显双「不喜欢」钮（点击吞掉冒泡，不触发行点击切歌）。
-        // 图标走 Web 图标库（web NeuIcon dislike-song/dislike-artist，T10 收官第 ⑰⑱ 条统一）
+        // 每日推荐行：行尾**单**「不喜欢」钮（T11 第 4 条：两个图标不好区分 → 合并为 1 个，
+        // 点击弹窗选「不喜欢这首歌 / 这位歌手」）。点击吞掉冒泡，不触发行点击切歌。
         if (this.dislikeable) {
-          Row({ space: Dim.s1 }) {
-            // WebIcon 是全局 @Builder（void 返回），不能链属性 —— 触摸区/按压态由外层 Row 承载
-            Row() {
-              WebIcon(WebIconName.DISLIKE_SONG, DISLIKE_ICON,
-                this.disTrackPressed ? Tokens.accent : Tokens.text2)
-            }
-              .height('100%')
-              .padding({ left: Dim.s2, right: Dim.s2 })
-              .alignSelf(ItemAlign.Center)
-              .accessibilityText('不喜欢这首歌')
-              .onClick(() => {
-                this.onDislikeTrack();
-              })
-              .onTouch((e: TouchEvent) => {
-                if (e.type === TouchType.Down) {
-                  this.disTrackPressed = true;
-                } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
-                  this.disTrackPressed = false;
-                }
-              })
-            Row() {
-              WebIcon(WebIconName.DISLIKE_ARTIST, DISLIKE_ICON,
-                this.disArtistPressed ? Tokens.accent : Tokens.text2)
-            }
-              .height('100%')
-              .padding({ left: Dim.s2, right: Dim.s2 })
-              .alignSelf(ItemAlign.Center)
-              .accessibilityText('不喜欢该歌手')
-              .onClick(() => {
-                this.onDislikeArtist();
-              })
-              .onTouch((e: TouchEvent) => {
-                if (e.type === TouchType.Down) {
-                  this.disArtistPressed = true;
-                } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
-                  this.disArtistPressed = false;
-                }
-              })
+          // WebIcon 是全局 @Builder（void 返回），不能链属性 —— 触摸区/按压态由外层 Row 承载
+          Row() {
+            WebIcon(WebIconName.DISLIKE_SONG, DISLIKE_ICON,
+              this.disPressed ? Tokens.accent : Tokens.text2)
           }
-          .height('100%')
+            .constraintSize({ minWidth: Dim.touchMin })
+            .height('100%')
+            .padding({ left: Dim.s2, right: Dim.s2 })
+            .justifyContent(FlexAlign.Center)
+            .alignSelf(ItemAlign.Center)
+            .accessibilityText('不喜欢')
+            .onClick(() => {
+              this.openDislikeDialog();
+            })
+            .onTouch((e: TouchEvent) => {
+              if (e.type === TouchType.Down) {
+                this.disPressed = true;
+              } else if (e.type === TouchType.Up || e.type === TouchType.Cancel) {
+                this.disPressed = false;
+              }
+            })
         }
         }
         .width('100%')

@@ -109,7 +109,11 @@ export struct SettingsPage {
 
   private toast(msg: string): void {
     try {
-      this.getUIContext().getPromptAction().showToast({ message: msg, duration: 2000 });
+      this.getUIContext().getPromptAction().showToast({
+        message: msg,
+        duration: 2000,
+        alignment: Alignment.Bottom
+      });
     } catch (e) {
       // toast 失败静默（与 DailyPage.showToast 同款口径）
     }

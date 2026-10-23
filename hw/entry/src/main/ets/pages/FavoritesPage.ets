@@ -217,7 +217,8 @@ export struct FavoritesPage {
       try {
         this.getUIContext().getPromptAction().showToast({
           message: msg === undefined ? Copy.favOpFailed : msg,
-          duration: 2000
+          duration: 2000,
+          alignment: Alignment.Bottom
         });
       } catch (toastErr) {
         hilog.warn(0x0000, TAG, 'toast 显示失败: %{public}s', JSON.stringify(toastErr));

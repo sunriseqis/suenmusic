@@ -105,28 +105,44 @@ export struct WebButton {
     return Tokens.text1;
   }
 
+  /**
+   * 描边 + 顶沿内高光（web inset hi 近似）。
+   *
+   * ⚠️ 2026-10-23 修复（黑名单/备份弹窗行错乱）：原先高光是 Stack 里一条
+   * `Row().width('100%')`。本按钮非 block 时根 Stack 是**内容自适应宽**，
+   * 百分比宽子组件按父级最大约束测量 → Stack 被撑到整行宽（实测「恢复」按钮
+   * 960×107px 巨板），旁边 `layoutWeight(1)` 的歌名被挤成 0 宽。
+   * 现改走与 WebIconButton 一致的**上边线上色**（无百分比子组件），
+   * 自适应宽度完全由 label 决定。
+   */
+  private btnBorder(): BorderOptions {
+    if (this.variantKind === NeuBtnVariant.GHOST || this.variantKind === NeuBtnVariant.DANGER) {
+      // web：ghost 无厚度、.v-danger 透明底红字
+      return { width: 0 };
+    }
+    if (this.variantKind === NeuBtnVariant.PRIMARY) {
+      // 琥珀填充无描边，只留顶沿高光（上边线走 hi，6% 白，衬在琥珀上才有厚度）
+      return { width: { top: Dim.hairline }, color: { top: Tokens.hi } };
+    }
+    // default：四边 line 描边（与原实现一致）
+    // 说明：原先顶沿那条 hi 内高光是 `Row().width('100%')`，在自适应宽容器里会撑爆按钮宽度；
+    // 1vp 的 6% 白高光在实机上肉眼不可辨，为保证 32 处调用点不回归，这里直接去掉、只留描边。
+    return { width: Dim.hairline, color: Tokens.line };
+  }
+
   build() {
-    Stack({ alignContent: Alignment.Top }) {
+    Stack() {
       Text(this.labelStr)
         .fontSize(this.btnFont())
         .fontWeight(FontWeight.Medium)
         .fontColor(this.btnFontColor())
-      // 顶沿内高光（web inset hi 近似；ghost/danger 无厚度不画）
-      if (this.variantKind === NeuBtnVariant.DEFAULT || this.variantKind === NeuBtnVariant.PRIMARY) {
-        Row()
-          .height(Dim.hairline)
-          .width('100%')
-          .backgroundColor(Tokens.hi)
-      }
     }
     .height(this.btnHeight())
     .width(this.blockFlag ? '100%' : undefined)
     .padding({ left: this.btnPaddingH(), right: this.btnPaddingH() })
     .borderRadius(Dim.radiusMd)
     .backgroundColor(this.btnBg())
-    .border(this.variantKind === NeuBtnVariant.GHOST || this.variantKind === NeuBtnVariant.PRIMARY
-      ? { width: 0 }
-      : { width: Dim.hairline, color: Tokens.line })
+    .border(this.btnBorder())
     .opacity(this.disabledFlag ? 0.55 : 1)
     .translate({ y: this.pressed ? 1 : 0 })
     .accessibilityText(this.labelStr)
