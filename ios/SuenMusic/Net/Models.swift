@@ -128,6 +128,49 @@ struct SearchReply: Codable {
     let degraded: Bool?
 }
 
+// MARK: - 集合页（专辑 / 歌手 / 歌单 / 榜单）
+
+/// `GET /api/albums/:id`
+struct AlbumDetailReply: Codable {
+    let album: Album
+    let songs: [Track]
+    let notice: String?
+}
+
+/// `GET /api/toplist/:id`
+struct ToplistDetailReply: Codable {
+    let topInfo: Toplist?
+    let tracks: [Track]
+    let hasMore: Bool
+}
+
+/// `GET /api/artists/:id/songs`
+struct ArtistSongsReply: Codable {
+    let id: String
+    let name: String
+    let page: Int
+    let songs: [Track]
+    let hasMore: Bool
+}
+
+/// 歌单详情里的歌单本体（`GET /api/qq/playlist/:tid` 的 playlist 字段）
+struct QqPlaylist: Codable, Hashable {
+    let id: String
+    let name: String
+    let picUrl: String
+    let description: String?
+    let playCount: Int?
+    let trackCount: Int?
+    struct Creator: Codable, Hashable { let nickname: String; let userId: Int? }
+    let creator: Creator?
+}
+
+/// `GET /api/qq/playlist/:tid`
+struct QqPlaylistDetailReply: Codable {
+    let playlist: QqPlaylist
+    let tracks: [Track]
+}
+
 // MARK: - 音源解析
 
 struct ResolveResponse: Codable {

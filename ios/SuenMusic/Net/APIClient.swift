@@ -334,6 +334,26 @@ final class APIClient {
         try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)")
     }
 
+    // MARK: 集合页
+
+    func albumDetail(id: String, limit: Int = 100) async throws -> AlbumDetailReply {
+        try await get("/api/albums/\(id)", query: ["limit": String(limit)])
+    }
+
+    func toplistDetail(id: String, limit: Int = 100) async throws -> ToplistDetailReply {
+        try await get("/api/toplist/\(id)", query: ["limit": String(limit)])
+    }
+
+    func artistSongs(id: String, name: String = "", limit: Int = 50, page: Int = 1) async throws -> ArtistSongsReply {
+        var q = ["limit": String(limit), "page": String(page)]
+        if !name.isEmpty { q["name"] = name }
+        return try await get("/api/artists/\(id)/songs", query: q)
+    }
+
+    func qqPlaylistDetail(id: String) async throws -> QqPlaylistDetailReply {
+        try await get("/api/qq/playlist/\(id)")
+    }
+
     /// 每日推荐（只读；服务端每日 00:30 产出）
     func dailyRecommend() async throws -> DailyRecommend {
         try await get("/api/recommend/daily")

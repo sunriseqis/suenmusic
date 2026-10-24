@@ -62,6 +62,9 @@ struct HomeView: View {
         }
         .scrollIndicators(.hidden)
         .refreshable { await refresh() }
+        .navigationDestination(for: CollectionRoute.self) { route in
+            CollectionView(route: route)
+        }
     }
 
     // MARK: - 欢迎区
@@ -109,7 +112,11 @@ struct HomeView: View {
             ScrollView(.horizontal) {
                 LazyHStack(spacing: Dim.s4) {
                     ForEach(albums) { album in
-                        posterCard(album).frame(width: cardWidth)
+                        NavigationLink(value: CollectionRoute(kind: "album", id: album.id, name: album.name)) {
+                            posterCard(album)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(width: cardWidth)
                     }
                 }
                 .padding(.horizontal, Dim.s4)
@@ -229,7 +236,10 @@ struct HomeView: View {
         let columns = [GridItem(.flexible(), spacing: Dim.s4), GridItem(.flexible(), spacing: Dim.s4)]
         return LazyVGrid(columns: columns, spacing: Dim.s4) {
             ForEach(lists) { list in
-                toplistCard(list)
+                NavigationLink(value: CollectionRoute(kind: "toplist", id: list.id, name: list.name)) {
+                    toplistCard(list)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, Dim.s4)

@@ -50,6 +50,9 @@ struct SearchView: View {
             }
         }
         .background(p.bg)
+        .navigationDestination(for: CollectionRoute.self) { route in
+            CollectionView(route: route)
+        }
         .onAppear { loadRecent() }
     }
 
@@ -212,15 +215,24 @@ struct SearchView: View {
             switch slice {
             case 1:
                 ForEach(albums) { album in
-                    coverCell(url: album.picUrl, title: album.name, sub: album.artistLine, circle: false)
+                    NavigationLink(value: CollectionRoute(kind: "album", id: album.id, name: album.name)) {
+                        coverCell(url: album.picUrl, title: album.name, sub: album.artistLine, circle: false)
+                    }
+                    .buttonStyle(.plain)
                 }
             case 2:
                 ForEach(artists) { artist in
-                    coverCell(url: "", title: artist.name, sub: "", circle: true)
+                    NavigationLink(value: CollectionRoute(kind: "artist", id: artist.id, name: artist.name)) {
+                        coverCell(url: "", title: artist.name, sub: "", circle: true)
+                    }
+                    .buttonStyle(.plain)
                 }
             default:
                 ForEach(playlists) { list in
-                    coverCell(url: list.picUrl, title: list.name, sub: list.subLine, circle: false)
+                    NavigationLink(value: CollectionRoute(kind: "playlist", id: list.id, name: list.name)) {
+                        coverCell(url: list.picUrl, title: list.name, sub: list.subLine, circle: false)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
