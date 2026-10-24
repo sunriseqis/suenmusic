@@ -161,6 +161,20 @@ struct FavoritePage: Codable {
     let items: [FavoriteItem]
     let total: Int
     let nextCursor: String?
+    /// 收藏的 AI 摘要（首页分页才有；空 = 没有，头部回退「收藏曲目」）
+    let summary: String?
+}
+
+// MARK: - 每日推荐
+
+/// `GET /api/recommend/daily` —— 只读（服务端每天 00:30 产出，无「换一批」）
+struct DailyRecommend: Codable {
+    let status: String?
+    let date: String?
+    let greeting: String?
+    let welcomePhrase: String?
+    let tracks: [Track]
+    let message: String?
 }
 
 // MARK: - 服务端错误体

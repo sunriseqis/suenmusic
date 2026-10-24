@@ -15,8 +15,10 @@
 		0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26564CB8956642BA586CAE68 /* AudioEngine.swift */; };
 		1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059196BD216930E1443BF606 /* Notifier.swift */; };
 		27F5989A61368C71B560E576 /* PlaybackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29822D920A5A97C4DD3B16BC /* PlaybackService.swift */; };
+		654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF95D12E5B52161C828D837 /* DailyView.swift */; };
 		40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */; };
 		8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D08E3CBA663948F14CF5F /* Dimension.swift */; };
+		D8414E4510E9D80656090B72 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */; };
 		ECD1269803F379E5A8E93341 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D065FDB56A1018194F6CD49C /* HomeView.swift */; };
 		D8BC02FB63F0869B42537FA0 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5318EF083FF113A8B0C2B11B /* LoginView.swift */; };
 		52DE6D5A7473923D455576CA /* PlayerBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18A0D568F9F6ABAB3B9CF2B7 /* PlayerBar.swift */; };
@@ -38,8 +40,10 @@
 		26564CB8956642BA586CAE68 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		059196BD216930E1443BF606 /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		29822D920A5A97C4DD3B16BC /* PlaybackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackService.swift; sourceTree = "<group>"; };
+		8DF95D12E5B52161C828D837 /* DailyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyView.swift; sourceTree = "<group>"; };
 		5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		080D08E3CBA663948F14CF5F /* Dimension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dimension.swift; sourceTree = "<group>"; };
+		B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
 		D065FDB56A1018194F6CD49C /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		5318EF083FF113A8B0C2B11B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		18A0D568F9F6ABAB3B9CF2B7 /* PlayerBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerBar.swift; sourceTree = "<group>"; };
@@ -119,8 +123,10 @@
 		C71E237AED0167A15E00637D /* UI */ = {
 			isa = PBXGroup;
 			children = (
+				8DF95D12E5B52161C828D837 /* DailyView.swift */,
 				5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */,
 				080D08E3CBA663948F14CF5F /* Dimension.swift */,
+				B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */,
 				D065FDB56A1018194F6CD49C /* HomeView.swift */,
 				5318EF083FF113A8B0C2B11B /* LoginView.swift */,
 				18A0D568F9F6ABAB3B9CF2B7 /* PlayerBar.swift */,
@@ -228,8 +234,10 @@
 				0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */,
 				1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */,
 				27F5989A61368C71B560E576 /* PlaybackService.swift in Sources */,
+				654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */,
 				40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */,
 				8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */,
+				D8414E4510E9D80656090B72 /* FavoritesView.swift in Sources */,
 				ECD1269803F379E5A8E93341 /* HomeView.swift in Sources */,
 				D8BC02FB63F0869B42537FA0 /* LoginView.swift in Sources */,
 				52DE6D5A7473923D455576CA /* PlayerBar.swift in Sources */,

@@ -334,6 +334,19 @@ final class APIClient {
         try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)")
     }
 
+    /// 每日推荐（只读；服务端每日 00:30 产出）
+    func dailyRecommend() async throws -> DailyRecommend {
+        try await get("/api/recommend/daily")
+    }
+
+    /// 取消收藏（幂等）。响应体不参与 UI，用空结构吞掉，避免为此新增一个模型。
+    func removeFavorite(trackId: String) async throws {
+        let _: EmptyReply = try await send("/api/favorites/\(trackId)", method: "DELETE")
+    }
+
+    /// 只用于吞掉"没有字段需要读"的响应
+    struct EmptyReply: Decodable {}
+
     func favorites(limit: Int = 50, cursor: String? = nil) async throws -> FavoritePage {
         var q = ["limit": String(limit)]
         if let cursor { q["cursor"] = cursor }

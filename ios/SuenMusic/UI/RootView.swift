@@ -23,7 +23,10 @@ struct RootView: View {
             TabView {
                 NavigationStack { HomeView() }
                     .tabItem { Label("首页", systemImage: "house") }
-                // 专属/收藏两个 tab 待批⑥（集合页与每日推荐还没建）
+                NavigationStack { DailyView() }
+                    .tabItem { Label("专属", systemImage: "sparkles") }
+                NavigationStack { FavoritesView() }
+                    .tabItem { Label("收藏", systemImage: "heart") }
                 NavigationStack { SearchView() }
                     .tabItem { Label("搜索", systemImage: "magnifyingglass") }
                 NavigationStack { SettingsView() }
