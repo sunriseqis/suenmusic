@@ -5,11 +5,11 @@
  * 为什么需要它：这条链有五个步骤，其中两步**极易忘**且忘掉后的报错都很难懂 ——
  *   1. `cap sync ios` 会把 CapApp-SPM/Package.swift 改回远程依赖
  *      （直连 GitHub Releases 常超时 → `Missing package product 'CapApp-SPM'`）；
- *   2. IPA 必须叫 `SuenMusic-v<版本>-release.ipa`，服务端才会认它。
+ *   2. IPA 必须叫 `suenmusic-<版本>.ipa`（服务端 `artifactName()` 同口径，同版本覆盖同名）。
  *
  * 用法（在 **suenmusic 单仓根**执行，web 就在仓内 web/ 目录）：
  *   npm run ios:sync              # 只做 web 构建 + cap sync + vendor 还原（进 Xcode 前跑）
- *   npm run ios:ipa               # 完整链路，产出 app/SuenMusic-v<版本>-release.ipa
+ *   npm run ios:ipa               # 完整链路，产出 app/suenmusic-<版本>.ipa
  *   npm run ios:ipa:unsigned      # 同上，但**不签名**，产出 app/unsigned/ 下的同名 IPA
  *
  * 两种导出怎么选：
@@ -68,7 +68,7 @@ const SYMROOT = join(OUTPUT_DIR, UNSIGNED ? 'build-unsigned' : 'build');
  * 未签名的包放子目录。
  *
  * 刻意**保留规范文件名**（不给它加 `-unsigned` 后缀）：服务端是按
- * `^SuenMusic-v(\d+)-release\.ipa$` 挑包的，改名字它就认不出来了。
+ * `^suenmusic-(\d+\.\d+\.\d+)\.ipa$` 挑包的，改名字它就认不出来了。
  * 用目录区分两种产物，名字留给上传。
  */
 const IPA_DIR = UNSIGNED ? join(OUTPUT_DIR, 'unsigned') : OUTPUT_DIR;
@@ -250,7 +250,8 @@ async function buildIpa(versionName, versionCode) {
   // shell 的 -R 逐个原样搬运，不用去猜 fs.cp 对符号链接的处理是否够保守。
   run('cp', ['-R', appPath, payloadDir]);
 
-  const ipaName = `SuenMusic-v${versionName}-release.ipa`;
+  // 发行命名（用户 2026-10-24 裁定，与鸿蒙同口径）：`suenmusic-<版本>.ipa`，同版本永远覆盖同名。
+  const ipaName = `suenmusic-${versionName}.ipa`;
   const ipaPath = join(IPA_DIR, ipaName);
   await rm(ipaPath, { force: true });
   run('zip', ['-qry', ipaName, 'Payload'], { cwd: IPA_DIR });
