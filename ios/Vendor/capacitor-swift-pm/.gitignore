@@ -1,6 +1,0 @@
-capacitor-checkout
-*.xcframework
-*.zip
-.swiftpm
-frameworks
-.build
