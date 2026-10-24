@@ -128,6 +128,28 @@ struct SearchReply: Codable {
     let degraded: Bool?
 }
 
+// MARK: - 检查更新（与 hw 同口径：三形态 + 交给系统浏览器/侧载工具）
+
+/// `latest` 字段（发行仓产物）
+struct UpdateArtifact: Codable {
+    let fileName: String
+    let versionName: String
+    let versionCode: Int
+    let size: Int?
+    let sha256: String?
+}
+
+/// `GET /api/update/check` 的返回
+struct UpdateCheckReply: Codable {
+    let available: Bool
+    struct Pair: Codable { let versionName: String; let versionCode: Int }
+    let current: Pair
+    let latest: UpdateArtifact?
+    let downloadPath: String
+    /// 浏览器/侧载工具发不出 Authorization 头，只能靠这个短期令牌换鉴权
+    let downloadToken: String
+}
+
 // MARK: - 集合页（专辑 / 歌手 / 歌单 / 榜单）
 
 /// `GET /api/albums/:id`

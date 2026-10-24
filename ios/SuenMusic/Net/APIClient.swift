@@ -367,6 +367,28 @@ final class APIClient {
     /// 只用于吞掉"没有字段需要读"的响应
     struct EmptyReply: Decodable {}
 
+    // MARK: 账号 / 更新
+
+    /// 修改密码（服务端会签发新会话，调用方必须 adopt 掉）
+    func changePassword(oldPassword: String, newPassword: String) async throws -> AuthSession {
+        struct Body: Encodable { let oldPassword: String; let newPassword: String }
+        let data = try JSONEncoder().encode(Body(oldPassword: oldPassword, newPassword: newPassword))
+        return try await send("/api/auth/password", method: "PATCH", body: data)
+    }
+
+    /// 检查更新（三形态的数据源）。`force` 只有用户手点才传 true。
+    func checkUpdate(versionName: String, versionCode: Int, force: Bool) async throws -> UpdateCheckReply {
+        var q = ["platform": "ios", "version_name": versionName, "version_code": String(versionCode)]
+        if force { q["force"] = "1" }
+        return try await get("/api/update/check", query: q)
+    }
+
+    /// 交给系统浏览器/侧载工具下载的直链（带短期令牌）
+    func updateDownloadURL(path: String, token: String) -> String {
+        baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            + path + "?platform=ios&token=" + token
+    }
+
     func favorites(limit: Int = 50, cursor: String? = nil) async throws -> FavoritePage {
         var q = ["limit": String(limit)]
         if let cursor { q["cursor"] = cursor }
