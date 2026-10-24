@@ -118,7 +118,6 @@ export struct SettingsPage {
   @State pwNew2: string = '';
   @State pwBusy: boolean = false;
   @State signOutAsk: boolean = false;
-  @State aboutOpen: boolean = false;
 
   // ---- T9：桌面卡片管理 ----
   /** 已添加的桌面卡片张数（-1 = 还没查） */
@@ -248,10 +247,13 @@ export struct SettingsPage {
     return this.userRole === 'admin' ? '管理员' : '用户';
   }
 
-  /** 头像位文字：昵称/账号首字符（本项目没有头像上传，用首字母圆牌，T8 §①） */
-  private avatarText(): string {
-    const n = this.userDisplay.length > 0 ? this.userDisplay : this.userName;
-    return n.length > 0 ? n.substring(0, 1).toUpperCase() : '?';
+  /**
+   * 账号信息行文案（单行，对齐其他行）：`昵称 用户名-角色`。
+   * 用户 2026-10-24 裁定：不要头像、不要两行、格式与其它行一致。
+   */
+  private accountLine(): string {
+    const name = this.userDisplay.length > 0 ? this.userDisplay : this.userName;
+    return name + ' ' + this.userName + '-' + this.roleLabel();
   }
 
   private pwReady(): boolean {
@@ -279,13 +281,6 @@ export struct SettingsPage {
     }
   }
 
-  /** 关于文案（版本取自 bundleManager；仓库是私有仓，不放进 UI） */
-  private aboutText(): string {
-    return 'SuenMusic v' + this.selfVersion()
-      + '（build ' + this.selfVersionCode() + '）\n\n'
-      + '单仓构建：服务端 + Web 面板 + 鸿蒙/iOS 原生客户端。\n'
-      + '本包未签名，用移动端侧载工具安装；数据只存在你自己的服务端上。';
-  }
 
   // ---------------- T9：桌面卡片管理 ----------------
 
@@ -1128,12 +1123,12 @@ export struct SettingsPage {
       .animation({ duration: Motion.standard, curve: Motion.curve }))
   }
 
-  /** 修改口令弹层（T8）：旧口令 + 新口令 ×2，服务端回新会话 */
+  /** 修改密码弹层（T8）：由「账号信息」行点击打开；旧密码 + 新密码 ×2，服务端回新会话 */
   @Builder
   passwordSheet() {
     Column({ space: Dim.s3 }) {
       this.sheetGrip()
-      this.sheetHead('修改口令')
+      this.sheetHead('修改密码')
       NeuInput({ content: this.pwOld, placeholder: '当前口令', password: true })
         .width('100%')
       NeuInput({ content: this.pwNew, placeholder: '新口令（至少 6 位）', password: true })
@@ -1505,50 +1500,22 @@ export struct SettingsPage {
             this.secLabel('账号')
             Column() {
               if (this.userName.length > 0) {
-                // 账号卡（T8 §①）：头像位 + 昵称 + 角色，独立面板卡而不是列表行
-                Row({ space: Dim.s3 }) {
-                  Text(this.avatarText())
-                    .fontSize(Dim.fsSection)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor(Tokens.badgeInk)
-                    .width(Dim.coverSm)
-                    .height(Dim.coverSm)
-                    .textAlign(TextAlign.Center)
-                    .borderRadius(Dim.radiusAvatar)
-                    .backgroundColor(Tokens.accent)
-                  Column({ space: Dim.s0 }) {
-                    // 第 ⑪ 条：优先显示服务端昵称（K_USER_DISPLAY），缺失回退登录名
-                    Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
-                      .fontSize(Dim.fsSub)
-                      .fontWeight(FontWeight.Medium)
+                // 账号信息行（用户 2026-10-24 裁定：去掉头像、不要两行、对齐其他行；
+                // 点这一行 = 修改密码，「关于」整行删除，「修改口令」行也随之取消）
+                Column() {
+                  Row() {
+                    Text(this.accountLine())
+                      .fontSize(Dim.fsBody)
                       .fontColor(Tokens.text1)
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    Text('@' + this.userName + ' · ' + this.roleLabel())
-                      .fontSize(Dim.fsCaption)
-                      .fontColor(Tokens.text2)
-                      .maxLines(1)
-                  }
-                  .alignItems(HorizontalAlign.Start)
-                  .layoutWeight(1)
-                }
-                .width('100%')
-                .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
-                .accessibilityText('账号 ' + this.userName + '，' + this.roleLabel())
-
-                // 修改口令（PATCH /api/auth/password，服务端回新会话）
-                Column() {
-                  Row() {
-                    Text('修改口令')
-                      .fontSize(Dim.fsBody)
-                      .fontColor(Tokens.text1)
                       .layoutWeight(1)
                     WebIcon(WebIconName.CHEVRON_RIGHT, Dim.icon16, Tokens.text2)
                   }
                   .width('100%')
                   .height(Dim.touchMin)
                   .padding({ left: Dim.s4, right: Dim.s4 })
-                  .accessibilityText('修改登录口令')
+                  .accessibilityText('账号信息 ' + this.accountLine() + '，点击修改密码')
                   .onClick(() => {
                     this.pwOld = '';
                     this.pwNew = '';
@@ -1557,29 +1524,6 @@ export struct SettingsPage {
                   })
                 }
                 .width('100%')
-                .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
-
-                // 关于（T8 §通用）
-                Column() {
-                  Row() {
-                    Text('关于 SuenMusic')
-                      .fontSize(Dim.fsBody)
-                      .fontColor(Tokens.text1)
-                      .layoutWeight(1)
-                    Text('v' + this.selfVersion())
-                      .fontSize(Dim.fsMinor)
-                      .fontColor(Tokens.text2)
-                  }
-                  .width('100%')
-                  .height(Dim.touchMin)
-                  .padding({ left: Dim.s4, right: Dim.s4 })
-                  .accessibilityText('关于 SuenMusic')
-                  .onClick(() => {
-                    this.aboutOpen = true;
-                  })
-                }
-                .width('100%')
-                .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
 
                 // 退出登录（红字行 + 二次确认）
                 Column() {
@@ -1795,21 +1739,6 @@ export struct SettingsPage {
         })
       }
 
-      // T8：关于
-      if (this.aboutOpen) {
-        ConfirmDialog({
-          titleStr: '关于 SuenMusic',
-          messageStr: this.aboutText(),
-          confirmLabel: '知道了',
-          singleFlag: true,
-          onConfirm: (): void => {
-            this.aboutOpen = false;
-          },
-          onCancel: (): void => {
-            this.aboutOpen = false;
-          }
-        })
-      }
 
       // T9：卡片添加/使用说明
       if (this.cardHelpOpen) {
