@@ -247,13 +247,14 @@ export struct SettingsPage {
     return this.userRole === 'admin' ? '管理员' : '用户';
   }
 
-  /**
-   * 账号信息行文案（单行，对齐其他行）：`昵称 用户名-角色`。
-   * 用户 2026-10-24 裁定：不要头像、不要两行、格式与其它行一致。
-   */
-  private accountLine(): string {
-    const name = this.userDisplay.length > 0 ? this.userDisplay : this.userName;
-    return name + ' ' + this.userName + '-' + this.roleLabel();
+  /** 账号行左侧：昵称（缺失回退登录名） */
+  private accountName(): string {
+    return this.userDisplay.length > 0 ? this.userDisplay : this.userName;
+  }
+
+  /** 账号行右侧：`用户名-角色`（与其它行的右侧说明同字号/同色，用户 2026-10-24 裁定） */
+  private accountTag(): string {
+    return this.userName + '-' + this.roleLabel();
   }
 
   private pwReady(): boolean {
@@ -1504,18 +1505,22 @@ export struct SettingsPage {
                 // 点这一行 = 修改密码，「关于」整行删除，「修改口令」行也随之取消）
                 Column() {
                   Row() {
-                    Text(this.accountLine())
+                    // 左侧昵称、右侧「用户名-角色」，与其它行（左标题 / 右说明）同构；不带箭头
+                    Text(this.accountName())
                       .fontSize(Dim.fsBody)
                       .fontColor(Tokens.text1)
                       .maxLines(1)
                       .textOverflow({ overflow: TextOverflow.Ellipsis })
                       .layoutWeight(1)
-                    WebIcon(WebIconName.CHEVRON_RIGHT, Dim.icon16, Tokens.text2)
+                    Text(this.accountTag())
+                      .fontSize(Dim.fsMinor)
+                      .fontColor(Tokens.text2)
+                      .maxLines(1)
                   }
                   .width('100%')
                   .height(Dim.touchMin)
                   .padding({ left: Dim.s4, right: Dim.s4 })
-                  .accessibilityText('账号信息 ' + this.accountLine() + '，点击修改密码')
+                  .accessibilityText('账号信息 ' + this.accountName() + ' ' + this.accountTag() + '，点击修改密码')
                   .onClick(() => {
                     this.pwOld = '';
                     this.pwNew = '';
