@@ -198,7 +198,7 @@ struct HomeView: View {
 
     private func songRow(_ track: Track, index: Int, all: [Track], startAt: Int) -> some View {
         Button {
-            Task { await player.play(tracks: all, startingAt: startAt) }
+            Task { await player.play(tracks: all, startingAt: startAt, origin: "首页") }
         } label: {
             HStack(spacing: Dim.s3) {
                 Text(String(format: "%02d", index))

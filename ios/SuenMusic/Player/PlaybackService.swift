@@ -21,13 +21,37 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     @Published private(set) var positionMs: Int = 0
     @Published private(set) var durationMs: Int = 0
     @Published private(set) var loading: Bool = false
+    /// 仅用于"引擎都起不来"这类**无法归入播放失败语义**的硬错误（不再用于逐曲失败）
     @Published var errorMessage: String?
     /// 音源角标：bilibili / netease
     @Published private(set) var source: String = "bilibili"
+    /// 队列来源（eyebrow「正在播放 · 来源」用，setQueue 装载方写入）
+    @Published private(set) var origin: String = ""
+    /// 手动点播到无音源曲目：eyebrow 显示「无音源」，**不跳不弹任何按钮**（用户 2026-10-23 定的规格）
+    @Published private(set) var noSource: Bool = false
 
     private var engine: AudioEngine?
     private var sessionToken: String?
     private var tokenExpiresAt: Date = .distantPast
+
+    // MARK: 失败语义（与 hw `MediaPlayerCore` 逐条对齐）
+
+    /// 失败先挂起 2.5s：AVPlayer 对 5xx 会自行重试，瞬时失败不该惊动用户
+    private static let failGraceMs = 2500
+    /// 装载看门狗：6s 内没进 playing 就当失败
+    private static let stallMs = 6000
+    /// 连续失败达到此数 → 暂停 + 通知，不再逐首跳
+    private static let maxFailStreak = 2
+    /// 连播静默跳过的延迟（服务端瞬时抖动时不至于把整条队列连跳掉）
+    private static let skipDelayMs = 600
+    /// 无音源文案（hw `NO_SOURCE_LABEL`）
+    static let noSourceLabel = "无音源"
+
+    /// true = 这次装载由**用户手动点播**触发（失败要停下并标无音源），false = 连播自动切
+    private var manualLoad = false
+    private var failStreak = 0
+    private var graceTask: Task<Void, Never>?
+    private var loadWatchdog: Task<Void, Never>?
 
     var currentTrack: Track? {
         guard queue.indices.contains(currentIndex) else { return nil }
@@ -66,13 +90,19 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
 
     // MARK: 用户意图
 
-    func play(tracks: [Track], startingAt index: Int) async {
+    func play(tracks: [Track], startingAt index: Int, origin: String = "") async {
         guard !tracks.isEmpty, tracks.indices.contains(index) else { return }
         guard let engine = ensureEngine() else { return }
         loading = true
         errorMessage = nil
+        noSource = false
+        failStreak = 0
+        // 手动点播：失败要停在当前曲并标「无音源」，不自动跳（hw `manualLoad = true`）
+        manualLoad = true
+        self.origin = origin
         queue = tracks
         currentIndex = index
+        armLoadWatchdog()
 
         let token = await validToken()
         let mapped = tracks.map(Self.toNative)
@@ -97,8 +127,18 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         if playing { engine.pause() } else { engine.play() }
     }
 
-    func next() { _ = engine?.skipToNext() }
-    func prev() { _ = engine?.skipToPrevious() }
+    /// 手动切歌：失败同样停在目标曲并标「无音源」
+    func next() {
+        manualLoad = true
+        armLoadWatchdog()
+        _ = engine?.skipToNext()
+    }
+
+    func prev() {
+        manualLoad = true
+        armLoadWatchdog()
+        _ = engine?.skipToPrevious()
+    }
     func seek(to ms: Int) { engine?.seek(to: max(0, ms)) }
 
     func setRepeat(_ mode: String) { engine?.setRepeatMode(mode) }
@@ -127,18 +167,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
 
     // MARK: AudioEngineEvents（引擎在主线程回调，这里可直接改 @Published）
 
-    nonisolated func emitProgress(index: Int, positionMs: Int, durationMs: Int, playing: Bool) {
-        Task { @MainActor in
-            if self.currentIndex != index { self.currentIndex = index }
-            self.positionMs = positionMs
-            if durationMs > 0 { self.durationMs = durationMs }
-            self.playing = playing
-            self.loading = false
-        }
-    }
-
     nonisolated func emitTrackChange(index: Int, id: String, reason: Int) {
         Task { @MainActor in
+            // reason 1 = 播完自动切下一首（hw：advance 走 manualLoad=false）
+            if reason == 1 { self.manualLoad = false }
             self.currentIndex = index
             // 时长先落元数据值，等流的精确值（X-Audio-Duration-Ms）回来再覆盖
             if self.queue.indices.contains(index) { self.durationMs = self.queue[index].dt }
@@ -148,14 +180,127 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     nonisolated func emitState(playing: Bool) {
         Task { @MainActor in
             self.playing = playing
-            if playing { self.loading = false }
+            if playing {
+                self.loading = false
+                self.markLoaded()
+            }
+        }
+    }
+
+    nonisolated func emitProgress(index: Int, positionMs: Int, durationMs: Int, playing: Bool) {
+        Task { @MainActor in
+            if self.currentIndex != index { self.currentIndex = index }
+            self.positionMs = positionMs
+            if durationMs > 0 { self.durationMs = durationMs }
+            self.playing = playing
+            self.loading = false
+            if playing { self.markLoaded() }
         }
     }
 
     nonisolated func emitError(message: String) {
         Task { @MainActor in
-            self.errorMessage = message
             self.loading = false
+            self.scheduleFailureSettle(message: message)
+        }
+    }
+
+    // MARK: - 失败落定（hw `MediaPlayerCore.settleFailure` 逐条对齐）
+
+    /// 进入 playing：清掉宽限/看门狗、连续失败计数、无音源标记
+    private func markLoaded() {
+        failStreak = 0
+        noSource = false
+        graceTask?.cancel()
+        graceTask = nil
+        loadWatchdog?.cancel()
+        loadWatchdog = nil
+    }
+
+    /// 装载看门狗：6s 内没进 playing 按失败处理
+    private func armLoadWatchdog() {
+        loadWatchdog?.cancel()
+        loadWatchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.stallMs) * 1_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !self.playing else { return }
+                self.scheduleFailureSettle(message: "装载超时")
+            }
+        }
+    }
+
+    /// 失败先挂起 2.5s：期间若已经播起来（AVPlayer 对 5xx 会自愈）就完全忽略
+    private func scheduleFailureSettle(message: String) {
+        graceTask?.cancel()
+        graceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(Self.failGraceMs) * 1_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await MainActor.run {
+                guard !self.playing else { return }   // 宽限窗口内自愈 → 不惊动用户
+                self.settleFailure(message: message)
+            }
+        }
+    }
+
+    private func settleFailure(message: String) {
+        graceTask?.cancel()
+        graceTask = nil
+        loadWatchdog?.cancel()
+        loadWatchdog = nil
+        // 必须把"已暂停"推给系统：否则锁屏/控制中心会按上次 playing 自行外推进度
+        engine?.pause()
+        playing = false
+        loading = false
+        failStreak += 1
+
+        let title = currentTrack?.name ?? ""
+        let hasWayOut = currentIndex + 1 < queue.count
+
+        // ① 连续失败：暂停 + 通知，不再逐首跳
+        if failStreak >= Self.maxFailStreak {
+            errorMessage = nil
+            noSource = false
+            Notifier.notify(title: "连续多首没有匹配音源", body: "已暂停播放，请检查网络或稍后再试")
+            return
+        }
+
+        // ② 连播（非手动）且还有下一首：**页面不留任何报错**，只发通知 + 600ms 后跳过
+        if !manualLoad && hasWayOut {
+            errorMessage = nil
+            noSource = false
+            Notifier.notify(title: "没有匹配音源", body: "《\(title)》没有可播放的匹配音源，已自动跳过")
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(Self.skipDelayMs) * 1_000_000)
+                guard let self, !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.manualLoad = false
+                    self.next()
+                    self.manualLoad = false
+                }
+            }
+            return
+        }
+
+        // ③ 手动点播（或连播已无路可走）：停住，只在 eyebrow 显示「无音源」
+        errorMessage = nil
+        noSource = true
+    }
+
+    /// 顶栏 eyebrow（hw `eyebrowText` 同口径）：无音源/错误 > 「正在播放/已停止 · 来源」
+    var eyebrowText: String {
+        if noSource { return Self.noSourceLabel }
+        if let err = errorMessage, !err.isEmpty { return err }
+        let status = playing ? "正在播放" : "已停止"
+        return origin.isEmpty ? status : "\(status) · \(origin)"
+    }
+
+    /// 音源文案（hw `sourceLabel` 同口径：bilibili / 网易云 / 未匹配）
+    var sourceLabel: String {
+        switch source {
+        case "bilibili": return "bilibili"
+        case "netease": return "网易云"
+        default: return "未匹配"
         }
     }
 }
