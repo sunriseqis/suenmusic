@@ -22,6 +22,7 @@
 		6943CEF364CE159C8EC8E858 /* PlayerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0CF227A3143F8E5E4969B1 /* PlayerView.swift */; };
 		C6B0D1DBAC49E102F3AD73A0 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E3C902A5F403A811FD14B41 /* RootView.swift */; };
 		361F98B71E8C983A6BFFF648 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E162C675C8DD23CC5669487 /* SettingsView.swift */; };
+		A693E0F4B1952EA1D227FCA9 /* SkeletonList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799441B953B7EEBAD4A157A6 /* SkeletonList.swift */; };
 		82B3A16A629F6329B595DDFA /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE040F4F7A3752C1E9CC220 /* Theme.swift */; };
 		DB249DB9D0FF833647E29581 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6F9973165E2B0FD4A3AAC566 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
@@ -42,6 +43,7 @@
 		4B0CF227A3143F8E5E4969B1 /* PlayerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerView.swift; sourceTree = "<group>"; };
 		1E3C902A5F403A811FD14B41 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		7E162C675C8DD23CC5669487 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		799441B953B7EEBAD4A157A6 /* SkeletonList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonList.swift; sourceTree = "<group>"; };
 		7FE040F4F7A3752C1E9CC220 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		6F9973165E2B0FD4A3AAC566 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		13EBF53C97796A7B6D8673EB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -120,6 +122,7 @@
 				4B0CF227A3143F8E5E4969B1 /* PlayerView.swift */,
 				1E3C902A5F403A811FD14B41 /* RootView.swift */,
 				7E162C675C8DD23CC5669487 /* SettingsView.swift */,
+				799441B953B7EEBAD4A157A6 /* SkeletonList.swift */,
 				7FE040F4F7A3752C1E9CC220 /* Theme.swift */,
 			);
 			path = UI;
@@ -226,6 +229,7 @@
 				6943CEF364CE159C8EC8E858 /* PlayerView.swift in Sources */,
 				C6B0D1DBAC49E102F3AD73A0 /* RootView.swift in Sources */,
 				361F98B71E8C983A6BFFF648 /* SettingsView.swift in Sources */,
+				A693E0F4B1952EA1D227FCA9 /* SkeletonList.swift in Sources */,
 				82B3A16A629F6329B595DDFA /* Theme.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

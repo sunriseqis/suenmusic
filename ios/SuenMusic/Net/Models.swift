@@ -70,7 +70,20 @@ struct Album: Codable, Identifiable, Hashable {
     let id: String
     let name: String
     let picUrl: String
+    /// 主歌手（详情/搜索接口给；新碟接口给的是 artists 数组）
     let singerName: String?
+    /// 发行日（`YYYY-MM-DD` 形态，新碟接口才有）—— 海报日期角标用；对齐 hw `Album.publishTime`
+    let publishTime: String?
+    /// 歌手列表（新碟接口给 artists）—— 海报副行用；对齐 hw `Album.artists`
+    let artists: [TrackArtist]?
+
+    /// 海报副行文案（hw `albumArtistLine` 同口径：artists 优先，逐名拼接「/」，空则回退 singerName）
+    var artistLine: String {
+        let names = (artists ?? []).map(\.name).filter { !$0.isEmpty }
+        if !names.isEmpty { return names.joined(separator: " / ") }
+        if let s = singerName, !s.isEmpty { return s }
+        return ""
+    }
 }
 
 struct HomeData: Codable {
