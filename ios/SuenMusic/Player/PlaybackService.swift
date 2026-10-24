@@ -172,6 +172,9 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             // reason 1 = 播完自动切下一首（hw：advance 走 manualLoad=false）
             if reason == 1 { self.manualLoad = false }
             self.currentIndex = index
+            self.noSource = false
+            // 换歌是元数据变更 → 立刻推 Live Activity（不受 1s 地板限制）
+            self.pushActivity(force: true)
             // 时长先落元数据值，等流的精确值（X-Audio-Duration-Ms）回来再覆盖
             if self.queue.indices.contains(index) { self.durationMs = self.queue[index].dt }
         }
@@ -184,6 +187,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 self.loading = false
                 self.markLoaded()
             }
+            self.pushActivity(force: false)
         }
     }
 
@@ -287,7 +291,24 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         noSource = true
     }
 
-    /// 顶栏 eyebrow（hw `eyebrowText` 同口径）：无音源/错误 > 「正在播放/已停止 · 来源」
+    /// 推一次 Live Activity / 灵动岛状态。
+    /// force = true 时用于换歌/播放暂停等必须即时的变更；进度类走控制器内部 1s 地板（与 hw 卡片同值）。
+    private func pushActivity(force: Bool) {
+        let track = currentTrack
+        let state = PlaybackActivityAttributes.ContentState(
+            title: track?.name ?? "",
+            artist: track?.artistLine ?? "",
+            album: track?.al.name ?? "",
+            coverUrl: track?.al.picUrl ?? "",
+            positionMs: positionMs,
+            durationMs: durationMs,
+            playing: playing,
+            sourceLabel: sourceLabel
+        )
+        LiveActivityController.shared.sync(state: state, force: force)
+    }
+
+    /// 顶栏 eyebrow（hw eyebrowText 同口径）：无音源/错误 > 「正在播放/已停止 · 来源」
     var eyebrowText: String {
         if noSource { return Self.noSourceLabel }
         if let err = errorMessage, !err.isEmpty { return err }
