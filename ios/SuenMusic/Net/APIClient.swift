@@ -212,6 +212,16 @@ final class APIClient {
         try await send(path, method: "GET", query: query)
     }
 
+    /// 搜索（对齐 hw `APIClient.search`）：type 取 all/song/album/artist/playlist/mv
+    func search(keyword: String, type: String = "all", page: Int = 1, limit: Int = 30) async throws -> SearchReply {
+        try await get("/api/search", query: [
+            "q": keyword,
+            "type": type,
+            "page": String(page),
+            "limit": String(limit),
+        ])
+    }
+
     func post<T: Decodable, B: Encodable>(_ path: String, body: B) async throws -> T {
         let data = try JSONEncoder().encode(body)
         return try await send(path, method: "POST", body: data)

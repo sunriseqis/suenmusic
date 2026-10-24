@@ -93,6 +93,41 @@ struct HomeData: Codable {
     let welcomePhrase: String?
 }
 
+// MARK: - 搜索
+
+/// 分片级「还有下一页」（服务端 `hasMore`；**不能**用 songs.count 推断，搜歌手时 songs 恒空）
+struct SearchHasMore: Codable, Hashable {
+    let song: Bool
+    let album: Bool
+    let artist: Bool
+    let playlist: Bool
+}
+
+/// 歌单卡（搜索结果/歌单页共用）
+struct PlaylistCard: Codable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let picUrl: String
+    let creatorName: String?
+
+    var subLine: String { creatorName ?? "" }
+}
+
+/// `GET /api/search` 的返回
+struct SearchReply: Codable {
+    let query: String
+    let type: String
+    let page: Int
+    let limit: Int
+    let songs: [Track]
+    let albums: [Album]
+    let artists: [TrackArtist]
+    let playlists: [PlaylistCard]
+    let hasMore: SearchHasMore
+    /// 上游降级（部分分片缺失）时的提示文案
+    let degraded: Bool?
+}
+
 // MARK: - 音源解析
 
 struct ResolveResponse: Codable {
