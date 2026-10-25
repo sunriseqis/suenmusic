@@ -73,6 +73,10 @@ struct FavoritesView: View {
         .task {
             if items.isEmpty { await load(reset: true) }
             player.warm(shownTracks, limit: 10)
+            // 收藏是分页的（每页 30），但「收藏列表即队列」—— 必须把剩余分页也拉完，
+            // 否则从收藏页点歌，队列只有当前这一页的 30 首（用户实测「播放队列只装填 30 首」）。
+            await loadAll()
+            player.warm(shownTracks, limit: 10)
         }
         .onReceive(NotificationCenter.default.publisher(for: RefreshSignal.name)) { note in
             guard (note.object as? Int) == 2 else { return }
@@ -297,6 +301,8 @@ struct FavoritesView: View {
     }
 
     private func play(at index: Int) async {
+        // 队列必须是「全部收藏」，不是当前这一页：没拉完就先补齐再起播
+        if !reachedEnd { await loadAll() }
         guard shownTracks.indices.contains(index) else { return }
         await player.play(tracks: shownTracks, startingAt: index, origin: "收藏")
     }
