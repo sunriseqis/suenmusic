@@ -124,13 +124,16 @@ struct PlaybackLiveActivityWidget: Widget {
                         .tint(DesignTokens.accent)
                 }
             } compactLeading: {
+                // 单击岛 → 打开 App 并落到播放页（系统规定 tap 只能打开 App，用 URL 指定落地页）
                 PlaybackIslandCover(jpeg: context.state.coverJPEG)
+                    .widgetURL(URL(string: "suenmusic://player"))
             } compactTrailing: {
                 Image(systemName: context.state.playing ? "pause.fill" : "play.fill")
                     .font(.system(size: Dim.icon12))
                     .foregroundStyle(DesignTokens.accent)
             } minimal: {
                 PlaybackIslandCover(jpeg: context.state.coverJPEG)
+                    .widgetURL(URL(string: "suenmusic://player"))
             }
             .keylineTint(DesignTokens.accent)
         }

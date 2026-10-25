@@ -18,6 +18,15 @@ struct RootView: View {
         .sheet(isPresented: $showPlayer) {
             PlayerView()
         }
+        // 灵动岛 / 锁屏卡点击 → suenmusic://player：直接落到播放页（对应 widget 的 .widgetURL）
+        .onOpenURL { url in
+            guard url.scheme == "suenmusic" else { return }
+            if url.host == "player" {
+                showPlayer = true
+            } else if let host = url.host, let index = Int(host) {
+                tab = index
+            }
+        }
     }
 
     private var mainTabs: some View {
