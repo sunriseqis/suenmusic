@@ -80,24 +80,25 @@ struct Palette {
     let posterScrimMid: Color
 
     init(_ scheme: ColorScheme) {
-        let dark = scheme == .dark
-        bg = dark ? DesignTokens.bg : DesignTokens.bgLight
-        panel = dark ? DesignTokens.panel : DesignTokens.panelLight
-        panel2 = dark ? DesignTokens.panel2 : DesignTokens.panel2Light
-        line = dark ? DesignTokens.line : DesignTokens.lineLight
-        text1 = dark ? DesignTokens.text1 : DesignTokens.text1Light
-        text2 = dark ? DesignTokens.text2 : DesignTokens.text2Light
-        accent = dark ? DesignTokens.accent : DesignTokens.accentLight
-        accentText = dark ? DesignTokens.accentText : DesignTokens.accentTextLight
-        // hw：accent 底上的文字用 badgeInk（深色底上的深墨字），浅色主题同值
+        // token 已是动态色（自带 light/dark 两值），这里不再按 scheme 分叉：
+        // 保留 `Palette(scheme)` 签名只为不动既有页面的调用点。
+        bg = DesignTokens.bg
+        panel = DesignTokens.panel
+        panel2 = DesignTokens.panel2
+        line = DesignTokens.line
+        text1 = DesignTokens.text1
+        text2 = DesignTokens.text2
+        accent = DesignTokens.accent
+        accentText = DesignTokens.accentText
+        // hw：accent 底上的文字用 badgeInk（浅色白墨 / 深色深墨，随主题自动切）
         onAccent = DesignTokens.badgeInk
-        danger = dark ? DesignTokens.danger : DesignTokens.dangerLight
-        track = dark ? DesignTokens.track : DesignTokens.trackLight
-        hi = dark ? DesignTokens.hi : DesignTokens.hiLight
-        scrim = dark ? DesignTokens.scrim : DesignTokens.scrimLight
+        danger = DesignTokens.danger
+        track = DesignTokens.track
+        hi = DesignTokens.hi
+        scrim = DesignTokens.scrim
         badgeInk = DesignTokens.badgeInk
-        dateChip = dark ? DesignTokens.dateChip : DesignTokens.dateChipLight
-        posterScrim = dark ? DesignTokens.posterScrim : DesignTokens.posterScrimLight
-        posterScrimMid = dark ? DesignTokens.posterScrimMid : DesignTokens.posterScrimMidLight
+        dateChip = DesignTokens.dateChip
+        posterScrim = DesignTokens.posterScrim
+        posterScrimMid = DesignTokens.posterScrimMid
     }
 }

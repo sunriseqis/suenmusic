@@ -407,4 +407,160 @@ final class APIClient {
         if relative.hasPrefix("http") { return relative }
         return base + (relative.hasPrefix("/") ? relative : "/" + relative)
     }
+
+    /// 路径段转义（服务端 `:id` / `:type` 都是单段，斜杠不能出现）
+    private func seg(_ raw: String) -> String {
+        raw.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? raw
+    }
+
+    // MARK: 收藏内容 / 导入 / 去重
+
+    /// 收藏的曲目内容（服务端一次补齐，上限 500 首）
+    func favoriteTracks(limit: Int = 500) async throws -> [Track] {
+        struct Reply: Decodable { let tracks: [Track] }
+        let r: Reply = try await get("/api/favorites/tracks", query: ["limit": String(limit)])
+        return r.tracks
+    }
+
+    /// 用完整曲目对象批量导入收藏（服务端 500 首封顶，重复的自动跳过）
+    func importFavorites(_ tracks: [Track]) async throws -> ImportReply {
+        struct Body: Encodable { let tracks: [Track] }
+        let data = try JSONEncoder().encode(Body(tracks: tracks))
+        return try await send("/api/favorites/import", method: "POST", body: data)
+    }
+
+    /// 从 QQ 音乐歌单链接 / 歌单 id 直接导入收藏（服务端自动去重）
+    func importQqPlaylist(link: String) async throws -> QqImportReply {
+        struct Body: Encodable { let link: String }
+        let data = try JSONEncoder().encode(Body(link: link))
+        return try await send("/api/favorites/import-qq-playlist", method: "POST", body: data)
+    }
+
+    /// 去重预检：只读，返回重复分组（每组保留最早收藏的一首）
+    func dedupPreview() async throws -> DedupPreview {
+        try await send("/api/favorites/dedup/preview", method: "POST", body: Data("{}".utf8))
+    }
+
+    /// 执行去重：真正删除每组里除最早收藏以外的曲目
+    func dedupApply() async throws -> DedupResult {
+        try await send("/api/favorites/dedup", method: "POST", body: Data("{}".utf8))
+    }
+
+    // MARK: 推荐黑名单
+
+    /// 「不喜欢」列表（曲目 / 歌手两型）
+    func dislikes() async throws -> [DislikeEntry] {
+        struct Reply: Decodable { let dislikes: [DislikeEntry] }
+        let r: Reply = try await get("/api/recommend/dislikes")
+        return r.dislikes
+    }
+
+    /// 记一条「不喜欢」。type 取 `track` / `artist`（歌手型会连带解绑用户曲库归属）
+    func addDislike(type: String, id: String, name: String) async throws {
+        struct Body: Encodable { let type: String; let id: String; let name: String }
+        let data = try JSONEncoder().encode(Body(type: type, id: id, name: name))
+        let _: EmptyReply = try await send("/api/recommend/dislike", method: "POST", body: data)
+    }
+
+    /// 撤销一条「不喜欢」（幂等）
+    func removeDislike(type: String, id: String) async throws {
+        let _: EmptyReply = try await send(
+            "/api/recommend/dislike/\(seg(type))/\(seg(id))", method: "DELETE"
+        )
+    }
+
+    // MARK: 用户画像
+
+    /// 当前用户画像（摘要 + 画像行 + 台账行）
+    func persona() async throws -> PersonaReply {
+        try await get("/api/ai/persona")
+    }
+
+    /// 用一句引导意见调优画像。服务端把结果包在 `persona` 里
+    func tunePersona(guidance: String) async throws -> PersonaReply {
+        struct Body: Encodable { let guidance: String }
+        struct Reply: Decodable { let persona: PersonaReply }
+        let data = try JSONEncoder().encode(Body(guidance: guidance))
+        let r: Reply = try await send("/api/ai/persona/tune", method: "POST", body: data)
+        return r.persona
+    }
+
+    // MARK: 音源账号
+
+    /// B 站账号状态（全站共用一份凭证；判定看 `configured`）
+    func bilibiliAccount() async throws -> SourceAccount {
+        try await get("/api/bilibili/account")
+    }
+
+    /// 网易云账号状态（`account` 可能为 null 而 `configured` 为 true，判定看 `configured`）
+    func neteaseAccount() async throws -> SourceAccount {
+        try await get("/api/netease/account")
+    }
+
+    // MARK: 手动锚定
+
+    /// 当前锚点。**没有锚点时服务端回 `{ "anchor": null }`，这里是 nil 而不是抛错**
+    func trackAnchor(_ trackId: String) async throws -> AnchorInfo? {
+        struct Reply: Decodable { let anchor: AnchorInfo? }
+        let r: Reply = try await get("/api/tracks/\(seg(trackId))/anchor")
+        return r.anchor
+    }
+
+    /// 锚定「这首曲 = 这个 B 站视频」。服务端只回 `{ ok, trackId, bvid }`，
+    /// 所以写完再读一次，拿齐 title / author / durationSec
+    @discardableResult
+    func setAnchor(_ trackId: String, bvid: String) async throws -> AnchorInfo {
+        struct Body: Encodable { let bvid: String }
+        struct Reply: Decodable { let ok: Bool?; let trackId: String?; let bvid: String? }
+        let data = try JSONEncoder().encode(Body(bvid: bvid))
+        let r: Reply = try await send("/api/tracks/\(seg(trackId))/anchor", method: "POST", body: data)
+        if let anchor = try? await trackAnchor(trackId) { return anchor }
+        return AnchorInfo(trackId: r.trackId ?? trackId, bvid: r.bvid ?? bvid, pinned: true)
+    }
+
+    /// 解除锚定（之后该曲目回到正常自动匹配）
+    func removeAnchor(_ trackId: String) async throws {
+        let _: EmptyReply = try await send("/api/tracks/\(seg(trackId))/anchor", method: "DELETE")
+    }
+
+    // MARK: 批量解析 / 流会话令牌
+
+    /// 播放队列预取：服务端串行解析（最多 10 首），返回按 trackId 索引的结果
+    func resolveBatch(_ ids: [String]) async throws -> [String: ResolveReply] {
+        struct Body: Encodable { let trackIds: [String] }
+        struct Reply: Decodable { let results: [ResolveReply] }
+        let data = try JSONEncoder().encode(Body(trackIds: ids))
+        let r: Reply = try await send("/api/resolve/batch", method: "POST", body: data)
+        var out: [String: ResolveReply] = [:]
+        for item in r.results {
+            guard let key = item.trackId, !key.isEmpty, out[key] == nil else { continue }
+            out[key] = item
+        }
+        return out
+    }
+
+    /// 会话级流令牌（绑定 `*`，给原生播放器整条队列一次签发）
+    func streamSessionToken() async throws -> String {
+        struct Reply: Decodable { let token: String; let expiresInMs: Int? }
+        let r: Reply = try await get("/api/stream/session-token")
+        return r.token
+    }
+
+    /// 探测任意 base 的 `/api/health`（免鉴权）。2 秒超时；**必须校验返回体 `ok == true`**
+    /// —— 门户劫持 / 反代错误页也会回 200
+    func health(base: String) async -> Bool {
+        let root = base.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: root + "/api/health") else { return false }
+        var req = URLRequest(url: url)
+        req.timeoutInterval = 2
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            guard let http = resp as? HTTPURLResponse, http.statusCode == 200 else { return false }
+            struct Reply: Decodable { let ok: Bool? }
+            return (try? JSONDecoder().decode(Reply.self, from: data))?.ok == true
+        } catch {
+            return false
+        }
+    }
 }

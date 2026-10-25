@@ -253,6 +253,207 @@ struct DailyRecommend: Codable {
     let message: String?
 }
 
+// MARK: - 收藏导入 / 去重（`/api/favorites/*`）
+
+/// `POST /api/favorites/import` 的返回
+struct ImportReply: Decodable {
+    let ok: Bool?
+    /// 服务端收到的曲目数（含已收藏的）
+    let received: Int?
+    /// 真正新加入收藏的数量（已存在的不计数）
+    let added: Int?
+    let total: Int?
+}
+
+/// `POST /api/favorites/import-qq-playlist` 的返回
+struct QqImportReply: Decodable {
+    let ok: Bool?
+    let playlistName: String?
+    let received: Int?
+    let added: Int?
+    let skipped: Int?
+    let total: Int?
+}
+
+/// 去重分组（服务端同一份数据给了 `duplicateGroups` / `groups` 两个键）
+struct DedupGroup: Decodable {
+    let key: String?
+    let name: String?
+    let artist: String?
+    let total: Int?
+    let count: Int?
+    let keepTrackId: String?
+    let keepId: String?
+    let removeTrackIds: [String]?
+    let removeIds: [String]?
+}
+
+/// `POST /api/favorites/dedup/preview` 的返回（只读预检，不删任何东西）
+struct DedupPreview: Decodable {
+    let ok: Bool?
+    let duplicateCount: Int?
+    let groupsCount: Int?
+    let duplicateGroups: [DedupGroup]?
+    let groups: [DedupGroup]?
+
+    /// 服务端最多回 100 组；两个键名任取其一
+    var resolvedGroups: [DedupGroup] { duplicateGroups ?? groups ?? [] }
+}
+
+/// `POST /api/favorites/dedup` 的返回
+struct DedupResult: Decodable {
+    let ok: Bool?
+    let removedCount: Int?
+    let remainingCount: Int?
+}
+
+// MARK: - 推荐黑名单（`/api/recommend/*`）
+
+/// `GET /api/recommend/dislikes` 的列表项
+struct DislikeEntry: Decodable, Identifiable {
+    /// `track` / `artist`
+    let type: String?
+    /// 曲目 id 或歌手 mid
+    let targetId: String?
+    let name: String?
+    let createdAt: Double?
+
+    var id: String { "\(type ?? "")::\(targetId ?? "")" }
+}
+
+// MARK: - 用户画像（`/api/ai/persona*`）
+
+/// `GET /api/ai/persona`（裸对象）与 `POST /api/ai/persona/tune`（`persona` 包裹）共用
+struct PersonaReply: Decodable {
+    let summary: String?
+    let profileLines: [String]
+    let ledgerLines: [String]
+    let lastGuidance: String?
+    /// 毫秒时间戳；从未生成过时为 null
+    let updatedAt: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case summary, profileLines, ledgerLines, lastGuidance, updatedAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        profileLines = try c.decodeIfPresent([String].self, forKey: .profileLines) ?? []
+        ledgerLines = try c.decodeIfPresent([String].self, forKey: .ledgerLines) ?? []
+        lastGuidance = try c.decodeIfPresent(String.self, forKey: .lastGuidance)
+        updatedAt = try c.decodeIfPresent(Double.self, forKey: .updatedAt)
+    }
+}
+
+// MARK: - 音源账号（B 站 / 网易云，全站共用一份出网身份）
+
+/// `GET /api/bilibili/account` 与 `GET /api/netease/account`（两源同构）
+struct SourceAccount: Decodable {
+    /// B 站是 `mid`、网易云是 `userId`，其余字段两源共用
+    struct Inner: Decodable {
+        let name: String?
+        let mid: Int?
+        let userId: Int?
+        let face: String?
+        let vip: Bool?
+        let vipType: Int?
+        let loggedInAt: Double?
+    }
+
+    /// 是否有一份可用的凭证。**判定必须优先它**：网易云的 `account` 可能是 null
+    /// 而 `configured` 为 true（环境变量兜底），拿 account 判空会误报未登录
+    let configured: Bool
+    /// `database` / `env` / `none`
+    let source: String?
+    let account: Inner?
+    /// B 站独有：凭证里有没有 SESSDATA（缺它等于没登录）
+    let hasSessdata: Bool?
+    let canLogout: Bool?
+
+    /// 账号昵称（两源都在 `account.name`）
+    var name: String? { account?.name }
+    var isConfigured: Bool { configured }
+
+    enum CodingKeys: String, CodingKey {
+        case configured, source, account, hasSessdata, canLogout
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        configured = try c.decodeIfPresent(Bool.self, forKey: .configured) ?? false
+        source = try c.decodeIfPresent(String.self, forKey: .source)
+        account = try c.decodeIfPresent(Inner.self, forKey: .account)
+        hasSessdata = try c.decodeIfPresent(Bool.self, forKey: .hasSessdata)
+        canLogout = try c.decodeIfPresent(Bool.self, forKey: .canLogout)
+    }
+}
+
+// MARK: - 手动锚定（`/api/tracks/:id/anchor`）
+
+/// 曲目与 B 站视频的锚定映射（服务端 `track_anchors` 表的一行）
+struct AnchorInfo: Decodable {
+    let trackId: String?
+    let bvid: String
+    let title: String?
+    let author: String?
+    /// 秒。服务端存的是整数，这里用 Double 兜浮点
+    let durationSec: Double?
+    /// true = 用户手动锚定（自动沉淀的锚定不会被算法覆盖）
+    let pinned: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case trackId, bvid, title, author, durationSec, pinned
+    }
+
+    init(trackId: String? = nil, bvid: String, title: String? = nil, author: String? = nil,
+         durationSec: Double? = nil, pinned: Bool? = nil) {
+        self.trackId = trackId
+        self.bvid = bvid
+        self.title = title
+        self.author = author
+        self.durationSec = durationSec
+        self.pinned = pinned
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        trackId = try c.decodeIfPresent(String.self, forKey: .trackId)
+        bvid = try c.decodeIfPresent(String.self, forKey: .bvid) ?? ""
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        author = try c.decodeIfPresent(String.self, forKey: .author)
+        durationSec = try c.decodeIfPresent(Double.self, forKey: .durationSec)
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned)
+    }
+}
+
+// MARK: - 批量解析（`POST /api/resolve/batch`）
+
+/// 批量解析的单项结果。**全部可选**：失败项只有 trackId/ok/reason/message，
+/// 成功项才带 score/streamUrl —— 用非可选字段会让整批解码失败
+struct ResolveReply: Decodable {
+    let trackId: String?
+    let ok: Bool?
+    let reason: String?
+    /// true = 上游限速（客户端应提示「当前网络繁忙」而不是狂试）
+    let rateLimited: Bool?
+    let retryAfterMs: Int?
+    let message: String?
+    let score: Int?
+    let bvid: String?
+    let matchedTitle: String?
+    let matchedAuthor: String?
+    let durationDiff: Double?
+    let fallbackStream: Bool?
+    let bandwidth: Int?
+    let source: String?
+    /// 相对路径，必须拼 baseURL 才能喂给播放器
+    let streamUrl: String?
+    let streamTokenExpiresInSec: Int?
+    let track: Track?
+    let coverUrl: String?
+}
+
 // MARK: - 服务端错误体
 
 struct ApiErrorBody: Codable {

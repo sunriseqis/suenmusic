@@ -91,6 +91,21 @@ enum Dim {
     // ---- 歌词上下留白 ----
     static let lyricPadTop: CGFloat = 120
     static let lyricPadBottom: CGFloat = 160
+
+    // ---- 曲目行 TrackRow / 在播竖条（与 hw TrackItem.ets 逐值同源） ----
+    /// 行尾时长列宽（hw DUR_W）
+    static let durW: CGFloat = 46
+    /// 在播竖条：条宽 / 容器高 / 三根高度（hw bar width 2、BAR_BOX、BAR_H_*）
+    static let barW: CGFloat = 2
+    static let barBox: CGFloat = 14
+    static let barTall: CGFloat = 14
+    static let barMid: CGFloat = 8
+    static let barShort: CGFloat = 6
+    /// 右滑手势：起步门槛 / 阻尼起点 / 触发阈值 / 滑出距离（hw SWIPE_*）
+    static let swipeGate: CGFloat = 8
+    static let swipeDampAt: CGFloat = 150
+    static let swipeThreshold: CGFloat = 85
+    static let swipeOut: CGFloat = 360
 }
 
 enum Motion {
@@ -104,4 +119,11 @@ enum Motion {
     static let tabLift: CGFloat = 8
     /// 全局统一曲线（hw 只允许 EaseOut / Friction）
     static let curve: Animation = .easeOut(duration: standard)
+    /// 在播竖条一次单程（hw BOUNCE_MS = 1000ms，alternating 往返）
+    static let barsBounce: Double = 1.0
+    /// 竖条相位差 0 / 160ms / 320ms
+    static let barsDelayMid: Double = 0.16
+    static let barsDelayShort: Double = 0.32
+    /// 手势结束后吞掉合成点击的时间窗（hw CLICK_GUARD_MS）
+    static let clickGuard: Double = 0.35
 }

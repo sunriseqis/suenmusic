@@ -3,21 +3,28 @@
 三份只读调研（视觉规范 / 播放页歌词队列 / 设置缓存备份）的结论汇总。**hw 源码是唯一真相**，
 实现时直接读 `hw/entry/src/main/ets` 对应文件，本文件只做索引与进度追踪。
 
-## 一、视觉基座（批次 1，进行中）
+## 一、视觉基座（批次 1，**已完成并集成编译通过**）
 | 件 | hw 来源 | iOS 目标文件 | 状态 |
 |---|---|---|---|
-| 动态色令牌（16 token 浅/深） | common/Tokens.ets | UI/DesignTokens.swift（改造） | 进行中 |
-| WebIcon（22 图标映射） | common/WebIcons.ets | UI/WebIcon.swift | 进行中 |
-| WebIconButton（4 质感×4 尺寸）/ WebButton（4 变体×3 尺寸） | common/WebButtons.ets | UI/WebButton.swift | 进行中 |
-| NeuTabs 分段控件 | common/NeuTabs.ets | UI/NeuTabs.swift | 进行中 |
-| TrackItem → TrackRow（含 PlayingBars + 右滑收藏状态机） | common/TrackItem.ets | UI/TrackRow.swift | 进行中 |
-| EmptyState + Copy 文案表 | pages/EmptyState.ets, common/Copy.ets | UI/EmptyState.swift, UI/Copy.swift | 进行中 |
-| AppToast（2200ms/距底132/穿透点击） | common/AppToast.ets | UI/AppToast.swift | 进行中 |
-| ConfirmDialog（86%宽/16圆角/危险变体） | common/ConfirmDialog.ets | UI/ConfirmDialog.swift | 进行中 |
-| NeuInput（凹陷+琥珀光标） | pages/NeuInput.ets | UI/NeuInput.swift | 进行中 |
-| 骨架屏海报块 withPoster | pages/SkeletonList.ets | UI/SkeletonList.swift（改造） | 进行中 |
+| 动态色令牌（16 token 浅/深） | common/Tokens.ets | UI/DesignTokens.swift（改造） | 完成 |
+| WebIcon（22 图标映射） | common/WebIcons.ets | UI/WebIcon.swift | 完成 |
+| WebIconButton（4 质感×4 尺寸）/ WebButton（4 变体×3 尺寸） | common/WebButtons.ets | UI/WebButton.swift | 完成 |
+| NeuTabs 分段控件 | common/NeuTabs.ets | UI/NeuTabs.swift | 完成 |
+| TrackItem → TrackRow（含 PlayingBars + 右滑收藏状态机） | common/TrackItem.ets | UI/TrackRow.swift | 完成 |
+| EmptyState + Copy 文案表 | pages/EmptyState.ets, common/Copy.ets | UI/EmptyState.swift, UI/Copy.swift | 完成 |
+| AppToast（2200ms/距底132/穿透点击） | common/AppToast.ets | UI/AppToast.swift | 完成 |
+| ConfirmDialog（86%宽/16圆角/危险变体） | common/ConfirmDialog.ets | UI/ConfirmDialog.swift | 完成 |
+| NeuInput（凹陷+琥珀光标） | pages/NeuInput.ets | UI/NeuInput.swift | 完成 |
+| 骨架屏海报块 withPoster | pages/SkeletonList.ets | UI/SkeletonList.swift（改造） | 完成 |
 
-## 二、页面（批次 2，待派）
+
+## 一·五、接口层（已完成）
+新增 18 个方法 + 10 个模型，均已对应真实 handler（编译 + 16 条解码断言全过）。
+踩到并已处理的服务端差异：favorites/tracks 是包裹结构；persona 与 persona/tune 两种形状；
+POST anchor 不回锚点本体（写后再读）；**无锚点是 200 + {anchor:null} 而非 404**；
+dedup/preview 双键重复；网易云 account 可为 null 而 configured=true；batch 失败项缺字段。
+
+## 二、页面（批次 2，进行中：播放页 / 缓存+服务器 / 设置）
 | 页面 | hw 来源 | 要点 |
 |---|---|---|
 | 播放页重写 | pages/PlayerPage.ets | 环境光晕(封面 blur60 op0.15)、封面 280/194、曲名 24、推荐理由卡、Slider(step 1s)、五键排(模式/上一首/60播放键渐变/下一首/队列)、歌词 peek 三行(58 高)、浮层层键 lyrics/queue/more/anchor/dislike |
