@@ -126,7 +126,6 @@ struct PlayerView: View {
     @State private var path: [CollectionRoute] = []
     /// 入场淡入（hw translate(y:100%)→0 的 200ms EaseOut；位移由 fullScreenCover 自带的底部滑入承担，
     /// 这里只补透明度 —— 纯视觉属性，不参与任何测量/布局）
-    @State private var entered = false
 
     private var p: Palette { Palette(scheme) }
     private var track: Track? { player.currentTrack }
@@ -209,16 +208,19 @@ struct PlayerView: View {
         return label
     }
 
-    /// 播放模式图标（hw `modeIconName` 的 iOS 子集）
+    /// 播放模式图标（对齐 hw `modeIconName` 五档）
     private var modeIcon: WebIconName {
         switch player.playMode {
-        case "all": return .modeLoop
-        case "one": return .modeRepeatOne
+        case "shuffle": return .modeShuffle
+        case "repeat-one": return .modeRepeatOne
+        case "list-loop": return .modeLoop
+        case "shuffle-once": return .modeShuffleOnce
         default: return .modeOrder
         }
     }
 
-    private var modeActive: Bool { player.playMode != "off" }
+    /// 只有「顺序播放」是未强调态（hw 同口径：非 order 时图标染琥珀）
+    private var modeActive: Bool { player.playMode != "order" }
 
     // MARK: - 页面主层
 

@@ -44,7 +44,17 @@ struct SuenTrack {
 
 final class AudioEngine: NSObject {
 
-    enum RepeatMode: String { case off, one, all }
+    /// 播放模式：字符串与 hw `MediaPlayerCore.PLAY_MODES` 完全一致
+    /// `['order','shuffle','repeat-one','list-loop','shuffle-once']`
+    enum RepeatMode: String {
+        case order
+        case shuffle
+        case repeatOne = "repeat-one"
+        case listLoop = "list-loop"
+        case shuffleOnce = "shuffle-once"
+
+        var isShuffle: Bool { self == .shuffle || self == .shuffleOnce }
+    }
 
     private weak var events: AudioEngineEvents?
     private let player = AVQueuePlayer()
@@ -64,7 +74,10 @@ final class AudioEngine: NSObject {
 
     private(set) var tracks: [SuenTrack] = []
     private var itemIndex: [ObjectIdentifier: Int] = [:]
-    private var repeatMode: RepeatMode = .off
+    private var repeatMode: RepeatMode = .order
+    /// 逻辑播放顺序（元素 = tracks 的下标）。非随机模式就是 0..<count；
+    /// 随机模式是「当前曲打头 + 其余洗牌」，切回顺序模式时还原，保证列表显示顺序不被破坏。
+    private var playOrder: [Int] = []
 
     private var baseUrl = ""
     private var sessionToken = ""
@@ -406,7 +419,8 @@ final class AudioEngine: NSObject {
     }
 
     func setRepeatMode(_ mode: String) {
-        repeatMode = RepeatMode(rawValue: mode) ?? .off
+        repeatMode = RepeatMode(rawValue: mode) ?? .order
+        rebuildPlayOrder(startingAt: currentIndex)
         // 模式决定"队尾还有没有下一首"：off→all 会让锁屏的"下一首"从灰变亮
         refreshRemoteCommandAvailability()
     }
@@ -550,32 +564,26 @@ final class AudioEngine: NSObject {
             }
             guard let idx = self.itemIndex[ObjectIdentifier(item)] else { return }
 
-            if self.repeatMode == .one {
+            if self.repeatMode == .repeatOne {
                 // 原地重播：不是切歌，不发 trackChange；但"仍在播放"要报给 Web
                 self.player.seek(to: .zero)
                 self.startPlayback()
                 return
             }
 
-            let isLast = idx >= self.tracks.count - 1
-            if isLast {
-                if self.repeatMode == .all {
-                    self.rebuildQueue(from: 0, positionMs: 0, autoplay: true, reason: 1)
+            // 接续统一走「播放顺序表」：非随机 = 原序（与旧行为一致），
+            // 随机 / 随机不重复由 playOrder 决定下一首是谁。
+            if let next = self.nextLogicalIndex() {
+                if next == idx + 1 && self.player.items().count > 1 && !self.repeatMode.isShuffle {
+                    self.player.advanceToNextItem()
+                    self.onCurrentItemChanged(self.player.currentItem)
                 } else {
-                    // repeat off 到队尾：停在末尾（等价 Media3 STATE_ENDED）
-                    self.player.pause()
-                    self.reportPlaying(false)
+                    self.rebuildQueue(from: next, positionMs: 0, autoplay: true, reason: 1)
                 }
-            } else if self.player.items().count <= 1 {
-                // 队列中后续条目未预加载（罕见异常态），安全重建从下一首接续
-                self.rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 1)
             } else {
-                self.player.advanceToNextItem()
-                // 正常靠上面的 currentItem KVO 发 trackChange(reason=1)；这里主动补一次
-                // 兜底 —— AVQueuePlayer 的 currentItem KVO 在部分场景下会迟到甚至不触发，
-                // 而熄屏自动接续全靠它同步 Web 端。
-                // 重复调用是安全的：onCurrentItemChanged 内部有 lastCurrentItem 去重。
-                self.onCurrentItemChanged(self.player.currentItem)
+                // 顺序播完 / 随机不重复播完：停在末尾（等价 Media3 STATE_ENDED）
+                self.player.pause()
+                self.reportPlaying(false)
             }
         }
     }
@@ -811,6 +819,52 @@ final class AudioEngine: NSObject {
         handlePlaybackFailure()
     }
 
+    // MARK: 播放顺序（随机 / 随机不重复）
+
+    /// 重建播放顺序：非随机 = 原序；随机 = 当前曲打头 + 其余洗牌。
+    /// 这样「切到随机」不会打断当前曲，且列表显示顺序（tracks）始终不变。
+    private func rebuildPlayOrder(startingAt index: Int) {
+        guard !tracks.isEmpty else { playOrder = []; return }
+        guard repeatMode.isShuffle else {
+            playOrder = Array(tracks.indices)
+            return
+        }
+        let safe = min(max(0, index), tracks.count - 1)
+        playOrder = [safe] + tracks.indices.filter { $0 != safe }.shuffled()
+    }
+
+    /// 当前曲在顺序表里的位置（找不到就退回 0）
+    private var orderPosition: Int {
+        playOrder.firstIndex(of: currentIndex) ?? 0
+    }
+
+    /// 下一首的逻辑下标；nil = 到头且不允许回绕
+    private func nextLogicalIndex() -> Int? {
+        guard !tracks.isEmpty else { return nil }
+        if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
+        let pos = orderPosition
+        if pos + 1 < playOrder.count { return playOrder[pos + 1] }
+        switch repeatMode {
+        case .listLoop:
+            return playOrder.first
+        case .shuffle:
+            // 随机播放到末尾：重洗一轮继续（首位避开刚刚播完的那首）
+            rebuildPlayOrder(startingAt: currentIndex)
+            return playOrder.count > 1 ? playOrder[1] : playOrder.first
+        default:
+            return nil
+        }
+    }
+
+    /// 上一首的逻辑下标；nil = 到头部且不允许回绕
+    private func previousLogicalIndex() -> Int? {
+        guard !tracks.isEmpty else { return nil }
+        if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
+        let pos = orderPosition
+        if pos > 0 { return playOrder[pos - 1] }
+        return repeatMode == .listLoop ? playOrder.last : nil
+    }
+
     // MARK: 私有：状态跟踪
 
     private func onProgressTick(_ time: CMTime) {
@@ -1024,15 +1078,7 @@ final class AudioEngine: NSObject {
     @discardableResult
     func skipToNext() -> Bool {
         guard !tracks.isEmpty else { return false }
-        let idx = currentIndex
-        let next: Int
-        if idx + 1 < tracks.count {
-            next = idx + 1
-        } else if repeatMode == .all {
-            next = 0
-        } else {
-            return false
-        }
+        guard let next = nextLogicalIndex() else { return false }
         rebuildQueue(from: next, positionMs: 0, autoplay: true, reason: 2)
         return true
     }
@@ -1041,9 +1087,7 @@ final class AudioEngine: NSObject {
     @discardableResult
     func skipToPrevious() -> Bool {
         guard !tracks.isEmpty else { return false }
-        let idx = currentIndex
-        guard idx > 0 || repeatMode == .all else { return false }
-        let prev = idx > 0 ? idx - 1 : tracks.count - 1
+        guard let prev = previousLogicalIndex() else { return false }
         rebuildQueue(from: prev, positionMs: 0, autoplay: true, reason: 2)
         return true
     }
@@ -1121,8 +1165,8 @@ final class AudioEngine: NSObject {
     private func refreshRemoteCommandAvailability() {
         let center = MPRemoteCommandCenter.shared()
         let hasTracks = !tracks.isEmpty
-        let canGoNext = hasTracks && (currentIndex + 1 < tracks.count || repeatMode == .all)
-        let canGoPrev = hasTracks && (currentIndex > 0 || repeatMode == .all)
+        let canGoNext = hasTracks && nextLogicalIndex() != nil
+        let canGoPrev = hasTracks && previousLogicalIndex() != nil
         center.nextTrackCommand.isEnabled = canGoNext
         center.previousTrackCommand.isEnabled = canGoPrev
         center.changePlaybackPositionCommand.isEnabled = hasTracks

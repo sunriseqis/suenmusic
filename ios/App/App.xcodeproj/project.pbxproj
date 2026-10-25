@@ -33,7 +33,6 @@
 		230D962241974805D52FA2A9 /* EmptyState.swift in Sources */ = {isa = PBXBuildFile; fileRef = D47053BC1D6D0E0FA33D9838 /* EmptyState.swift */; };
 		D8414E4510E9D80656090B72 /* FavoritesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */; };
 		ECD1269803F379E5A8E93341 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D065FDB56A1018194F6CD49C /* HomeView.swift */; };
-		5AD93F7CB0942CB5B5A2067D /* HorizontalSwipeInstaller.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CC1E301956D5BBA2C690B4 /* HorizontalSwipeInstaller.swift */; };
 		2AE4667D38133D27513D864E /* ListRowChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = 308356406CD2A47D88F7E2E0 /* ListRowChrome.swift */; };
 		D8BC02FB63F0869B42537FA0 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5318EF083FF113A8B0C2B11B /* LoginView.swift */; };
 		EB503D10020AF1AAE8F5D4DD /* LyricPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD2B698F0EB54A0A5653650 /* LyricPanel.swift */; };
@@ -117,7 +116,6 @@
 		D47053BC1D6D0E0FA33D9838 /* EmptyState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmptyState.swift; sourceTree = "<group>"; };
 		B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
 		D065FDB56A1018194F6CD49C /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		80CC1E301956D5BBA2C690B4 /* HorizontalSwipeInstaller.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HorizontalSwipeInstaller.swift; sourceTree = "<group>"; };
 		308356406CD2A47D88F7E2E0 /* ListRowChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ListRowChrome.swift; sourceTree = "<group>"; };
 		5318EF083FF113A8B0C2B11B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		FAD2B698F0EB54A0A5653650 /* LyricPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricPanel.swift; sourceTree = "<group>"; };
@@ -239,7 +237,6 @@
 				D47053BC1D6D0E0FA33D9838 /* EmptyState.swift */,
 				B056589FE9BC56EF9F9C7870 /* FavoritesView.swift */,
 				D065FDB56A1018194F6CD49C /* HomeView.swift */,
-				80CC1E301956D5BBA2C690B4 /* HorizontalSwipeInstaller.swift */,
 				308356406CD2A47D88F7E2E0 /* ListRowChrome.swift */,
 				5318EF083FF113A8B0C2B11B /* LoginView.swift */,
 				FAD2B698F0EB54A0A5653650 /* LyricPanel.swift */,
@@ -419,7 +416,6 @@
 				230D962241974805D52FA2A9 /* EmptyState.swift in Sources */,
 				D8414E4510E9D80656090B72 /* FavoritesView.swift in Sources */,
 				ECD1269803F379E5A8E93341 /* HomeView.swift in Sources */,
-				5AD93F7CB0942CB5B5A2067D /* HorizontalSwipeInstaller.swift in Sources */,
 				2AE4667D38133D27513D864E /* ListRowChrome.swift in Sources */,
 				D8BC02FB63F0869B42537FA0 /* LoginView.swift in Sources */,
 				EB503D10020AF1AAE8F5D4DD /* LyricPanel.swift in Sources */,

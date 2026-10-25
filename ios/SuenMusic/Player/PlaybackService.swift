@@ -382,15 +382,19 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     // MARK: 播放模式（内核只有 off/one/all；hw 的 shuffle 两态 iOS 内核未实现）
 
     /// off = 顺序播放 / all = 列表循环 / one = 单曲循环
-    @Published private(set) var playMode: String = "off"
+    /// 播放模式：与 hw `PLAY_MODES` 同字符串（order / shuffle / repeat-one / list-loop / shuffle-once）
+    @Published private(set) var playMode: String = "order"
 
     /// 循环切下一档（hw `cycleMode` 的 iOS 子集），返回切换后的模式
     @discardableResult
     func cycleMode() -> String {
+        // 顺序与 hw `PLAY_MODES` 一致：顺序 → 随机 → 单曲循环 → 列表循环 → 随机不重复 → 顺序
         switch playMode {
-        case "off": playMode = "all"
-        case "all": playMode = "one"
-        default: playMode = "off"
+        case "order": playMode = "shuffle"
+        case "shuffle": playMode = "repeat-one"
+        case "repeat-one": playMode = "list-loop"
+        case "list-loop": playMode = "shuffle-once"
+        default: playMode = "order"
         }
         engine?.setRepeatMode(playMode)
         return playMode
@@ -399,8 +403,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 模式文案（hw `Copy.modeOrder` 等同意）
     var playModeLabel: String {
         switch playMode {
-        case "all": return "列表循环"
-        case "one": return "单曲循环"
+        case "shuffle": return "随机播放"
+        case "repeat-one": return "单曲循环"
+        case "list-loop": return "列表循环"
+        case "shuffle-once": return "随机不重复"
         default: return "顺序播放"
         }
     }

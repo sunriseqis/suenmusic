@@ -11,7 +11,6 @@ import SwiftUI
  */
 struct TrackRow: View {
     /// 阻尼起点之后的位移放大系数（hw SWIPE_DAMP_FACTOR）
-    private static let dampFactor: CGFloat = 0.25
     /// 在播薄染浓度（hw CUR_TINT，= web color-mix(accent 7%, panel)）
     private static let playingTint: Double = 0.07
 
@@ -29,11 +28,8 @@ struct TrackRow: View {
     private let onDislike: (() -> Void)?
 
     /// 右滑实时位移（已阻尼）
-    @State private var swipeX: CGFloat = 0
     /// 已过阈值、行正在滑出（收藏页随后由父级剪行）
-    @State private var vanishing = false
     /// 最近一次手势结束时刻：其后 `Motion.clickGuard` 内的点击一律吞掉
-    @State private var lastSwipeEnd = Date.distantPast
 
     init(track: Track, index: Int, coverSize: CGFloat = Dim.coverBar,
          isFav: Bool, markFav: Bool = true, swipeRemoveOnUnfavorite: Bool = false,
@@ -57,7 +53,6 @@ struct TrackRow: View {
 
     var body: some View {
         ZStack(alignment: .leading) {
-            swipeAction
             content
                 .background(DesignTokens.bg) // 必须不透明：下面就是动作区
                 .overlay {
@@ -76,7 +71,6 @@ struct TrackRow: View {
                 .overlay(alignment: .bottom) {
                     Rectangle().fill(DesignTokens.line).frame(height: Dim.hairline)
                 }
-                .offset(x: swipeX)
         }
         .frame(height: Dim.rowHeight)
         // hw 的行是**直角**：只有底沿一条发丝线（TrackItem.ets:260-271 的 border 只设 left/bottom，
@@ -90,23 +84,9 @@ struct TrackRow: View {
 
     // MARK: - 底层右滑动作区
 
-    private var actionInk: Color {
-        isFav ? DesignTokens.swipeFavInk : DesignTokens.swipeInk
-    }
 
-    private var swipeAction: some View {
-        HStack(spacing: Dim.s1) {
-            WebIcon(isFav ? .heartFilled : .heart, size: Dim.iconSm)
-                .foregroundStyle(actionInk)
-            Text(isFav ? "取消收藏" : "收藏")
-                .font(.system(size: Dim.fsBody, weight: .medium))
-                .foregroundStyle(actionInk)
-        }
-        .padding(.leading, Dim.s5)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .background(isFav ? DesignTokens.swipeFavBg : DesignTokens.accentText)
-        .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd))
-    }
+    /// 行点击：右滑已交给系统 `.swipeActions`，不再需要吞掉合成点击
+    private func handleTap() { onTap() }
 
     // MARK: - 上层行内容
 
@@ -188,74 +168,6 @@ struct TrackRow: View {
         .padding(.horizontal, Dim.s2) // 内边距在框内，命中区 minWidth 44（hw 同序）
         .frame(minWidth: Dim.touchMin, maxHeight: .infinity)
         .accessibilityLabel("不喜欢")
-    }
-
-    // MARK: - 手势状态机
-
-    /// 只认右滑：左滑位移归 0、不消耗；竖直占优让位给列表滚动
-    ///（等价 hw `PanDirection.Horizontal` 的手势仲裁）。
-    private var swipeGesture: some Gesture {
-        DragGesture(minimumDistance: Dim.swipeGate)
-            .onChanged { value in
-                guard !vanishing else { return }
-                let dx = value.translation.width
-                let dy = value.translation.height
-                guard abs(dx) > abs(dy) else { return }
-                guard dx > 0 else {
-                    swipeX = 0
-                    return
-                }
-                swipeX = dx > Dim.swipeDampAt
-                    ? Dim.swipeDampAt + (dx - Dim.swipeDampAt) * Self.dampFactor
-                    : dx
-            }
-            .onEnded { _ in endSwipe() }
-    }
-
-    private func endSwipe() {
-        // DragGesture 没有 cancel 回调：滑到左向时 swipeX 已被上面的 guard 归 0，
-        // 过不了阈值 → 只弹回、绝不当作已触发，等价 hw 的 onActionCancel 语义。
-        lastSwipeEnd = Date()
-        guard !vanishing else { return }
-        guard swipeX >= Dim.swipeThreshold else {
-            animateSwipe(to: 0)
-            return
-        }
-        if swipeRemoveOnUnfavorite && isFav {
-            // 收藏页：先滑出去，动画走完再让父级改状态剪行（顺序反了看不到滑出）
-            vanishing = true
-            animateSwipe(to: Dim.swipeOut)
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(Motion.standard))
-                guard let toggle = onSwipeToggle else {
-                    vanishBack()
-                    return
-                }
-                let removed = (try? await toggle()) ?? false
-                if !removed { vanishBack() }
-            }
-            return
-        }
-        // 普通页：行留在原地，弹回后由序号染色 / 动作区文案确认结果
-        if let toggle = onSwipeToggle {
-            Task { @MainActor in _ = await toggle() }
-        }
-        animateSwipe(to: 0)
-    }
-
-    private func vanishBack() {
-        vanishing = false
-        animateSwipe(to: 0)
-    }
-
-    private func animateSwipe(to x: CGFloat) {
-        withAnimation(Motion.curve) { swipeX = x }
-    }
-
-    private func handleTap() {
-        // 手势刚结束的合成点击一律吞掉，避免滑完就误触切歌
-        if Date().timeIntervalSince(lastSwipeEnd) < Motion.clickGuard { return }
-        onTap()
     }
 
     // MARK: - 时长文案
