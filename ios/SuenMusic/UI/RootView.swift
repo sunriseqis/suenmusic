@@ -21,9 +21,14 @@ struct RootView: View {
         // 正是同一动作，尺寸不再由系统 detent 决定。
         // 播放页是 hw 那种**全屏浮层**（盖住底栏、整体从底部上滑），不是 fullScreenCover 的卡片式模态
         // （后者自带圆角 + 顶部露背景，用户实测「你这个属于浮窗了吧」）。
+        // ⚠️ 播放页必须是**铺满屏幕的浮层**：用 .overlay 挂在 Group 上时，
+        // 里面的 NavigationStack 会按内容尺寸收缩（用户实测「页面还是小、上下巨大空白」）。
+        // 所以放到最外层 ZStack 并显式给满屏 frame + ignoresSafeArea。
         .overlay {
             if showPlayer {
-                PlayerView()
+                PlayerView(onClose: { withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false } })
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .ignoresSafeArea()
                     .transition(.move(edge: .bottom))
                     .zIndex(10)
             }
@@ -40,6 +45,11 @@ struct RootView: View {
                 let delay = DebugHooks.int("SUEN_PLAYER_DELAY") ?? 3
                 try? await Task.sleep(nanoseconds: UInt64(max(0, delay)) * 1_000_000_000)
                 showPlayer = true
+                // 验证收起链路（无触摸环境无法点收起键）：SUEN_PLAYER_AUTOCLOSE=秒 后自动走同一条 onClose
+                if let after = DebugHooks.int("SUEN_PLAYER_AUTOCLOSE"), after > 0 {
+                    try? await Task.sleep(nanoseconds: UInt64(after) * 1_000_000_000)
+                    withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false }
+                }
             }
             #endif
         }

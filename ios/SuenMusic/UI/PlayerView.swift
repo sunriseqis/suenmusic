@@ -94,13 +94,19 @@ private enum PlayerSpec {
 struct PlayerView: View {
     @EnvironmentObject private var player: PlaybackService
     @Environment(\.colorScheme) private var scheme
-    @Environment(\.dismiss) private var dismiss
+    /// 收起动作由**调用方**给（RootView 用 showPlayer=false）。
+    ///
+    /// 不能用 `@Environment(\.dismiss)`：播放页现在不是 present 出来的模态（hw 是全屏浮层），
+    /// overlay 里的 dismiss 是空操作 —— 用户实测「收起按钮失效」就是这个原因。
+    let onClose: () -> Void
 
     /// 当前浮层层键（唯一写入方）
     @State private var sheet: PlayerSheet = .none
     /// 拖动进度条期间不能用播放位置驱动滑块（松手才 seek，对齐 hw `dragging`/`dragPos`）
     @State private var dragging = false
     @State private var slide: Double = 0
+
+    /// 默认空实现（无参便利构造见下方 extension）
     /// 歌词 peek（当前行 ±1）
     @State private var peekLines: [LyricLine] = []
     @State private var peekActive = -1
@@ -291,7 +297,7 @@ struct PlayerView: View {
     private func header(eyebrowWidth: CGFloat) -> some View {
         ZStack {
             HStack(spacing: 0) {
-                WebIconButton(.chevronDown, box: Dim.touchMin, style: .plain) { dismiss() }
+                WebIconButton(.chevronDown, box: Dim.touchMin, style: .plain) { onClose() }
                     .accessibilityLabel("收起播放页")
                 Spacer(minLength: 0)
                 WebIconButton(.dots, box: Dim.btnMd, style: .plain) { openSheet(.more) }
