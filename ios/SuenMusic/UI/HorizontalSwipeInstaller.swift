@@ -43,9 +43,11 @@ struct HorizontalSwipeInstaller: UIViewRepresentable {
 
         func gestureRecognizerShouldBegin(_ g: UIGestureRecognizer) -> Bool {
             guard g is SwipePan, let view = g.view as? UIView else { return false }
-            let t = (g as! SwipePan).translation(in: view)
-            // 只接管「向右且明显偏横」的拖动；其余（纵向滚动、向左滑）一律放行
-            return t.x > 6 && t.x > abs(t.y)
+            // ⚠️ 必须用 velocity，不能用 translation：在「将要开始」这一刻 translation 恒为 (0,0)，
+            //    拿它判断会永远 return false —— 这就是上一版「右滑无效」的原因。
+            //    velocity 在此刻已有方向，可用它区分横向/纵向。
+            let v = (g as! SwipePan).velocity(in: view)
+            return v.x > 0 && abs(v.x) > abs(v.y)
         }
 
         func gestureRecognizer(_ g: UIGestureRecognizer,

@@ -77,8 +77,9 @@ struct TabBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(TabCellPressStyle())
-        // 长按 0.5s → 请求该页刷新（替代下拉刷新；下拉会与行内右滑抢手势）
-        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress?(index) })
+        // 长按 0.5s → 请求该页刷新。
+        // ⚠️ 必须 highPriority：Button 会先吃掉长按，simultaneousGesture 在这个位置不生效（用户实测「长按无效」）。
+        .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress?(index) })
         .accessibilityLabel(label)
         .accessibilityValue(on ? "已选中" : "未选中")
         // hw `accessibilityLevel(currentTab === idx ? 'yes' : 'no')` 的 iOS 等价
