@@ -164,6 +164,11 @@ final class APIClient {
 
     var isLoggedIn: Bool { accessToken != nil || refreshToken != nil }
 
+    /// 重新从 UserDefaults 读取刷新令牌（DEBUG 环境变量注入后调用）
+    func reloadTokenFromDefaults() {
+        refreshToken = UserDefaults.standard.string(forKey: tokenKey)
+    }
+
     private var base: String { router.currentBaseURL }
 
     // MARK: 会话
