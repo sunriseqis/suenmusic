@@ -27,7 +27,13 @@ const ASSETS = join(IOS, 'App/App/Assets.xcassets');
 const GROUPS = ['App', 'Net', 'Player', 'UI'];
 const WIDGET_NAME = 'SuenWidgets';
 const WIDGET_BUNDLE_ID = 'com.suenmusic.app.SuenWidgets';
-const WIDGET_SHARED = ['Player/PlaybackActivity.swift', 'UI/DesignTokens.swift', 'UI/Dimension.swift', 'UI/Theme.swift'];
+const WIDGET_SHARED = [
+  'Player/PlaybackActivity.swift',
+  'Player/PlaybackIntents.swift',
+  'UI/DesignTokens.swift',
+  'UI/Dimension.swift',
+  'UI/Theme.swift',
+];
 
 function collectMain() {
   const out = [];
@@ -213,6 +219,7 @@ function render(main, widgetOwn) {
     o += '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = ' + WIDGET_BUNDLE_ID + ';\n';
     o += '\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";\n\t\t\t\tSKIP_INSTALL = YES;\n';
     o += '\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;\n\t\t\t\tSWIFT_VERSION = 5.0;\n';
+    o += '\t\t\t\tSWIFT_ACTIVE_COMPILATION_CONDITIONS = "WIDGET_EXTENSION $(inherited)";\n';
     o += '\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";\n';
     o += '\t\t\t};\n\t\t\tname = ' + name + ';\n\t\t};\n';
   }

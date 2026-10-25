@@ -166,15 +166,29 @@ private struct PlaybackIslandCover: View {
     }
 }
 
+/// 岛内遥控器：按钮走 AppIntent，**点按钮不打开 App**（系统后台唤醒 App 进程执行 perform）
 private struct PlaybackIslandControls: View {
     let playing: Bool
 
     var body: some View {
         HStack(spacing: Dim.s2) {
-            Image(systemName: "backward.fill").font(.system(size: Dim.icon12))
-            Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: Dim.icon14))
-            Image(systemName: "forward.fill").font(.system(size: Dim.icon12))
+            Button(intent: PrevTrackIntent()) {
+                Image(systemName: "backward.fill").font(.system(size: Dim.icon12))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesignTokens.text1)
+
+            Button(intent: PlayPauseIntent()) {
+                Image(systemName: playing ? "pause.fill" : "play.fill").font(.system(size: Dim.icon14))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesignTokens.accent)
+
+            Button(intent: NextTrackIntent()) {
+                Image(systemName: "forward.fill").font(.system(size: Dim.icon12))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(DesignTokens.text1)
         }
-        .foregroundStyle(DesignTokens.text1)
     }
 }
