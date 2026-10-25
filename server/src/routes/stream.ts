@@ -112,6 +112,56 @@ const PASSTHROUGH_HEADERS = [
   'last-modified',
 ];
 
+/**
+ * 从文件头字节认容器（与 iOS 侧 `AudioCacheStore.sniffContentType` 同口径）。
+ *
+ * 为什么需要：上游（B 站）常把音频声明成 `application/octet-stream`，
+ * 浏览器/鸿蒙播放器会自己嗅探，**iOS 的 AVPlayer 不会** —— 它会因为 MIME 不认识而
+ * 永远不进入 readyToPlay（表现为「点了不出声」）。服务端这里补一次嗅探，对所有客户端都对。
+ */
+function sniffAudioType(head: Buffer | null): string | null {
+  if (!head || head.length < 12) return null;
+  const at = (offset: number, tag: string): boolean =>
+    head.length >= offset + tag.length &&
+    head.subarray(offset, offset + tag.length).toString('latin1') === tag;
+  if (at(4, 'ftyp')) return 'audio/mp4';       // MP4/CMAF（B 站 m4s 分片同此）
+  if (at(0, 'ID3')) return 'audio/mpeg';
+  if (at(0, 'fLaC')) return 'audio/flac';
+  if (at(0, 'OggS')) return 'audio/ogg';
+  if (at(0, 'RIFF') && at(8, 'WAVE')) return 'audio/wav';
+  // 裸 MPEG 帧同步
+  if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return 'audio/mpeg';
+  return null;
+}
+
+/**
+ * 取出流的第一个 chunk（用于嗅探容器），**不销毁流**。
+ *
+ * ⚠️ 不能用 `for await ... return`：从异步迭代器提前 return 会调用 iterator.return()，
+ *   把 Node 流 destroy 掉，后续数据全丢（实测响应被截成 ~16KB）。
+ *   这里用 `read()` / 'readable' 事件，取完立刻 pause，等下游接上再 resume。
+ */
+async function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
+  const immediate = stream.read() as Buffer | null;
+  if (immediate) return immediate;
+  return await new Promise<Buffer | null>((resolve) => {
+    const done = (value: Buffer | null) => {
+      stream.removeListener('readable', onReadable);
+      stream.removeListener('end', onEnd);
+      resolve(value);
+    };
+    const onReadable = () => {
+      const chunk = stream.read() as Buffer | null;
+      if (chunk) {
+        stream.pause();
+        done(chunk);
+      }
+    };
+    const onEnd = () => done(null);
+    stream.once('readable', onReadable);
+    stream.once('end', onEnd);
+  });
+}
 function authorize(req: any, trackId: string): string {
   const query = req.query as Record<string, unknown>;
 
@@ -196,7 +246,28 @@ async function forward(
     return undefined;
   }
 
-  const stream = Readable.fromWeb(upstream.body as any);
+  const rawStream = Readable.fromWeb(upstream.body as any);
+  // content-type 缺失或上游只给 octet-stream 时，嗅探首个 chunk 补成真正的音频类型
+  const declaredType = (upstream.headers.get('content-type') ?? '').toLowerCase();
+  let bodyStream: Readable = rawStream;
+  if (declaredType === '' || declaredType.includes('octet-stream')) {
+    const first = await peekFirstChunk(rawStream);
+    const sniffed = sniffAudioType(first);
+    if (sniffed) {
+      reply.header('content-type', sniffed);
+      log.info(`stream: 上游 ${declaredType || '(空)'} → 嗅探为 ${sniffed}`);
+    }
+    if (first) {
+      bodyStream = Readable.from(
+        (async function* () {
+          yield first;
+          rawStream.resume();
+          for await (const chunk of rawStream) yield chunk;
+        })()
+      );
+    }
+  }
+  const stream = bodyStream;
 
   /**
    * 空闲守护：上游超过 STREAM_IDLE_MS 没有任何字节就放弃。
