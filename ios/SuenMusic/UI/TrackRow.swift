@@ -175,10 +175,11 @@ struct TrackRow: View {
         }
     }
 
-    /// 行尾「不喜欢」：按下染 accent，默认 text2；按钮自带命中区，点击不冒泡切歌
+    /// 行尾「不喜欢」：按下染 accent，默认 text2；按钮自带命中区，点击不冒泡切歌。
+    /// 图标与播放页统一用「斜杠爱心」（用户 2026-10-25 指定），字形保持 hw 的 16pt。
     private var dislikeButton: some View {
         Button { onDislike?() } label: {
-            WebIcon(.dislikeSong, size: Dim.icon16)
+            WebIcon(.heartSlash, size: Dim.icon16)
         }
         .buttonStyle(DislikeButtonStyle(active: DesignTokens.accent, idle: DesignTokens.text2))
         .padding(.horizontal, Dim.s2) // 内边距在框内，命中区 minWidth 44（hw 同序）
