@@ -885,14 +885,10 @@ export struct PlayerPage {
       .backgroundColor(Tokens.bg)
       .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
       .padding({ top: Dim.s1, bottom: this.avoidVp(this.bottomAvoidHeight) })
-      // 非对称：进来只位移；出去位移 + 淡出（与 iOS 队列抽屉同一处理，收起不再「一下子没了」）
-      .transition(TransitionEffect.asymmetric(
-        TransitionEffect.translate({ y: '100%' })
-          .animation({ duration: Motion.standard, curve: Motion.curve }),
-        TransitionEffect.translate({ y: '100%' })
-          .combine(TransitionEffect.OPACITY)
-          .animation({ duration: Motion.standard, curve: Motion.curve })
-      ))
+      // 分工与 iOS 一致：**遮罩只淡出、抽屉只位移**。
+      // （曾试过给抽屉叠 OPACITY 做非对称，长列表下同样有离屏合成开销，两端都回退成纯位移。）
+      .transition(TransitionEffect.translate({ y: '100%' })
+        .animation({ duration: Motion.standard, curve: Motion.curve }))
     }
     .width('100%')
     .height('100%')
