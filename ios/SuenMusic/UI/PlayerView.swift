@@ -229,8 +229,14 @@ struct PlayerView: View {
         // 封面吃「可用高度的一部分」而不是死守 hw 的 280：
         // 之前固定 280 + 整列垂直居中，剩下的 ~160pt 空白均分在上下，观感就是「页面没撑满」（用户实测）。
         // 现在 cap 同时受宽度与高度约束，底栏/顶栏贴边、封面吸收剩余空间。
+        // 封面尺寸**只按可用空间算**，不照抄 hw 的 280：
+        //   280 是 hw 在它那档分辨率上的取值；iOS 的屏幕高度跨度更大（SE 667pt → Pro Max 956pt），
+        //   写死就会两头出问题：小屏内容被挤爆 / 大屏上下留一大片空白（用户两次反馈的就是后者）。
+        //   规则：封面 = min(横向可用宽, 可用高 × 0.46)，有推荐理由卡时让位到 194（hw 同语义）。
+        //   下限由 ViewThatFits 的收缩阶梯兜住（小屏自动降档，永不溢出）。
         let hCap = height * PlayerSpec.coverHeightRatio
-        let cap = min(width - Dim.s5 * 2, hasReco ? Dim.coverReco : min(Dim.coverXl * PlayerSpec.coverGrowMax, hCap))
+        let cap = hasReco ? min(width - Dim.s5 * 2, Dim.coverReco)
+                          : min(width - Dim.s5 * 2, hCap)
         return ViewThatFits(in: .vertical) {
             column(side: cap * PlayerSpec.coverShrink[0], width: width)
             column(side: cap * PlayerSpec.coverShrink[1], width: width)
