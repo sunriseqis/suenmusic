@@ -2,7 +2,10 @@ import SwiftUI
 
 struct PlayerBar: View {
     @EnvironmentObject private var player: PlaybackService
+    @Environment(\.colorScheme) private var scheme
     let onExpand: () -> Void
+
+    private var p: Palette { Palette(scheme) }
 
     var body: some View {
         if let track = player.currentTrack {
@@ -15,7 +18,12 @@ struct PlayerBar: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(track.name).font(.subheadline).lineLimit(1)
-                    Text(track.artistLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    // 对齐 hw：手动点播到没有音源的曲目时，「正在播放」这行显示「无音源」
+                    //（np_error 同口径），曲名不换、也不弹任何按钮。
+                    Text(player.noSource ? PlaybackService.noSourceLabel : track.artistLine)
+                        .font(.caption2)
+                        .foregroundStyle(player.noSource ? p.danger : p.text2)
+                        .lineLimit(1)
                 }
                 Spacer()
                 Button { player.toggle() } label: {
