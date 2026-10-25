@@ -297,6 +297,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         if failStreak >= Self.maxFailStreak {
             errorMessage = nil
             noSource = false
+            NSLog("[Fail] 连续失败 %d 首 → 暂停 + 通知", failStreak)
             Notifier.notify(title: "连续多首没有匹配音源", body: "已暂停播放，请检查网络或稍后再试")
             return
         }
@@ -305,6 +306,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         if !manualLoad && hasWayOut {
             errorMessage = nil
             noSource = false
+            NSLog("[Fail] 连播无音源 → 600ms 后跳过《%@》", title)
             Notifier.notify(title: "没有匹配音源", body: "《\(title)》没有可播放的匹配音源，已自动跳过")
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(Self.skipDelayMs) * 1_000_000)
@@ -321,6 +323,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         // ③ 手动点播（或连播已无路可走）：停住，只在 eyebrow 显示「无音源」
         errorMessage = nil
         noSource = true
+        NSLog("[Fail] 手动点播无音源 → 停在当前曲，eyebrow 显示「无音源」（不跳、不弹按钮）")
     }
 
     /// 推一次 Live Activity / 灵动岛状态。

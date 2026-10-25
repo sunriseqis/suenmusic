@@ -109,6 +109,8 @@ final class AudioEngine: NSObject {
     /// 等 item ready 的最多轮数（100ms 一轮 → 3s）
     private static let playReadyMaxTries = 100   // 100 × 100ms = 10s：冷曲目首拉实测要 9-10s 才 ready
     private var playAttempts = 0
+    /// 每个 AVPlayerItem 的 status 观察（随条目创建/丢弃增删）
+    private var itemObservations: [NSKeyValueObservation] = []
     /// startPlayback 的起算时刻（用于打印「item 多久才 ready」）
     private var playbackStartedAt: Date?
     private var playRetries = 0
@@ -545,26 +547,15 @@ final class AudioEngine: NSObject {
 
     private func handlePlaybackFailure() {
         consecutiveErrors += 1
-        guard consecutiveErrors < Self.maxConsecutiveErrors else {
-            consecutiveErrors = 0
-            reportPlaying(false)
-            return
-        }
-        guard !tracks.isEmpty else { return }
-        let idx = currentIndex
-        if idx + 1 < tracks.count {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self = self else { return }
-                self.rebuildQueue(from: idx + 1, positionMs: 0, autoplay: true, reason: 1)
-            }
-        } else if repeatMode == .all {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                guard let self = self else { return }
-                self.rebuildQueue(from: 0, positionMs: 0, autoplay: true, reason: 1)
-            }
-        } else {
-            reportPlaying(false)
-        }
+        if consecutiveErrors >= Self.maxConsecutiveErrors { consecutiveErrors = 0 }
+        // ⚠️ 2026-10-25 对齐 hw：**引擎不许自己跳歌**。
+        // 旧实现失败 0.3s 后 rebuildQueue(next, reason: 1) 自动跳 —— 副作用有两层：
+        //   ① 把 PlaybackService 的 manualLoad 冲成 false（emitTrackChange(reason:1) 会重置），
+        //      于是 hw 那条「手动点播无音源 → 停住 + eyebrow 显示无音源」永远走不到；
+        //   ② 用户想锚定的那首被自动切走，永远锚不上（hw 代码里专门写死了这条规则）。
+        // hw 的失败策略在服务层（MediaPlayerCore.settleFailure）：手动=停住、连播=600ms 静默跳过、
+        // 连续失败=通知+暂停。iOS 侧对应 PlaybackService.settleFailure，这里只负责报告失败。
+        reportPlaying(false)
     }
 
     @objc private func itemFailed(_ note: Notification) {
@@ -803,7 +794,25 @@ final class AudioEngine: NSObject {
         let url = URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 }
             ?? URL(string: "suenmusic://invalid-stream/\(track.id)")!
         NSLog("%@", "[StreamUrl] makeItem id=\(track.id) url=\(raw.prefix(300))")
-        return AVPlayerItem(asset: AVURLAsset(url: url))
+        let item = AVPlayerItem(asset: AVURLAsset(url: url))
+        // ⚠️ 2026-10-25：**必须监听 item.status**，不能只靠进度 tick 里的失败检测。
+        // 服务端 503（曲目真没音源）时 item 会立刻 failed，而吃不上饭的播放器**根本没有时间轴** ——
+        // 周期时间观察者永不回调 → 失败传不出去 → 上层「无音源」三分支（停住/跳过/通知）全都不会执行。
+        // 表现就是用户看到「点了没反应、也没有任何提示」。
+        let key = ObjectIdentifier(item)
+        let obs = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            EngineThread.onMain { [weak self] in
+                guard let self, self.player.currentItem === item,
+                      !self.reportedFailures.contains(key) else { return }
+                self.reportedFailures.insert(key)
+                NSLog("[Start] item failed: %@", item.error?.localizedDescription ?? "-")
+                self.events?.emitError(message: item.error?.localizedDescription ?? "播放错误")
+                self.handlePlaybackFailure()
+            }
+        }
+        itemObservations.append(obs)
+        return item
     }
 
     /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
