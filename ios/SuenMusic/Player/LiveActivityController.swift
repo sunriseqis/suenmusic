@@ -16,7 +16,7 @@ final class LiveActivityController {
 
     /// ⚠️ 临时开关（2026-10-25 观察用）：false = 完全不请求 Live Activity，
     /// 用来验证「不声明 ActivityKit 时系统会不会自己捕获 Now Playing」；验证完改回 true 即可。
-    static let enabled = false
+    static let enabled = true
 
     /// 进度类更新的地板间隔（与 hw 卡片同值）
     private static let minIntervalMs = 1000
