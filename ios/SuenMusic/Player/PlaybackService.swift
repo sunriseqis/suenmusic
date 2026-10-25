@@ -97,6 +97,23 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         Task { _ = await validToken() }
     }
 
+    // MARK: 列表预热（降低首播解析延迟）
+
+    /// 把列表前几首的音源**在后台解析好**，用户点的时候直接命中服务端缓存。
+    ///
+    /// 为什么需要：服务端 `play_sources` 只缓存解析结果，而曲库 3749 首里只有几十条是热的     
+    /// 冷曲目每次首播都要现场去 B 站搜索+打分匹配（实测 2-8s），这就是「大多数歌起播 5-10 秒」的根。
+    /// 串行 + 上限，避免把上游打崩。
+    func warm(_ tracks: [Track], limit: Int = 8) {
+        let head = Array(tracks.prefix(limit))
+        guard !head.isEmpty else { return }
+        Task.detached(priority: .utility) {
+            for track in head {
+                _ = try? await APIClient.shared.resolve(trackId: track.id)
+            }
+        }
+    }
+
     // MARK: 用户意图
 
     func play(tracks: [Track], startingAt index: Int, origin: String = "") async {

@@ -40,6 +40,7 @@ struct DailyView: View {
         .background(p.bg)
         .task {
             if data == nil { await load() }
+            if let tracks = data?.tracks { player.warm(tracks, limit: 10) }
             #if DEBUG
             // 无触摸环境验 Live Activity / 播放页：SUEN_AUTOPLAY=1 进「专属」后自动播第一首
             if DebugHooks.string("SUEN_AUTOPLAY") == "1",

@@ -47,7 +47,10 @@ struct FavoritesView: View {
             list
         }
         .background(p.bg)
-        .task { if items.isEmpty { await load(reset: true) } }
+        .task {
+            if items.isEmpty { await load(reset: true) }
+            player.warm(shownTracks, limit: 10)
+        }
     }
 
     // MARK: - 头部

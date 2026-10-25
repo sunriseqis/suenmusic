@@ -109,6 +109,8 @@ final class AudioEngine: NSObject {
     /// 等 item ready 的最多轮数（100ms 一轮 → 3s）
     private static let playReadyMaxTries = 100   // 100 × 100ms = 10s：冷曲目首拉实测要 9-10s 才 ready
     private var playAttempts = 0
+    /// startPlayback 的起算时刻（用于打印「item 多久才 ready」）
+    private var playbackStartedAt: Date?
     private var playRetries = 0
     /// 起播后进度持续为 0 的 tick 计数（2s/tick）与重载次数
     private var zeroProgressTicks = 0
@@ -631,6 +633,7 @@ final class AudioEngine: NSObject {
         // autoplay 语义 = 用户就是要它现在播：把意图立起来，别让 playWhenReady 的 guard 挡掉
         // （2026-10-25 实测：rebuildQueue 结束时 intent=false，起播被自己的 guard 挡住 → 永远不出声）
         playingIntent = true
+        playbackStartedAt = Date()
         playAttempts = 0
         playRetries = 0
         playWhenReady()
@@ -688,6 +691,9 @@ final class AudioEngine: NSObject {
         let item = player.currentItem
         let ready = item?.status == .readyToPlay
 
+        if ready, let t0 = playbackStartedAt {
+            NSLog("[Start] item ready 用时 %.2fs", Date().timeIntervalSince(t0))
+        }
         if ready || playAttempts > Self.playReadyMaxTries {
             player.playImmediately(atRate: 1.0)
             reportPlaying(true)

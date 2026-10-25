@@ -35,6 +35,7 @@ struct HomeView: View {
         .background(p.bg)
         .task {
             if app.home == nil { await app.loadHome() }
+            if let songs = app.home?.newSongs { player.warm(songs, limit: 8) }
             if app.home == nil, let message = app.errorMessage { err = message }
         }
     }

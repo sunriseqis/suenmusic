@@ -463,6 +463,12 @@ final class StreamCacheDownloader: NSObject, URLSessionDataDelegate {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         guard !data.isEmpty else { return }
         lastDataAt = Date()
+        // 打点：1B / 64KB / 256KB 到达时刻（起播慢时用来区分「上游慢」还是「我们泵送慢」）
+        let before = entry.storedBytes
+        let after = before + Int64(data.count)
+        if before == 0 { cacheLog("first-byte", "\(entry.id) 首字节到达") }
+        if before < 64 * 1024, after >= 64 * 1024 { cacheLog("64KB", "\(entry.id) 64KB 到达") }
+        if before < 256 * 1024, after >= 256 * 1024 { cacheLog("256KB", "\(entry.id) 256KB 到达") }
         if !entry.append(data) {
             cacheLog("download", "\(entry.id) 落盘失败，停止缓存下载")
             diskBroken = true
