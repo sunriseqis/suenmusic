@@ -364,9 +364,6 @@ final class APIClient {
         let _: EmptyReply = try await send("/api/favorites/\(trackId)", method: "DELETE")
     }
 
-    /// 只用于吞掉"没有字段需要读"的响应
-    struct EmptyReply: Decodable {}
-
     // MARK: 账号 / 更新
 
     /// 修改密码（服务端会签发新会话，调用方必须 adopt 掉）

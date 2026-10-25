@@ -33,7 +33,7 @@ struct AuthConfig: Codable {
 
 // MARK: - 曲目
 
-struct TrackArtist: Codable, Hashable {
+struct TrackArtist: Codable, Hashable, Identifiable {
     let id: String
     let name: String
 }

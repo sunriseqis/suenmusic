@@ -9,6 +9,8 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
+// CryptoKit 提供 Insecure.SHA1（封面文件名摘要用；原来靠外部库，原生化后改系统框架）
+import CryptoKit
 
 /// 播放内核向 UI 上报的事件（替代原来的 Capacitor `notifyListeners`）。
 protocol AudioEngineEvents: AnyObject {
