@@ -678,6 +678,7 @@ export struct SearchPage {
           content: this.keyword,
           placeholder: '歌名、歌手、专辑、歌单',
           searchIcon: true,
+          clearable: true,
           enterKey: EnterKeyType.Search,
           onSubmit: (v: string) => { this.doSearch(v, 1); }
         })

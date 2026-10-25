@@ -300,7 +300,8 @@ export struct FavoritesPage {
       NeuInput({
         content: this.keyword,
         placeholder: '搜索歌名 / 歌手 / 专辑',
-        searchIcon: true
+        searchIcon: true,
+        clearable: true
       })
     }
     .width('100%')

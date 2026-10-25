@@ -22,6 +22,8 @@ export struct NeuInput {
   password: boolean = false;
   /** 前置放大镜图标（web NeuInput icon="search"） */
   searchIcon: boolean = false;
+  /** 一键清空（有内容时右侧出现 ×）。iOS 侧已加，这里补齐，避免两端交互不一致 */
+  clearable: boolean = false;
   /** 软键盘「搜索」键提交（SearchPage 用；不传则只当普通输入框） */
   onSubmit: (value: string) => void = () => {};
   /** 软键盘动作键类型（搜索场景传 EnterKeyType.Search，键盘才显示「搜索」） */
@@ -50,6 +52,17 @@ export struct NeuInput {
         .onSubmit((enterKey: EnterKeyType, event: SubmitEvent) => {
           this.onSubmit(this.content);
         })
+      if (this.clearable && this.content.length > 0) {
+        Stack() {
+          WebIcon(WebIconName.CLOSE, Dim.iconSm, Tokens.text2)
+        }
+        .width(Dim.touchMin)
+        .height(Dim.touchMin)
+        .onClick(() => {
+          this.content = '';
+        })
+        .accessibilityText('清空')
+      }
     }
     .height(Dim.touchMin)
     .backgroundColor(Tokens.bg)
