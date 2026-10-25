@@ -74,6 +74,10 @@ private enum PlayerSpec {
     /// 高度不够时**只缩封面**：按这个序列取第一个能完整放进可视区的封面尺寸。
     /// hw 在小屏上同样是收缩封面，绝不溢出；比例只作用于封面，其余元素尺寸不变。
     static let coverShrink: [CGFloat] = [1.0, 0.86, 0.72, 0.58, 0.44, 0.30, 0.20]
+    /// 封面可占可用高度的比例（超出就按它收缩，保证顶栏与底部区不被挤出屏）
+    static let coverHeightRatio: CGFloat = 0.46
+    /// 封面相对 hw 基准 280 的放大幅度上限（大屏才生效；402×874 上约 1.15 倍）
+    static let coverGrowMax: CGFloat = 1.2
 }
 
 /**
@@ -133,7 +137,7 @@ struct PlayerView: View {
                 ambient
                 GeometryReader { proxy in
                     ZStack {
-                        page(width: proxy.size.width)
+                        page(width: proxy.size.width, height: proxy.size.height)
                         layers
                     }
                 }
@@ -221,8 +225,12 @@ struct PlayerView: View {
     /// 取第一个能完整放进可视高度的版本。候选列里没有可无限拉伸的元素（不存在
     /// maxHeight: .infinity），所以「放得下」= 真的放得下，不会出现内容被裁掉一半；
     /// 横向左右各留 Dim.s5，封面宽度也计入了这个上限。
-    private func page(width: CGFloat) -> some View {
-        let cap = min(width - Dim.s5 * 2, hasReco ? Dim.coverReco : Dim.coverXl)
+    private func page(width: CGFloat, height: CGFloat) -> some View {
+        // 封面吃「可用高度的一部分」而不是死守 hw 的 280：
+        // 之前固定 280 + 整列垂直居中，剩下的 ~160pt 空白均分在上下，观感就是「页面没撑满」（用户实测）。
+        // 现在 cap 同时受宽度与高度约束，底栏/顶栏贴边、封面吸收剩余空间。
+        let hCap = height * PlayerSpec.coverHeightRatio
+        let cap = min(width - Dim.s5 * 2, hasReco ? Dim.coverReco : min(Dim.coverXl * PlayerSpec.coverGrowMax, hCap))
         return ViewThatFits(in: .vertical) {
             column(side: cap * PlayerSpec.coverShrink[0], width: width)
             column(side: cap * PlayerSpec.coverShrink[1], width: width)
@@ -234,7 +242,8 @@ struct PlayerView: View {
         }
         .padding(.horizontal, Dim.s5)
         .padding(.vertical, Dim.s3)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        // 贴满可用高度：顶栏夹在上、底部区压在下，中间封面块吸收剩余空间（不再整列居中留白）
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .opacity(entered ? 1 : 0)
     }
 
@@ -249,10 +258,11 @@ struct PlayerView: View {
                     recoCard(reco)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.vertical, Dim.s4)
             foot
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     /// 有推荐理由卡时封面让位（hw has-reco：280 → 194）

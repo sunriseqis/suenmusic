@@ -20,6 +20,7 @@ struct RootView: View {
                 PlayerView(onClose: {
                     withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false }
                 })
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .transition(.move(edge: .bottom))
             } else {
                 mainTabs

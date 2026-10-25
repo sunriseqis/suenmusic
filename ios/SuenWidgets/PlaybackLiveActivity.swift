@@ -77,17 +77,17 @@ struct PlaybackLiveActivityWidget: Widget {
                 .widgetURL(URL(string: "suenmusic://player"))
         } dynamicIsland: { context in
             DynamicIsland {
+                // 用户 2026-10-25 定的形态：**左侧封面独占一列，右侧四行**
+                //   1 歌名  2 歌手·专辑  3 进度  4 歌词
+                // 之前把歌词/进度放在 .bottom 区域会和封面抢横向空间，歌词也不居中 → 重排。
                 DynamicIslandExpandedRegion(.leading) {
-                    PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconXl)
-                }
-                DynamicIslandExpandedRegion(.center) {
-                    PlaybackIslandTitle(state: context.state)
+                    PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.touchMin)   // 44：左侧封面独占一列
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    PlaybackControls(playing: context.state.playing, compact: true)
+                    PlaybackIslandRows(state: context.state)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    PlaybackIslandBottom(state: context.state)
+                    PlaybackControls(playing: context.state.playing, compact: true)
                 }
             } compactLeading: {
                 // 单击岛 → 打开 App 并落到播放页（系统规定 tap 只能打开 App，用 URL 指定落地页）
@@ -115,6 +115,36 @@ struct SuenWidgetsBundle: WidgetBundle {
 }
 
 /// 灵动岛 expanded 中区：歌名 + 「歌手 · 专辑」
+/// 灵动岛 expanded 右侧四行：歌名 / 歌手·专辑 / 进度 / 歌词（用户 2026-10-25 定的形态）
+private struct PlaybackIslandRows: View {
+    let state: PlaybackActivityAttributes.ContentState
+    @Environment(\.colorScheme) private var scheme
+
+    private var p: Palette { Palette(scheme) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Dim.s0) {
+            Text(state.title.isEmpty ? "暂无歌曲播放" : state.title)
+                .font(.system(size: Dim.fsMinor, weight: .semibold))
+                .foregroundStyle(p.text1)
+                .lineLimit(1)
+            Text(PlaybackMeta.line(state))
+                .font(.system(size: Dim.fsCaption))
+                .foregroundStyle(p.text2)
+                .lineLimit(1)
+            ProgressView(value: Double(min(state.positionMs, max(state.durationMs, 1))),
+                         total: Double(max(state.durationMs, 1)))
+                .tint(p.accent)
+                .scaleEffect(x: 1, y: 0.7, anchor: .center)
+            Text(state.lyricLine.isEmpty ? " " : state.lyricLine.replacingOccurrences(of: "\n", with: " / "))
+                .font(.system(size: Dim.fsCaption))
+                .foregroundStyle(state.lyricLine.isEmpty ? p.text2 : p.accent)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct PlaybackIslandTitle: View {
     let state: PlaybackActivityAttributes.ContentState
     @Environment(\.colorScheme) private var scheme
