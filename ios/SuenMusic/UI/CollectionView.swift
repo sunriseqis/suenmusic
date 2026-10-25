@@ -36,6 +36,10 @@ struct CollectionView: View {
     @State private var subtitle = ""
     @State private var notice = ""
     @State private var tracks: [Track] = []
+    /// 专辑头部的主歌手（hw `album.artists`）：有 id 就能继续下钻到歌手页
+    @State private var artists: [TrackArtist] = []
+    /// 歌手页的专辑网格（hw `albumGrid`）：点专辑再进专辑页
+    @State private var albums: [Album] = []
     /// 本集合里已收藏的曲目 id（一次 `/api/favorites/check` 批量取，hw `hasFav` 同语义）
     @State private var favIds: Set<String> = []
     @State private var loading = false
@@ -45,6 +49,10 @@ struct CollectionView: View {
 
     /// hw `HEAD_ART = 148`（Dim 没有 148 档，用令牌拼出同值）
     private let headArt = Dim.coverSm * 3 + Dim.s4
+    /// hw `ALBUM_GRID_COLS`（歌手页专辑网格列数）
+    private let albumGridCols = 4
+    /// hw `BATCH_SIZE`（歌手页首批专辑数）
+    private let albumBatch = 8
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,6 +62,11 @@ struct CollectionView: View {
         .background(p.bg)
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
+        // 下钻链路（hw openCollection 全局信号）：本页自己也能再进集合 —— 从搜索/首页以外的入口
+        // 进来时同样成立；栈里连续 push 同一个 CollectionView，返回键 dismiss 一层即可。
+        .navigationDestination(for: CollectionRoute.self) { route in
+            CollectionView(route: route)
+        }
         .task {
             await load()
             await refreshFav()
@@ -111,6 +124,9 @@ struct CollectionView: View {
                             )
                         }
                     }
+                    if route.kind == "artist" && !albums.isEmpty {
+                        albumSection
+                    }
                 }
                 .padding(.bottom, Dim.s6)
             }
@@ -164,12 +180,7 @@ struct CollectionView: View {
                 .foregroundStyle(p.text1)
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-            if !subtitle.isEmpty {
-                Text(subtitle)
-                    .font(.system(size: Dim.fsBody))
-                    .foregroundStyle(p.text2)
-                    .lineLimit(1)
-            }
+            subtitleLine
             if route.kind != "artist" && !tracks.isEmpty {
                 Text("\(tracks.count) 首")
                     .font(.system(size: Dim.fsBody))
@@ -179,6 +190,36 @@ struct CollectionView: View {
         .frame(maxWidth: .infinity)
         .padding(.horizontal, Dim.s4)
         .padding(.top, Dim.s2)
+    }
+
+    /// 副行：专辑页把主歌手做成可继续下钻的链路（hw 任意页都能再进集合），
+    /// 其余种类（榜单/歌单/歌手）保持纯文本，不假装有入口。
+    @ViewBuilder
+    private var subtitleLine: some View {
+        if route.kind == "album" && !artists.isEmpty {
+            HStack(spacing: Dim.s1) {
+                ForEach(Array(artists.enumerated()), id: \.element.id) { index, artist in
+                    if index > 0 {
+                        Text("/")
+                            .font(.system(size: Dim.fsBody))
+                            .foregroundStyle(p.text2)
+                    }
+                    NavigationLink(value: CollectionRoute(kind: "artist", id: artist.id, name: artist.name)) {
+                        Text(artist.name)
+                            .font(.system(size: Dim.fsBody))
+                            .foregroundStyle(p.accentText)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("歌手 \(artist.name)")
+                }
+            }
+        } else if !subtitle.isEmpty {
+            Text(subtitle)
+                .font(.system(size: Dim.fsBody))
+                .foregroundStyle(p.text2)
+                .lineLimit(1)
+        }
     }
 
     /// 播放全部（hw playAllButton：accent 底 + 深字）
@@ -194,6 +235,69 @@ struct CollectionView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, Dim.s2)
         }
+    }
+
+    /// 歌手页「专辑」网格（hw albumGrid：4 列 + 点卡片进专辑页）。补充内容，拿不到就整节不出现。
+    private var albumSection: some View {
+        VStack(alignment: .leading, spacing: Dim.s3) {
+            Text("专辑")
+                .font(.system(size: Dim.fsHeadline, weight: .bold))
+                .foregroundStyle(p.text1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Dim.s2), count: albumGridCols),
+                      alignment: .leading, spacing: Dim.s3) {
+                ForEach(albums) { album in
+                    NavigationLink(value: CollectionRoute(kind: "album", id: album.id, name: album.name)) {
+                        coverCell(album)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.horizontal, Dim.s4)
+        .padding(.top, Dim.s4)
+    }
+
+    /// 封面卡（hw coverCard：1:1 封面 + 发丝线 + 顶沿内高光 + 标题两行 + 副行单行）
+    private func coverCell(_ album: Album) -> some View {
+        VStack(alignment: .leading, spacing: Dim.s2) {
+            Group {
+                if album.picUrl.isEmpty {
+                    p.panel2
+                } else {
+                    AsyncImage(url: URL(string: album.picUrl)) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            p.panel2
+                        }
+                    }
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous)
+                    .strokeBorder(p.line, lineWidth: Dim.hairline)
+            }
+            .overlay(alignment: .top) {
+                Rectangle().fill(p.hi).frame(height: Dim.hairline)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous))
+
+            Text(album.name)
+                .font(.system(size: Dim.fsBody))
+                .foregroundStyle(p.text1)
+                .lineLimit(2)
+            if !album.artistLine.isEmpty {
+                Text(album.artistLine)
+                    .font(.system(size: Dim.fsCaption))
+                    .foregroundStyle(p.text2)
+                    .lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - 文案（对齐 hw kindLabel / emptyTitle / emptyHint）
@@ -270,6 +374,8 @@ struct CollectionView: View {
     private func load() async {
         loading = true
         err = ""
+        artists = []
+        albums = []
         do {
             switch route.kind {
             case "album":
@@ -277,6 +383,8 @@ struct CollectionView: View {
                 coverUrl = r.album.picUrl
                 title = r.album.name
                 subtitle = r.album.artistLine
+                // 头部主歌手带 id：做成可下钻链路（专辑 → 歌手）
+                artists = r.album.artists ?? []
                 notice = r.notice ?? ""
                 tracks = r.songs
             case "toplist":
@@ -290,6 +398,8 @@ struct CollectionView: View {
                 title = r.name.isEmpty ? route.name : r.name
                 subtitle = "热门歌曲"
                 tracks = r.songs
+                // 专辑是补充内容：独立请求、独立兜错，拿不到就整节不出现（hw loadArtistAlbums 同口径）
+                await loadArtistAlbums()
             case "playlist":
                 let r = try await APIClient.shared.qqPlaylistDetail(id: route.id)
                 coverUrl = r.playlist.picUrl
@@ -305,5 +415,27 @@ struct CollectionView: View {
             err = describe(error)
         }
         loading = false
+    }
+
+    /// 歌手页专辑（`/api/artists/:id/albums`）。Net/ 没有这个封装，用公共 `get` + 页内私有结构直连；
+    /// 响应里还有 degraded/hasMore，本批只取首批封面墙，多余字段不影响解码。
+    private func loadArtistAlbums() async {
+        struct Wire: Decodable {
+            let name: String
+            let albums: [Album]
+        }
+        do {
+            let reply: Wire = try await APIClient.shared.get(
+                "/api/artists/" + route.id + "/albums",
+                query: [
+                    "name": title.isEmpty ? route.name : title,
+                    "limit": String(albumBatch),
+                    "page": "1",
+                ]
+            )
+            albums = reply.albums
+        } catch {
+            albums = []
+        }
     }
 }

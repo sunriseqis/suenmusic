@@ -13,6 +13,8 @@ final class AppState: ObservableObject {
     @Published var home: HomeData?
     @Published var loadingHome = false
     @Published var errorMessage: String?
+    /// 正在展示离线快照时的时间戳（epoch ms，0 = 在线最新数据）—— 首页横幅用（hw offlineAt）
+    @Published var offlineAt: Double = 0
 
     @Published var serverAddress: String = ServerRouter.shared.currentBaseURL
     private let api = APIClient.shared
@@ -20,6 +22,12 @@ final class AppState: ObservableObject {
     var isLoggedIn: Bool { user != nil }
 
     func bootstrap() async {
+        #if DEBUG
+        NSLog("[Boot] SUEN_TAB=%@ SUEN_SEARCH=%@ base=%@",
+              DebugHooks.string("SUEN_TAB") ?? "nil",
+              DebugHooks.string("SUEN_SEARCH") ?? "nil",
+              ServerRouter.shared.currentBaseURL)
+        #endif
         #if DEBUG
         // 真机自动化验证用：SIMCTL_CHILD_* / devicectl --environment-variables 注入令牌，跳过手输登录
         let env = ProcessInfo.processInfo.environment
@@ -80,12 +88,70 @@ final class AppState: ObservableObject {
     }
 
     func loadHome() async {
+        // 离线冷启动：先把快照摆上去（列表立刻可看），再照常联网刷新（hw HomePage.load 同序）
+        if home == nil, let snapshot = readHomeSnapshot() {
+            home = snapshot
+            offlineAt = homeSnapshotAt
+        }
         loadingHome = true
         defer { loadingHome = false }
         do {
-            home = try await api.home()
+            let fresh = try await api.home()
+            home = fresh
+            lastOkAt = Self.nowMs
+            offlineAt = 0
+            errorMessage = nil
+            saveHomeSnapshot(fresh)
+            #if DEBUG
+            NSLog("[Home] 联网成功：快照已写入 at=%.0f", homeSnapshotAt)
+            #endif
         } catch {
-            errorMessage = (error as? ApiError)?.message ?? error.localizedDescription
+            errorMessage = Self.describe(error)
+            // 手里已有数据但这次联网失败 → 挂离线横幅：时间戳优先快照写入时刻（与展示数据同源），
+            // 无快照时退回本次会话最近一次成功时刻（hw HomePage.load 的兜底逻辑）
+            if home != nil, (error as? ApiError)?.isNetwork == true {
+                let snapshotAt = homeSnapshotAt
+                offlineAt = snapshotAt > 0 ? snapshotAt : lastOkAt
+                #if DEBUG
+                NSLog("[Home] 联网失败（网络层）：切离线横幅 at=%.0f", offlineAt)
+                #endif
+            }
         }
+    }
+
+    // MARK: - 首页离线快照（hw AppState.readHomeSnapshot / saveHomeSnapshot 同语义）
+    //
+    // 只做「成功就落盘、失败就读回来」这一件事：不新起 Store，也不改首页渲染路径。
+
+    private static let snapshotKey = "suenmusic.homeSnapshot"
+    private static let snapshotAtKey = "suenmusic.homeSnapshotAt"
+
+    /// 本次会话最近一次联网成功时刻（无快照时横幅时间戳的兜底，hw lastOkAt）
+    private var lastOkAt: Double = 0
+
+    /// 快照写入时刻（epoch ms，0 = 从未写入）
+    var homeSnapshotAt: Double { UserDefaults.standard.double(forKey: Self.snapshotAtKey) }
+
+    /// 读快照（无/损坏返回 nil）
+    func readHomeSnapshot() -> HomeData? {
+        guard let raw = UserDefaults.standard.data(forKey: Self.snapshotKey) else { return nil }
+        return try? JSONDecoder().decode(HomeData.self, from: raw)
+    }
+
+    /// 成功拉到首页后落快照：JSON 原文 + 写入时刻
+    func saveHomeSnapshot(_ data: HomeData) {
+        guard let raw = try? JSONEncoder().encode(data) else { return }
+        UserDefaults.standard.set(raw, forKey: Self.snapshotKey)
+        UserDefaults.standard.set(Self.nowMs, forKey: Self.snapshotAtKey)
+    }
+
+    private static var nowMs: Double { Date().timeIntervalSince1970 * 1000 }
+
+    /// 错误 → 用户可读文案（一律经 Copy.describe，页面不自造错误话术）
+    private static func describe(_ error: Error) -> String {
+        guard let e = error as? ApiError else {
+            return Copy.describe(status: -1, code: nil, message: error.localizedDescription)
+        }
+        return Copy.describe(status: e.status, code: e.code.isEmpty ? nil : e.code, message: e.message)
     }
 }

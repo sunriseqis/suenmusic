@@ -65,6 +65,7 @@ struct HomeView: View {
     private func content(_ home: HomeData) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                offlineBanner
                 welcome(home)
                 if !home.newAlbums.isEmpty {
                     // hw Copy.sectionNewAlbums（iOS Copy 表暂无区块名条目，用同字面量）
@@ -86,6 +87,22 @@ struct HomeView: View {
         .refreshable { await load() }
         .navigationDestination(for: CollectionRoute.self) { route in
             CollectionView(route: route)
+        }
+    }
+
+    // MARK: - 离线横幅（hw HomePage 列表首行：离线数据 · 最后更新 HH:mm）
+
+    /// 展示的是本地快照时的横幅；在线最新数据时 `app.offlineAt` 为 0，不占位
+    @ViewBuilder
+    private var offlineBanner: some View {
+        if app.offlineAt > 0 {
+            Text("离线数据 · 最后更新 \(Self.clock(app.offlineAt))")
+                .font(.system(size: Dim.fsCaption))
+                .foregroundStyle(p.text2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Dim.s4)
+                .padding(.top, Dim.s2)
+                .padding(.bottom, Dim.s1)
         }
     }
 
@@ -326,14 +343,13 @@ struct HomeView: View {
 
     private func load() async {
         err = ""
-        do {
-            let fresh = try await APIClient.shared.home()
-            app.home = fresh
-            await refreshFavMarks(fresh.newSongs)
-        } catch {
+        // 首页数据的拉取/快照/离线横幅全部落在 AppState（hw HomePage 委托 AppState 的同构做法）
+        await app.loadHome()
+        if let home = app.home {
+            await refreshFavMarks(home.newSongs)
+        } else if let text = app.errorMessage {
             // 刷新失败不覆盖已有数据（hw 同口径）；只有连数据都没有时才占屏报错
-            let text = Self.describe(error)
-            if app.home == nil { err = text }
+            err = text
             ToastCenter.shared.show(text)
         }
     }
@@ -365,13 +381,16 @@ struct HomeView: View {
 
     // MARK: - 文案
 
-    /// 错误 → 用户可读文案（一律经 Copy.describe，页面不自造错误话术）
-    private static func describe(_ error: Error) -> String {
-        guard let e = error as? ApiError else {
-            return Copy.describe(status: fallbackStatus, code: nil, message: nil)
-        }
-        return Copy.describe(status: e.status, code: e.code.isEmpty ? nil : e.code, message: e.message)
+    /// epoch ms → HH:mm（离线横幅时间；按本地时区、24 小时制）
+    private static func clock(_ ms: Double) -> String {
+        clockFormatter.string(from: Date(timeIntervalSince1970: ms / 1000))
     }
+
+    private static let clockFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 
     /// 发行日 → 「09-11」角标（hw releaseBadge 同口径：正则只认年月日，解析不出返回 nil 不占位）
     private static func releaseBadge(_ raw: String?) -> String? {

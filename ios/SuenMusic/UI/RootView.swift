@@ -19,9 +19,16 @@ struct RootView: View {
         // 而 PlayerView 是照 hw 全屏浮层设计的（沉浸底 + 封面 280 + 四个内部浮层）。
         // hw 的入场是 translate(y:100%)→0 的 200ms EaseOut —— fullScreenCover 自带的底部滑入
         // 正是同一动作，尺寸不再由系统 detent 决定。
-        .fullScreenCover(isPresented: $showPlayer) {
-            PlayerView()
+        // 播放页是 hw 那种**全屏浮层**（盖住底栏、整体从底部上滑），不是 fullScreenCover 的卡片式模态
+        // （后者自带圆角 + 顶部露背景，用户实测「你这个属于浮窗了吧」）。
+        .overlay {
+            if showPlayer {
+                PlayerView()
+                    .transition(.move(edge: .bottom))
+                    .zIndex(10)
+            }
         }
+        .animation(.easeOut(duration: Motion.standard), value: showPlayer)
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
             player.prewarm()
@@ -54,21 +61,33 @@ struct RootView: View {
     /// 为什么保留 TabView 而不自己 switch：TabView 会**保持各页状态**（滚动位置、已加载数据），
     /// 自绘 switch 每次切 tab 都会重建页面 → 每次切回来都重新请求。所以：系统 TabView 负责
     /// 页面容器与状态，`barHeight(0)` 等价物是 `.toolbar(.hidden, for: .tabBar)`，视觉全部换自绘 TabBar。
+    /// 页面容器：**不用 TabView**。
+    ///
+    /// 用 TabView 时系统 tabBar 即便 `.toolbar(.hidden, for: .tabBar)` 也留下一条空背景（用户实测「tab 栏空背景还留在页面上」）。
+    /// 改成 ZStack 里常驻五个 NavigationStack：切页只改 opacity / hitTesting，
+    /// 页面实例不销毁 → 滚动位置与已加载数据都保留（和 TabView 一样的收益），且没有任何系统栏。
     private var mainTabs: some View {
         VStack(spacing: 0) {
-            TabView(selection: $tab) {
-                NavigationStack { HomeView() }.tag(0)
-                NavigationStack { DailyView() }.tag(1)
-                NavigationStack { FavoritesView() }.tag(2)
-                NavigationStack { SearchView() }.tag(3)
-                NavigationStack { SettingsView() }.tag(4)
+            ZStack {
+                page(0) { HomeView() }
+                page(1) { DailyView() }
+                page(2) { FavoritesView() }
+                page(3) { SearchView() }
+                page(4) { SettingsView() }
             }
-            .toolbar(.hidden, for: .tabBar)
             if player.currentTrack != nil {
                 PlayerBar { showPlayer = true }
             }
             TabBar(selection: $tab)
         }
+    }
+
+    /// 常驻页面：非当前页 `opacity 0` 且不接受点击（不销毁 = 保留状态）
+    private func page<Content: View>(_ index: Int, @ViewBuilder content: () -> Content) -> some View {
+        NavigationStack { content() }
+            .opacity(tab == index ? 1 : 0)
+            .allowsHitTesting(tab == index)
+            .accessibilityHidden(tab != index)
     }
 
     /// **DEBUG only**：用环境变量指定起始 tab，便于无触摸环境（OCR 验证）逐页跑界面。

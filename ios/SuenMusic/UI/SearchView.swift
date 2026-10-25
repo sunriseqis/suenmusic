@@ -8,6 +8,9 @@ import SwiftUI
  * （本地，最多 10 条，键 `recent_search` 同 hw）+ `TrackRow` 结果行 + 空态/骨架。
  * 计数文案同 hw `countLabel`：上游还有下一页时标 `N+`（服务端没有总数字段，不假装知道）。
  *
+ * 限流（hw SearchPage.ets:71,79,197,206,231-240）：服务端 HTTP 200 + `degraded` 非空且结果为空
+ * 时显示服务端人话，并记下冷却截止时刻 —— 冷却期内直接复用提示、不再打服务端。
+ *
  * **本批限制**：只有「单曲」分片可播放；专辑/歌手/歌单卡片的详情走 `CollectionRoute`。
  */
 struct SearchView: View {
@@ -28,6 +31,10 @@ struct SearchView: View {
     /// 单曲分片已收藏的曲目 id（hw `songRows[].fav`，一次 `/api/favorites/check` 批量取）
     @State private var favIds: Set<String> = []
     @State private var err = ""
+    /// 服务端随 HTTP 200 带回的限流人话（hw degradedText）：空结果 + degraded 是上游限流，不是「没找到」
+    @State private var degradedText = ""
+    /// 客户端冷却截止时刻（epoch ms，来自 degraded.retryAfterMs）：期间不再发请求（hw cooldownUntil）
+    @State private var cooldownUntil: Double = 0
     @State private var recent: [String] = []
 
     /// 类型序与 hw `SLICE_TYPES` 一致
@@ -37,10 +44,26 @@ struct SearchView: View {
     /// 与 hw `RECENT_MAX` 同值
     private let recentMax = 10
     private let recentKey = "recent_search"
+    /// /api/search 每页条数（与 APIClient.search 的默认 limit 同值）
+    private let pageLimit = 30
+    /// 冷却期内复用的提示（hw SearchPage.ets:197 同文案，N = 剩余秒数向上取整）
+    private static let rateLimitedFmt = "QQ 音乐搜索被限流，请在 %d 秒后重试"
+    /// 服务端没给 message 时的兜底（hw SearchPage.ets:236）
+    private static let rateLimitedFallback = "QQ 音乐搜索被限流，请稍后重试"
 
     private var p: Palette { Palette(scheme) }
 
     var body: some View {
+        // DEBUG 自动化钩子：模拟器没有触摸输入，用启动参数把集合页直接摆上来，
+        // 才能逐跳验收 C（歌手页专辑网格 → 专辑页歌手链接）。Release 下恒为 nil。
+        if let injected = Self.debugCollectionRoute() {
+            CollectionView(route: injected)
+        } else {
+            searchBody
+        }
+    }
+
+    private var searchBody: some View {
         VStack(spacing: 0) {
             searchBar
             NeuTabs(titles: sliceLabels, selection: $slice)
@@ -62,7 +85,10 @@ struct SearchView: View {
             submitted = ""
             clearResults()
         }
-        .onAppear { loadRecent() }
+        .onAppear {
+            loadRecent()
+            debugAutoSearch()
+        }
     }
 
     // MARK: - 搜索条（NeuInput + 琥珀图标钮并排，gap s3 同 hw）
@@ -83,6 +109,8 @@ struct SearchView: View {
     private var content: some View {
         if searching && !hasAnyResult {
             SkeletonList(withPoster: false, rows: 8)
+        } else if !degradedText.isEmpty && !hasAnyResult {
+            rateLimited
         } else if !err.isEmpty && !hasAnyResult {
             failure
         } else if submitted.isEmpty {
@@ -111,6 +139,22 @@ struct SearchView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.horizontal, Dim.s4)
+    }
+
+    /// 上游限流（hw SearchPage build 的 degradedText 分支）：提示而非「没找到」
+    private var rateLimited: some View {
+        VStack(spacing: Dim.s2) {
+            Text(degradedText)
+                .font(.system(size: Dim.fsBody))
+                .foregroundStyle(p.accent)
+                .multilineTextAlignment(.center)
+            Text("上游限流是临时的，稍等一下再试，不是搜索坏了")
+                .font(.system(size: Dim.fsMinor))
+                .foregroundStyle(p.text2)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, Dim.s6)
     }
 
     // MARK: - 最近搜索
@@ -363,23 +407,49 @@ struct SearchView: View {
         hasMore = [false, false, false, false]
         page = 1
         err = ""
+        degradedText = ""
     }
 
     private func doSearch(page target: Int) async {
         let q = submitted
         guard !q.isEmpty else { return }
+        // 冷却窗口内不打服务端（hw SearchPage.ets:181-199）：首屏搜索直接把剩余秒数复用成提示，
+        // 翻页请求直接拦下、不动现有结果。
+        let now = Self.nowMs
+        if now < cooldownUntil {
+            if target == 1 {
+                clearResults()
+                searching = false
+                loadingMore = false
+                let sec = Int(((cooldownUntil - now) / 1000).rounded(.up))
+                degradedText = String(format: Self.rateLimitedFmt, sec)
+                #if DEBUG
+                NSLog("[Search] 提示条文案=%@", degradedText)
+                NSLog("[Search] 冷却中：剩余 %d 秒，跳过请求（不打服务端）", sec)
+                #endif
+            }
+            return
+        }
         if target == 1 {
             searching = true
             err = ""
         } else {
             loadingMore = true
         }
+        degradedText = ""
         defer {
             searching = false
             loadingMore = false
         }
         do {
-            let reply = try await APIClient.shared.search(keyword: q, type: sliceTypes[slice], page: target)
+            // 直连 /api/search：Net/Models.swift 的 SearchReply.degraded 还是 Bool?，对不上服务端
+            // 现在的对象形态（{code,message,retryAfterMs}），复用它会整包解码失败。
+            let reply: SearchWireReply = try await APIClient.shared.get("/api/search", query: [
+                "q": q,
+                "type": sliceTypes[slice],
+                "page": String(target),
+                "limit": String(pageLimit),
+            ])
             if target == 1 {
                 songs = reply.songs
                 albums = reply.albums
@@ -393,11 +463,30 @@ struct SearchView: View {
             }
             hasMore = [reply.hasMore.song, reply.hasMore.album, reply.hasMore.artist, reply.hasMore.playlist]
             page = reply.page
+            // 空结果 + degraded = QQ 上游限流（code 2001，hw SearchPage.ets:231-240）：
+            // 显示服务端给的人话 + 记下冷却窗做节流。有结果时不打扰用户。
+            let total = reply.songs.count + reply.albums.count + reply.artists.count + reply.playlists.count
+            #if DEBUG
+            NSLog("[Search] 响应 type=%@ page=%d 条数=%d degradedCode=%@ retryAfter=%@",
+                  sliceTypes[slice], target, total,
+                  String(describing: reply.degraded?.code),
+                  String(describing: reply.degraded?.retryAfterMs))
+            #endif
+            if let degraded = reply.degraded, degraded.code != nil, total == 0 {
+                let message = degraded.message ?? ""
+                degradedText = message.isEmpty ? Self.rateLimitedFallback : message
+                if let ms = degraded.retryAfterMs, ms > 0 {
+                    cooldownUntil = Self.nowMs + ms
+                }
+            }
             await refreshFav()
         } catch {
             err = describe(error)
         }
     }
+
+    /// 当前时刻（epoch ms）
+    private static var nowMs: Double { Date().timeIntervalSince1970 * 1000 }
 
     /// 单曲分片批量取收藏标记（hw `refreshFavState`：一次 check，不逐行问）
     private func refreshFav() async {
@@ -442,4 +531,58 @@ struct SearchView: View {
         guard let data = try? JSONEncoder().encode(recent) else { return }
         UserDefaults.standard.set(data, forKey: recentKey)
     }
+
+    // MARK: - 无触摸自动化（DEBUG）：模拟器不能打字，用启动参数注入关键词
+    //
+    //   xcrun simctl launch booted com.suenmusic.app -SUEN_TAB search -SUEN_SEARCH 周杰伦
+    //   -SUEN_SEARCH_REPEAT 1：在冷却窗内再提交一次，用来验收「冷却期不发请求、直接复用提示」
+    private func debugAutoSearch() {
+        guard let injected = DebugHooks.string("SUEN_SEARCH"), !injected.isEmpty else { return }
+        #if DEBUG
+        NSLog("[Auto] 注入搜索关键词=%@", injected)
+        #endif
+        keyword = injected
+        trigger()
+        let repeatCount = DebugHooks.int("SUEN_SEARCH_REPEAT") ?? 0
+        guard repeatCount > 0 else { return }
+        // 间隔 1 秒（复用 1s 的动效令牌，不引入新裸数值）：够第一次响应落地、冷却生效
+        Task { @MainActor in
+            for _ in 0..<repeatCount {
+                try? await Task.sleep(for: .seconds(Motion.barsBounce))
+                trigger()
+            }
+        }
+    }
+
+    /// `-SUEN_COLLECTION artist:qq_ar_xxx:段艺璇` → 直接渲染该集合页（仅自动化验收用）
+    private static func debugCollectionRoute() -> CollectionRoute? {
+        guard let spec = DebugHooks.string("SUEN_COLLECTION"), !spec.isEmpty else { return nil }
+        let parts = spec.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 3, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return CollectionRoute(kind: parts[0], id: parts[1], name: parts[2])
+    }
+}
+
+/// `/api/search` 的 `degraded`（hw `SearchDegraded`）：QQ 上游限流（code 2001）时随 HTTP 200 带回。
+///
+/// 服务端**恒返回这个对象**（未限流时是 `{slices:[], code:null}`），所以不能按「可选布尔」理解。
+private struct SearchDegradedWire: Decodable {
+    let code: Int?
+    let message: String?
+    let retryAfterMs: Double?
+}
+
+/// `/api/search` 直连解码的响应体（只声明本页用到的字段）。
+///
+/// 为什么不复用 `Net/Models.swift` 的 `SearchReply`：它的 `degraded` 还是 `Bool?`，拿对象解码会
+/// 抛 typeMismatch 把**整个响应**废掉（连正常搜索结果都拿不到）。`Net/` 不在本任务范围内，
+/// 因此按约定在页面内私有直连；其余字段仍复用 Net/ 的公共模型，不重复定义契约。
+private struct SearchWireReply: Decodable {
+    let songs: [Track]
+    let albums: [Album]
+    let artists: [TrackArtist]
+    let playlists: [PlaylistCard]
+    let hasMore: SearchHasMore
+    let page: Int
+    let degraded: SearchDegradedWire?
 }
