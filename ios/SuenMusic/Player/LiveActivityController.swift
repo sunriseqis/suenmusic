@@ -14,9 +14,16 @@ import UIKit
 final class LiveActivityController {
     static let shared = LiveActivityController()
 
-    /// ⚠️ 临时开关（2026-10-25 观察用）：false = 完全不请求 Live Activity，
-    /// 用来验证「不声明 ActivityKit 时系统会不会自己捕获 Now Playing」；验证完改回 true 即可。
-    static let enabled = true
+    /// **默认关闭**（2026-10-25 定案）。
+    ///
+    /// 依据：旧仓（suenmusic-mobile）**完全没有 ActivityKit / widget 扩展**（grep 命中 0），
+    /// 但真机上灵动岛照样有内容 —— 说明 **iOS 系统自己会把媒体播放渲染到灵动岛和锁屏**，
+    /// 我们不需要声明 Live Activity。
+    ///
+    /// 而一旦声明，按 Apple 文档「must support all presentations」，锁屏必然多出一张卡（与系统媒体卡重复，
+    /// 之前返回 EmptyView 还留下一个空壳面板）。故：**不开 Live Activity，交给系统**。
+    /// 代码与 widget target 都保留 —— 将来若确实需要「系统卡给不了的」内容（如歌词滚动）再打开此开关。
+    static let enabled = false
 
     /// 进度类更新的地板间隔（与 hw 卡片同值）
     private static let minIntervalMs = 1000
