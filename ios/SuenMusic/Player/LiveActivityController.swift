@@ -14,6 +14,10 @@ import UIKit
 final class LiveActivityController {
     static let shared = LiveActivityController()
 
+    /// ⚠️ 临时开关（2026-10-25 观察用）：false = 完全不请求 Live Activity，
+    /// 用来验证「不声明 ActivityKit 时系统会不会自己捕获 Now Playing」；验证完改回 true 即可。
+    static let enabled = false
+
     /// 进度类更新的地板间隔（与 hw 卡片同值）
     private static let minIntervalMs = 1000
 
@@ -64,6 +68,7 @@ final class LiveActivityController {
 
     /// 同步一次状态。`force = true` 用于换歌/播放暂停/音源变化这类必须即时生效的变更。
     func sync(state: PlaybackActivityAttributes.ContentState, force: Bool = false) {
+        guard Self.enabled else { return }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         let now = Date()
         if !force, now.timeIntervalSince(lastPushAt) * 1000 < Double(Self.minIntervalMs) {
