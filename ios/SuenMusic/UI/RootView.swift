@@ -49,28 +49,25 @@ struct RootView: View {
         .overlay { ToastOverlay() }
     }
 
+    /// 自绘底栏（对齐 hw NativeRoot.ets：导轨 + 滑动药丸 + 五格），系统 TabView 只用来承载页面。
+    ///
+    /// 为什么保留 TabView 而不自己 switch：TabView 会**保持各页状态**（滚动位置、已加载数据），
+    /// 自绘 switch 每次切 tab 都会重建页面 → 每次切回来都重新请求。所以：系统 TabView 负责
+    /// 页面容器与状态，`barHeight(0)` 等价物是 `.toolbar(.hidden, for: .tabBar)`，视觉全部换自绘 TabBar。
     private var mainTabs: some View {
         VStack(spacing: 0) {
             TabView(selection: $tab) {
-                NavigationStack { HomeView() }
-                    .tabItem { Label("首页", systemImage: "house") }
-                    .tag(0)
-                NavigationStack { DailyView() }
-                    .tabItem { Label("专属", systemImage: "sparkles") }
-                    .tag(1)
-                NavigationStack { FavoritesView() }
-                    .tabItem { Label("收藏", systemImage: "heart") }
-                    .tag(2)
-                NavigationStack { SearchView() }
-                    .tabItem { Label("搜索", systemImage: "magnifyingglass") }
-                    .tag(3)
-                NavigationStack { SettingsView() }
-                    .tabItem { Label("我的", systemImage: "person") }
-                    .tag(4)
+                NavigationStack { HomeView() }.tag(0)
+                NavigationStack { DailyView() }.tag(1)
+                NavigationStack { FavoritesView() }.tag(2)
+                NavigationStack { SearchView() }.tag(3)
+                NavigationStack { SettingsView() }.tag(4)
             }
+            .toolbar(.hidden, for: .tabBar)
             if player.currentTrack != nil {
                 PlayerBar { showPlayer = true }
             }
+            TabBar(selection: $tab)
         }
     }
 
