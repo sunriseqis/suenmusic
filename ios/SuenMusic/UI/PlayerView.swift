@@ -549,9 +549,8 @@ struct PlayerView: View {
                 .zIndex(2)
         case .queue:
             QueueSheet(onClose: { closeSheet() })
-                // 非对称：进来只位移，出去位移+淡出（与歌词面板同一处理，收起不再「一下子没了」）
-                .transition(.asymmetric(insertion: .move(edge: .bottom),
-                                        removal: .move(edge: .bottom).combined(with: .opacity)))
+                // 只位移，不加 opacity：长列表叠加淡出会掉帧（用户实测「展开收起异常卡顿」）
+                .transition(.move(edge: .bottom))
         case .more:
             MoreMenu(sourceLabel: sourceText, artistName: firstArtistName,
                      albumName: track?.al.name ?? "",

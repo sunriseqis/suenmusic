@@ -29,9 +29,6 @@ struct QueueSheet: View {
         self.onClose = onClose
     }
 
-    /// 列表内容的淡入开关（容器滑入后 80ms 再显形，避免「硬弹出」）
-    @State private var revealList = false
-
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -45,10 +42,7 @@ struct QueueSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .onAppear {
-            withAnimation(.easeOut(duration: Motion.sheet).delay(0.08)) { revealList = true }
-        }
-        .onDisappear { revealList = false }
+        .onDisappear { }
     }
 
     private var drawer: some View {
@@ -107,14 +101,12 @@ struct QueueSheet: View {
             // 需要等一帧布局出来才能滚，否则 LazyVStack 还没铺内容，scrollTo 无效。
             .task {
                 let target = max(0, player.currentIndex)
-                try? await Task.sleep(nanoseconds: 60_000_000)
-                withAnimation(.easeOut(duration: Motion.sheet)) {
-                    proxy.scrollTo(target, anchor: .center)
-                }
+                try? await Task.sleep(nanoseconds: 30_000_000)
+                // 不用 withAnimation：展开瞬间对长列表做布局动画会明显卡（用户实测）
+                proxy.scrollTo(target, anchor: .center)
             }
         }
-        // 内容延迟淡入：和歌词面板同一个病根 —— 容器在动、内容却硬弹出。
-        .opacity(revealList ? 1 : 0)
+        // ⚠️ 不做整列表 opacity 动画：长列表每帧离屏合成，展开/收起明显掉帧（用户实测「异常卡顿」）。
         // 不再锁滚动：拖动排序已暂时摘除，滚动优先。
     }
 
