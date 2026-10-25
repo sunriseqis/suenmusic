@@ -19,7 +19,18 @@ struct SuenMusicApp: App {
                 .environmentObject(PlaybackService.shared)
                 .environmentObject(theme)
                 .preferredColorScheme(theme.preferredScheme)
-                .task { await app.bootstrap() }
+                .task {
+                    Notifier.bootstrap()          // 前台展示代理 + 通知授权
+                    await app.bootstrap()
+                    #if DEBUG
+                    // 自检钩子：验证「前台也能弹横幅」（默认关闭，SUEN_TEST_NOTIFY=1 打开）
+                    if DebugHooks.string("SUEN_TEST_NOTIFY") == "1" {
+                        try? await Task.sleep(nanoseconds: 2_000_000_000)
+                        Notifier.notify(title: "没有匹配音源",
+                                        body: "《测试曲目》没有可播放的匹配音源，已自动跳过")
+                    }
+                    #endif
+                }
         }
     }
 }
