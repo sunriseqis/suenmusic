@@ -17,7 +17,8 @@ struct SettingsView: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
-    @State private var seg = 0
+    /// DEBUG 钩子：SIMCTL_CHILD_SUEN_SETTINGS_SEG=2 直接落「高级」段（无触摸环境验界面用）
+    @State private var seg = SettingsView.initialSeg()
     @State private var showPassword = false
     @State private var pwOld = ""
     @State private var pwNew = ""
@@ -317,6 +318,14 @@ struct SettingsView: View {
     }
 
     // MARK: - 逻辑
+
+    private static func initialSeg() -> Int {
+        #if DEBUG
+        return Int(ProcessInfo.processInfo.environment["SUEN_SETTINGS_SEG"] ?? "") ?? 0
+        #else
+        return 0
+        #endif
+    }
 
     private var passwordReady: Bool {
         !pwBusy && !pwOld.isEmpty && pwNew.count >= 6 && pwNew == pwNew2
