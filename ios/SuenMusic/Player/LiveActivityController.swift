@@ -14,16 +14,15 @@ import UIKit
 final class LiveActivityController {
     static let shared = LiveActivityController()
 
-    /// **默认关闭**（2026-10-25 定案）。
+    /// **开启**（2026-10-25 用户定案：这种形态正好）。
     ///
-    /// 依据：旧仓（suenmusic-mobile）**完全没有 ActivityKit / widget 扩展**（grep 命中 0），
-    /// 但真机上灵动岛照样有内容 —— 说明 **iOS 系统自己会把媒体播放渲染到灵动岛和锁屏**，
-    /// 我们不需要声明 Live Activity。
+    /// 背景：iOS 会把 Live Activity 放到锁屏上该 App 的媒体槽位，于是系统媒体卡不再单独出现。
+    /// 换句话说——**锁屏只剩我们这一张卡**，它必须自己承担全部信息（封面/歌名/歌手/歌词/进度/三键）。
+    /// 这也让「锁屏歌词」成为可能（系统媒体卡不带歌词），而桌面 widget 做不到（15-60 分钟一次刷新）。
     ///
-    /// 而一旦声明，按 Apple 文档「must support all presentations」，锁屏必然多出一张卡（与系统媒体卡重复，
-    /// 之前返回 EmptyView 还留下一个空壳面板）。故：**不开 Live Activity，交给系统**。
-    /// 代码与 widget target 都保留 —— 将来若确实需要「系统卡给不了的」内容（如歌词滚动）再打开此开关。
-    static let enabled = false
+    /// 代价（已确认接受）：Apple 要求 all presentations，所以灵动岛与锁屏卡并存，锁屏会多这一张卡；
+    /// 因为系统卡被顶掉，这不是「重复」，而是「取代」。
+    static let enabled = true
 
     /// 进度类更新的地板间隔（与 hw 卡片同值）
     private static let minIntervalMs = 1000
