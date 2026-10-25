@@ -187,7 +187,8 @@ final class LiveActivityController {
             guard let self else { return }
             NSLog("[LiveActivity] update id=\(activity.id) title=\(state.title) artist=\(state.artist) "
                 + "album=\(state.album) lyric=\(Self.oneLine(state.lyricLine)) "
-                + "pos=\(state.positionMs)/\(state.durationMs) playing=\(state.playing ? 1 : 0)")
+                + "pos=\(state.positionMs)/\(state.durationMs) playing=\(state.playing ? 1 : 0) "
+                + "dark=\(state.dark ? 1 : 0) cover=\(state.coverJPEG?.count ?? 0)B")
             self.writing = false
             if let next = self.pendingState, self.activity?.id == activity.id, next != state {
                 self.write(next, to: activity)

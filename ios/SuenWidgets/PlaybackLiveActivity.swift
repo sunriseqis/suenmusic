@@ -16,14 +16,13 @@ import ActivityKit
  */
 struct PlaybackLockScreenView: View {
     let state: PlaybackActivityAttributes.ContentState
-    @Environment(\.colorScheme) private var scheme
 
-    private var p: Palette { Palette(scheme) }
+    private var p: Palette { Palette(state.dark ? .dark : .light) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Dim.s1) {
             HStack(spacing: Dim.s3) {
-                PlaybackArtwork(jpeg: state.coverJPEG, size: Dim.coverSm)
+                PlaybackArtwork(jpeg: state.coverJPEG, size: Dim.coverSm, dark: state.dark)
                 VStack(alignment: .leading, spacing: Dim.s0) {
                     Text(state.title.isEmpty ? "暂无歌曲播放" : state.title)
                         .font(.system(size: Dim.fsSub, weight: .semibold))
@@ -36,7 +35,7 @@ struct PlaybackLockScreenView: View {
                         .lineLimit(1)
                 }
                 Spacer(minLength: Dim.s1)
-                PlaybackControls(playing: state.playing, compact: false)
+                PlaybackControls(playing: state.playing, compact: false, dark: state.dark)
             }
             // 歌词行：只有有歌词才占位，避免没歌词的歌留一条空行
             if !state.lyricLine.isEmpty {
@@ -84,27 +83,28 @@ struct PlaybackLiveActivityWidget: Widget {
                 // ⚠️ 不能拆到 .leading / .trailing：这两个区域的宽高由系统决定（leading 很窄、trailing 很高），
                 //    实测 44pt 封面被压成空白、四行被拉成大间距。整块放进 .bottom 自己排版才可控。
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: Dim.s2) {
-                        HStack(alignment: .top, spacing: Dim.s2) {
-                            PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.btnMd)
-                            PlaybackIslandRows(state: context.state)
-                        }
-                        PlaybackControls(playing: context.state.playing, compact: true)
+                    // hw 2×4 卡片的三栏结构（封面列 | 信息列 | 运输列）：
+                    // 岛内空间小，纵向复用比「三键单独一行」更省高度、信息也更密。
+                    HStack(alignment: .center, spacing: Dim.s2) {
+                        PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.coverSm, dark: context.state.dark)
+                        PlaybackIslandRows(state: context.state)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        PlaybackIslandTransport(playing: context.state.playing, dark: context.state.dark)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity)
                 }
             } compactLeading: {
                 // 单击岛 → 打开 App 并落到播放页（系统规定 tap 只能打开 App，用 URL 指定落地页）
-                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm)
+                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: context.state.dark)
                     .widgetURL(URL(string: "suenmusic://player"))
             } compactTrailing: {
-                PlaybackIslandPlayPause(playing: context.state.playing)
+                PlaybackIslandPlayPause(playing: context.state.playing, dark: context.state.dark)
             } minimal: {
-                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm)
+                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: context.state.dark)
                     .widgetURL(URL(string: "suenmusic://player"))
             }
             // keylineTint 挂在 DynamicIsland 构造器上、拿不到环境 → 只能用 token 本身
-            //（等价于 Palette(scheme).accent：Palette 里 accent 就是 DesignTokens.accent 的动态色）
+            //（等价于 Palette(dark ? .dark : .light).accent：Palette 里 accent 就是 DesignTokens.accent 的动态色）
             .keylineTint(DesignTokens.accent)
         }
     }
@@ -122,9 +122,8 @@ struct SuenWidgetsBundle: WidgetBundle {
 /// 灵动岛 expanded 右侧四行：歌名 / 歌手·专辑 / 进度 / 歌词（用户 2026-10-25 定的形态）
 private struct PlaybackIslandRows: View {
     let state: PlaybackActivityAttributes.ContentState
-    @Environment(\.colorScheme) private var scheme
 
-    private var p: Palette { Palette(scheme) }
+    private var p: Palette { Palette(state.dark ? .dark : .light) }
 
     var body: some View {
         // spacing 1：四行必须紧贴，不能被系统区域拉成大间距
@@ -152,9 +151,8 @@ private struct PlaybackIslandRows: View {
 
 private struct PlaybackIslandTitle: View {
     let state: PlaybackActivityAttributes.ContentState
-    @Environment(\.colorScheme) private var scheme
 
-    private var p: Palette { Palette(scheme) }
+    private var p: Palette { Palette(state.dark ? .dark : .light) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -173,9 +171,8 @@ private struct PlaybackIslandTitle: View {
 /// 灵动岛 expanded 下区：歌词行 + 进度条 + 时间
 private struct PlaybackIslandBottom: View {
     let state: PlaybackActivityAttributes.ContentState
-    @Environment(\.colorScheme) private var scheme
 
-    private var p: Palette { Palette(scheme) }
+    private var p: Palette { Palette(state.dark ? .dark : .light) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Dim.s0) {
@@ -204,12 +201,12 @@ private struct PlaybackIslandBottom: View {
 /// 灵动岛 compact 右侧：播放 / 暂停
 private struct PlaybackIslandPlayPause: View {
     let playing: Bool
-    @Environment(\.colorScheme) private var scheme
+    let dark: Bool
 
     var body: some View {
         Image(systemName: playing ? "pause.fill" : "play.fill")
             .font(.system(size: Dim.icon12))
-            .foregroundStyle(Palette(scheme).accent)
+            .foregroundStyle(Palette(dark ? .dark : .light).accent)
     }
 }
 
@@ -230,20 +227,43 @@ private enum PlaybackMeta {
 
 /// 封面：Live Activity 扩展**不能联网取图**（AsyncImage 在渲染进程不解析），
 /// 图由主 App 下好、缩成 64×64 JPEG 塞进 ContentState（base64 随状态传过来）。
+/// 运输列（hw 2×4 的右侧竖排）：上一首 / 播放暂停 / 下一首，纵向排布省横向空间
+private struct PlaybackIslandTransport: View {
+    let playing: Bool
+    let dark: Bool
+
+    private var p: Palette { Palette(dark ? .dark : .light) }
+
+    var body: some View {
+        HStack(spacing: Dim.s2) {
+            Button(intent: PrevTrackIntent()) {
+                Image(systemName: "backward.fill").font(.system(size: Dim.icon12)).foregroundStyle(p.text1)
+            }.buttonStyle(.plain)
+            Button(intent: PlayPauseIntent()) {
+                Image(systemName: playing ? "pause.fill" : "play.fill")
+                    .font(.system(size: Dim.icon18)).foregroundStyle(p.accent)
+            }.buttonStyle(.plain)
+            Button(intent: NextTrackIntent()) {
+                Image(systemName: "forward.fill").font(.system(size: Dim.icon12)).foregroundStyle(p.text1)
+            }.buttonStyle(.plain)
+        }
+    }
+}
+
 private struct PlaybackArtwork: View {
     let jpeg: Data?
     let size: CGFloat
-    @Environment(\.colorScheme) private var scheme
+    let dark: Bool
 
     var body: some View {
         ZStack {
-            Palette(scheme).panel2
+            Palette(dark ? .dark : .light).panel2
             if let jpeg, let image = UIImage(data: jpeg) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.42))
-                    .foregroundStyle(Palette(scheme).text2)
+                    .foregroundStyle(Palette(dark ? .dark : .light).text2)
             }
         }
         .frame(width: size, height: size)
@@ -256,9 +276,9 @@ private struct PlaybackControls: View {
     let playing: Bool
     /// 灵动岛 expanded 空间窄：图标小一号、间距紧一档
     let compact: Bool
-    @Environment(\.colorScheme) private var scheme
+    let dark: Bool
 
-    private var p: Palette { Palette(scheme) }
+    private var p: Palette { Palette(dark ? .dark : .light) }
 
     var body: some View {
         HStack(spacing: compact ? Dim.s2 : Dim.s3) {

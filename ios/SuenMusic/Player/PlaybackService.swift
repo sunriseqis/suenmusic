@@ -148,6 +148,22 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
+    /// 主题变化后立刻重推一次 Live Activity（锁屏卡/灵动岛是独立进程，不会自己跟着改色）
+    func refreshActivityForTheme() {
+        guard currentTrack != nil else { return }
+        pushActivity(force: true)
+    }
+
+    /// 当前主题是否深色：显式设了浅/深就按设置，跟随系统时按系统当前外观。
+    static var currentDark: Bool {
+        switch ThemeStore.shared.mode {
+        case .light: return false
+        case .dark: return true
+        case .system:
+            return UITraitCollection.current.userInterfaceStyle == .dark
+        }
+    }
+
     // MARK: 预热（降低起播延迟）
 
     /// 应用启动/回前台时调一次：把引擎（AVAudioSession + 观察者）建好，并预取流会话令牌。
@@ -647,7 +663,8 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             playing: playing,
             sourceLabel: sourceLabel,
             coverJPEG: cached,
-            lyricLine: currentLyricLine
+            lyricLine: currentLyricLine,
+            dark: Self.currentDark
         )
         LiveActivityController.shared.sync(state: state, force: force)
     }

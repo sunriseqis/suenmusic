@@ -33,5 +33,11 @@ struct PlaybackActivityAttributes: ActivityAttributes {
         /// widget 进程不能联网、也不能自己算时间轴，所以歌词必须由主 App 按播放位置算好后随状态推；
         /// 只推一行（ContentState 上限 4KB），且只在**换行时**推（ActivityKit 有更新预算）。
         var lyricLine: String = ""
+        /// **是否深色**（true = 深色主题）。
+        ///
+        /// 为什么要把主题塞进状态里：widget / Live Activity 是独立进程，`@Environment(\.colorScheme)`
+        /// 拿到的是**系统**的深浅色，而 App 里可以单独设「浅色/深色」（theme_mode）——
+        /// 不传这个字段，用户把 App 设成深色、系统是浅色时，锁屏卡与灵动岛会一直是浅色（用户实测反馈）。
+        var dark: Bool = false
     }
 }
