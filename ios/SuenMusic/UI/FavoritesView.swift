@@ -198,7 +198,6 @@ struct FavoritesView: View {
             .padding(.bottom, Dim.s6)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await load(reset: true) }
     }
 
     @ViewBuilder

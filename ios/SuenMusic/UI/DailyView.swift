@@ -128,7 +128,6 @@ struct DailyView: View {
                     .padding(.bottom, Dim.s6)
                 }
                 .scrollIndicators(.hidden)
-                .refreshable { await load() }
             }
         }
     }

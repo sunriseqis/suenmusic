@@ -17,7 +17,7 @@ import ActivityKit
 struct PlaybackLockScreenView: View {
     let state: PlaybackActivityAttributes.ContentState
 
-    private var p: Palette { Palette(state.dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: state.dark) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Dim.s1) {
@@ -104,7 +104,7 @@ struct PlaybackLiveActivityWidget: Widget {
                     .widgetURL(URL(string: "suenmusic://player"))
             }
             // keylineTint 挂在 DynamicIsland 构造器上、拿不到环境 → 只能用 token 本身
-            //（等价于 Palette(dark ? .dark : .light).accent：Palette 里 accent 就是 DesignTokens.accent 的动态色）
+            //（等价于 Palette(dark: dark).accent：Palette 里 accent 就是 DesignTokens.accent 的动态色）
             .keylineTint(DesignTokens.accent)
         }
     }
@@ -123,7 +123,7 @@ struct SuenWidgetsBundle: WidgetBundle {
 private struct PlaybackIslandRows: View {
     let state: PlaybackActivityAttributes.ContentState
 
-    private var p: Palette { Palette(state.dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: state.dark) }
 
     var body: some View {
         // spacing 1：四行必须紧贴，不能被系统区域拉成大间距
@@ -152,7 +152,7 @@ private struct PlaybackIslandRows: View {
 private struct PlaybackIslandTitle: View {
     let state: PlaybackActivityAttributes.ContentState
 
-    private var p: Palette { Palette(state.dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: state.dark) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -172,7 +172,7 @@ private struct PlaybackIslandTitle: View {
 private struct PlaybackIslandBottom: View {
     let state: PlaybackActivityAttributes.ContentState
 
-    private var p: Palette { Palette(state.dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: state.dark) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Dim.s0) {
@@ -206,7 +206,7 @@ private struct PlaybackIslandPlayPause: View {
     var body: some View {
         Image(systemName: playing ? "pause.fill" : "play.fill")
             .font(.system(size: Dim.icon12))
-            .foregroundStyle(Palette(dark ? .dark : .light).accent)
+            .foregroundStyle(Palette(dark: dark).accent)
     }
 }
 
@@ -232,7 +232,7 @@ private struct PlaybackIslandTransport: View {
     let playing: Bool
     let dark: Bool
 
-    private var p: Palette { Palette(dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: dark) }
 
     var body: some View {
         HStack(spacing: Dim.s2) {
@@ -257,13 +257,13 @@ private struct PlaybackArtwork: View {
 
     var body: some View {
         ZStack {
-            Palette(dark ? .dark : .light).panel2
+            Palette(dark: dark).panel2
             if let jpeg, let image = UIImage(data: jpeg) {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.42))
-                    .foregroundStyle(Palette(dark ? .dark : .light).text2)
+                    .foregroundStyle(Palette(dark: dark).text2)
             }
         }
         .frame(width: size, height: size)
@@ -278,7 +278,7 @@ private struct PlaybackControls: View {
     let compact: Bool
     let dark: Bool
 
-    private var p: Palette { Palette(dark ? .dark : .light) }
+    private var p: Palette { Palette(dark: dark) }
 
     var body: some View {
         HStack(spacing: compact ? Dim.s2 : Dim.s3) {

@@ -84,7 +84,6 @@ struct HomeView: View {
             .padding(.bottom, Dim.s6)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await load() }
         .navigationDestination(for: CollectionRoute.self) { route in
             CollectionView(route: route)
         }

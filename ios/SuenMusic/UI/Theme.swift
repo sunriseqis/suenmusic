@@ -85,6 +85,40 @@ struct Palette {
     let posterScrim: Color
     let posterScrimMid: Color
 
+    /// 固定值调色板（**不随系统 trait 变化**）。
+    ///
+    /// 为什么需要：`DesignTokens` 里的颜色是动态 `Color(light:dark:)`，在 widget / Live Activity
+    /// 那个独立进程里按**系统**外观解析。所以即便主 App 把 `dark` 传对了，锁屏卡与灵动岛
+    /// 也会一直跟着系统走（用户实测「灵动岛不会随 app 主题变」）。
+    /// 这里直接用十六进制字面量构造颜色，绕开动态解析。
+    init(dark: Bool) {
+        func c(_ light: UInt32, _ darkValue: UInt32, _ alpha: Double = 1) -> Color {
+            let v = dark ? darkValue : light
+            return Color(.sRGB,
+                         red: Double((v >> 16) & 0xFF) / 255.0,
+                         green: Double((v >> 8) & 0xFF) / 255.0,
+                         blue: Double(v & 0xFF) / 255.0,
+                         opacity: alpha)
+        }
+        bg = c(0xF2F0EA, 0x0E0F11)
+        panel = c(0xFFFDF8, 0x17181B)
+        panel2 = c(0xF7F3EA, 0x1D1F23)
+        line = c(0xDCD6C9, 0x2A2C30)
+        text1 = c(0x141414, 0xE9E7E2)
+        text2 = c(0x6D6A63, 0x8A8D93)
+        accent = c(0xB0650F, 0xE8A33D)
+        accentText = c(0x8F4E08, 0xE8A33D)
+        onAccent = c(0xFFFFFF, 0x1A1206)
+        danger = c(0xA8322A, 0xD4564A)
+        track = c(0xDCD6C9, 0x2A2C30)
+        hi = c(0xFFFFFF, 0xFFFFFF, dark ? 0.06 : 0.95)
+        scrim = c(0x141414, 0x000000, dark ? 0.66 : 0.42)
+        badgeInk = c(0xFFFFFF, 0x1A1206)
+        dateChip = c(0x000000, 0x000000, 0.5)
+        posterScrim = c(0x000000, 0x000000, 0.78)
+        posterScrimMid = c(0x000000, 0x000000, 0.42)
+    }
+
     init(_ scheme: ColorScheme) {
         // token 已是动态色（自带 light/dark 两值），这里不再按 scheme 分叉：
         // 保留 `Palette(scheme)` 签名只为不动既有页面的调用点。
