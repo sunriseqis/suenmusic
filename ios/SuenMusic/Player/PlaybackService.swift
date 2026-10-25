@@ -190,6 +190,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         queue = tracks
         currentIndex = index
         ensureLyrics()   // 起播即拉歌词（引擎整队装载不发 trackChange，见 ensureLyrics 注释）
+        // 推荐理由同理：它只在 emitTrackChange 里拉，而**首播走 setQueue 内联装载不发该事件** →
+        // 第一首播放时「专属推荐理由」卡从不出现，用户也就看不到卡右上角的「不喜欢」按钮。
+        ensureRecoReasons()
+        currentRecoReason = recoReasons[tracks[index].id]
         armLoadWatchdog()
 
         NSLog("[Start] play() 进入 id=\(tracks[index].id) origin=\(origin)")
@@ -439,6 +443,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 }
                 self.recoReasons = map
                 self.currentRecoReason = self.currentTrack.flatMap { map[$0.id] }
+                NSLog("[Reco] 推荐理由 %d 条；当前曲命中=%@", map.count, self.currentRecoReason == nil ? "否" : "是")
             }
         }
     }
