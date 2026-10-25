@@ -95,7 +95,7 @@ struct SearchView: View {
 
     private var searchBar: some View {
         HStack(spacing: Dim.s3) {
-            NeuInput($keyword, placeholder: "歌名、歌手、专辑、歌单", icon: .search) { trigger() }
+            NeuInput($keyword, clearable: true, placeholder: "歌名、歌手、专辑、歌单", icon: .search) { trigger() }
             WebIconButton(.search, box: Dim.touchMin, style: .gradient) { trigger() }
                 .accessibilityLabel("搜索")
         }

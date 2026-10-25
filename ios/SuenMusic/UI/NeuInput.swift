@@ -13,17 +13,21 @@ struct NeuInput: View {
     private let placeholder: String
     private let icon: WebIconName?
     private let isPassword: Bool
+    private let clearable: Bool
     private let onSubmit: (() -> Void)?
 
     private var p: Palette { Palette(scheme) }
 
-    init(_ text: Binding<String>, placeholder: String,
+    // `clearable` 故意放在 placeholder 之前：调用点写成 `NeuInput($kw, clearable: true, placeholder: …)` 更自然，
+    // 且 Swift 要求实参顺序与声明一致。
+    init(_ text: Binding<String>, clearable: Bool = false, placeholder: String,
          icon: WebIconName? = nil, isPassword: Bool = false,
          onSubmit: (() -> Void)? = nil) {
         self._text = text
         self.placeholder = placeholder
         self.icon = icon
         self.isPassword = isPassword
+        self.clearable = clearable
         self.onSubmit = onSubmit
     }
 
@@ -34,6 +38,21 @@ struct NeuInput: View {
                     .foregroundStyle(p.text2)
             }
             field
+            // 一键清空（hw 缺这个交互；搜索框有内容时才出现，避免空框多一个灰点）
+            if clearable, !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    WebIcon(.close, size: Dim.iconSm)
+                        .foregroundStyle(p.text2)
+                        .frame(width: Dim.touchMin, height: Dim.touchMin)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清空")
+                // 右侧内边距已经由容器 s3 提供，这里只吃掉按钮自身留白
+                .padding(.trailing, -Dim.s2)
+            }
         }
         .frame(height: Dim.touchMin)
         .padding(.horizontal, Dim.s3)

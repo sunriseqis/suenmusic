@@ -135,7 +135,7 @@ struct FavoritesView: View {
 
     /// 收藏内搜索行（hw `searchRow`：NeuInput + 放大镜图标，本地过滤不发请求）
     private var searchRow: some View {
-        NeuInput($keyword, placeholder: "搜索歌名 / 歌手 / 专辑", icon: .search)
+        NeuInput($keyword, clearable: true, placeholder: "搜索歌名 / 歌手 / 专辑", icon: .search)
             .padding(.horizontal, Dim.s4)
             .padding(.vertical, Dim.s1)
     }
