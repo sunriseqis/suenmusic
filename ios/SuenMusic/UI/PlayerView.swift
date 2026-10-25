@@ -140,7 +140,21 @@ struct PlayerView: View {
         .onChange(of: player.durationMs) { _, _ in
             if !dragging { slide = Double(clampedPosition) }
         }
-        .onAppear { slide = Double(clampedPosition) }
+        .onAppear {
+            slide = Double(clampedPosition)
+            #if DEBUG
+            // 自动化验收钩子：SUEN_SHEET=lyrics|queue|more|anchor|dislike 时直接打开对应浮层，
+            // 供 OCR 截图核对（模拟器无法脚本化点击）。默认不生效。
+            switch DebugHooks.string("SUEN_SHEET") ?? "" {
+            case "lyrics": openSheet(.lyrics)
+            case "queue": openSheet(.queue)
+            case "more": openSheet(.more)
+            case "anchor": openSheet(.anchor)
+            case "dislike": openSheet(.dislike)
+            default: break
+            }
+            #endif
+        }
     }
 
     // MARK: - 可见数据
