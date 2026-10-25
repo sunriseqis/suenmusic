@@ -29,6 +29,9 @@ struct QueueSheet: View {
         self.onClose = onClose
     }
 
+    /// 列表内容的淡入开关（容器滑入后 80ms 再显形，避免「硬弹出」）
+    @State private var revealList = false
+
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -42,6 +45,10 @@ struct QueueSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
+        .onAppear {
+            withAnimation(.easeOut(duration: Motion.sheet).delay(0.08)) { revealList = true }
+        }
+        .onDisappear { revealList = false }
     }
 
     private var drawer: some View {
@@ -86,14 +93,28 @@ struct QueueSheet: View {
     // MARK: - 列表
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(player.queue.indices, id: \.self) { index in
-                    row(index, player.queue[index])
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(player.queue.indices, id: \.self) { index in
+                        row(index, player.queue[index])
+                            .id(index)
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+            // 呼出即定位：当前曲**居中**（之前停在列表第一位，用户实测「默认显示列表第一位」）。
+            // 需要等一帧布局出来才能滚，否则 LazyVStack 还没铺内容，scrollTo 无效。
+            .task {
+                let target = max(0, player.currentIndex)
+                try? await Task.sleep(nanoseconds: 60_000_000)
+                withAnimation(.easeOut(duration: Motion.sheet)) {
+                    proxy.scrollTo(target, anchor: .center)
                 }
             }
         }
-        .scrollIndicators(.hidden)
+        // 内容延迟淡入：和歌词面板同一个病根 —— 容器在动、内容却硬弹出。
+        .opacity(revealList ? 1 : 0)
         // 不再锁滚动：拖动排序已暂时摘除，滚动优先。
     }
 
