@@ -37,11 +37,16 @@ struct LyricPanel: View {
         self.onClose = onClose
     }
 
+    /// 内容淡入开关：面板整体从底部滑上来（200ms）期间，正文先保持透明，
+    /// 滑到位后再淡入 —— 否则列表会在最终位置先“硬弹”出来，看着像面板没做动效（用户实测）。
+    @State private var contentShown = false
+
     var body: some View {
         VStack(spacing: 0) {
             header
             content
         }
+        .opacity(contentShown ? 1 : 0)
         // 全屏 = 占满父容器给的安全区（调用方是播放页的全屏 GeometryReader）：
         // 顶部/底部避让由容器承担，这里只补自己的呼吸留白，不再自己 ignoresSafeArea，
         // 否则会把内容顶到刘海/指示条区域之外。
@@ -49,7 +54,13 @@ struct LyricPanel: View {
         .padding(.top, Dim.s3)
         .padding(.bottom, Dim.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(p.bg)
+        .background(p.bg.ignoresSafeArea())
+        .onAppear {
+            // 滑入 200ms；正文延后 120ms 淡入（100ms easeOut），不抢面板的位移
+            withAnimation(.easeOut(duration: Motion.fast).delay(Motion.standard * 0.6)) {
+                contentShown = true
+            }
+        }
         .task(id: player.currentTrack?.id) { await load() }
         .onChange(of: player.positionMs) { _, _ in syncActive() }
     }

@@ -528,6 +528,8 @@ struct PlayerView: View {
         case .lyrics:
             LyricPanel(title: track?.name ?? "", onClose: { closeSheet() })
                 .transition(.move(edge: .bottom))
+                // 歌词页是整页浮层：滑入时要盖住下面的播放页主体（含 peek 歌词）
+                .zIndex(2)
         case .queue:
             QueueSheet(onClose: { closeSheet() })
                 .transition(.move(edge: .bottom))
