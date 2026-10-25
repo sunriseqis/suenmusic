@@ -1,24 +1,41 @@
 import SwiftUI
 
 /**
- * 首页（发现）—— **逐区块对齐鸿蒙端 `pages/HomePage.ets`**（hw 又是对齐移动版 Web `Home.vue` ≤767px）。
+ * 首页（发现）—— **逐区块对齐鸿蒙端 pages/HomePage.ets**（hw 又是对齐移动版 Web Home.vue ≤767px）。
  *
- * 信息层级（顺序不可变）：
+ * 信息层级（顺序不可变，照 hw build()）：
  *   欢迎区（昵称大字 + AI 欢迎语单行） → 新碟首发（1:1 海报横滑，一屏 2 张）
- *   → 新歌首发（最多 8 行） → 巅峰榜（两列封面卡）
+ *   → 新歌首发（最多 8 行 TrackRow） → 巅峰榜（两列封面卡）
  *
  * 质感口径同 hw：色差分层（bg/panel/panel2）+ 发丝线描边 + 顶沿内高光，**禁外阴影**。
+ * 曲目行一律走公共 TrackRow（hw TrackItem 的 iOS 等价物），本页不再自绘行。
  */
 struct HomeView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var player: PlaybackService
     @Environment(\.colorScheme) private var scheme
 
+    /// 首屏失败文案（Copy.describe 产出）：只在**完全没有数据**时占屏
     @State private var err = ""
-    @State private var refreshing = false
+    /// 已收藏曲目 id（右滑收藏的动作区文案 / 序号染色；拉取失败静默）
+    @State private var favIds: Set<String> = []
 
-    /// 新歌列表展示行数（hw `NEW_SONG_ROWS = 8`）
+    /// 新歌列表展示行数（hw NEW_SONG_ROWS = 8）
     private let newSongRows = 8
+
+    /// 队列来源（hw setQueue 的 origin）
+    private static let originHome = "首页"
+    /// 海报压字渐变的中间停靠点（hw posterCard：posterScrimMid 停 0.52）
+    private static let scrimMidStop: CGFloat = 0.52
+    /// 海报副行（歌手）文字浓度（hw opacity 0.82）
+    private static let artistInk: Double = 0.82
+    /// 海报压字墨色（hw Color.White）：压字区自带 posterScrim 暗渐变兜底、与主题无关，
+    /// 取令牌里唯一「恒为纯白」的那枚（swipeInk），页面不出现裸色
+    private static let posterInk = DesignTokens.swipeInk
+    /// 海报一屏张数（hw Swiper displayCount 2）
+    private static let posterPerPage = 2
+    /// 非 ApiError 的兜底状态码（Copy.describe 按服务端 5xx 出话术）
+    private static let fallbackStatus = 500
 
     private var p: Palette { Palette(scheme) }
 
@@ -34,9 +51,12 @@ struct HomeView: View {
         }
         .background(p.bg)
         .task {
-            if app.home == nil { await app.loadHome() }
-            if let songs = app.home?.newSongs { player.warm(songs, limit: 8) }
-            if app.home == nil, let message = app.errorMessage { err = message }
+            if app.home == nil {
+                await load()
+            } else if let songs = app.home?.newSongs {
+                await refreshFavMarks(songs)
+            }
+            if let songs = app.home?.newSongs { player.warm(songs, limit: newSongRows) }
         }
     }
 
@@ -47,6 +67,7 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 welcome(home)
                 if !home.newAlbums.isEmpty {
+                    // hw Copy.sectionNewAlbums（iOS Copy 表暂无区块名条目，用同字面量）
                     sectionTitle("新碟首发")
                     posterRail(home.newAlbums)
                 }
@@ -62,13 +83,13 @@ struct HomeView: View {
             .padding(.bottom, Dim.s6)
         }
         .scrollIndicators(.hidden)
-        .refreshable { await refresh() }
+        .refreshable { await load() }
         .navigationDestination(for: CollectionRoute.self) { route in
             CollectionView(route: route)
         }
     }
 
-    // MARK: - 欢迎区
+    // MARK: - 欢迎区（hw：昵称大字 + 每日一言，两行都坚决单行）
 
     @ViewBuilder
     private func welcome(_ home: HomeData) -> some View {
@@ -81,11 +102,13 @@ struct HomeView: View {
                     .foregroundStyle(p.text1)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Text(phrase)
                     .font(.system(size: Dim.fsBody))
                     .foregroundStyle(p.text2)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Dim.s4)
@@ -94,39 +117,40 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 区块标题
+    // MARK: - 区块标题（hw 小标：11px / 0.18em 字距 / 次级灰 / 中等字重）
 
     private func sectionTitle(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: Dim.fsSection, weight: .semibold))
-            .foregroundStyle(p.text1)
+            .font(.system(size: Dim.fsCaption, weight: .medium))
+            .tracking(Dim.s0)
+            .foregroundStyle(p.text2)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, Dim.s4)
             .padding(.top, Dim.s4)
-            .padding(.bottom, Dim.s2)
+            .padding(.bottom, Dim.s1)
     }
 
-    // MARK: - 新碟海报横滑（一屏 2 张 1:1）
+    // MARK: - 新碟海报横滑（hw Swiper displayCount 2：一屏 2 张 1:1 大卡）
 
     private func posterRail(_ albums: [Album]) -> some View {
-        GeometryReader { proxy in
-            let cardWidth = (proxy.size.width - Dim.s4 * 2 - Dim.s4) / 2
-            ScrollView(.horizontal) {
-                LazyHStack(spacing: Dim.s4) {
-                    ForEach(albums) { album in
-                        NavigationLink(value: CollectionRoute(kind: "album", id: album.id, name: album.name)) {
-                            posterCard(album)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(width: cardWidth)
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: 0) {
+                ForEach(albums) { album in
+                    NavigationLink(value: CollectionRoute(kind: "album", id: album.id, name: album.name)) {
+                        posterCard(album)
                     }
+                    .buttonStyle(.plain)
+                    .containerRelativeFrame(.horizontal, count: Self.posterPerPage, spacing: 0)
                 }
-                .padding(.horizontal, Dim.s4)
             }
-            .scrollIndicators(.hidden)
+            .scrollTargetLayout()
+            .padding(.bottom, Dim.s5)
         }
-        .frame(height: ((UIScreen.main.bounds.width - Dim.s4 * 3) / 2) + Dim.s2)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollIndicators(.hidden)
     }
 
+    /// hw posterCard：封面铺满 + 左上日期角标 + 底部渐变压字；凸面板 = panel2 底 + 发丝线 + 顶沿内高光
     private func posterCard(_ album: Album) -> some View {
         ZStack(alignment: .bottomLeading) {
             AsyncImage(url: URL(string: album.picUrl)) { phase in
@@ -140,33 +164,39 @@ struct HomeView: View {
             .aspectRatio(1, contentMode: .fill)
             .clipped()
 
-            VStack { Rectangle().fill(p.hi).frame(height: Dim.hairline); Spacer() }
+            // 顶沿内高光（hw topSheen）
+            VStack(spacing: 0) {
+                Rectangle().fill(p.hi).frame(height: Dim.hairline)
+                Spacer(minLength: 0)
+            }
 
+            // 发行日角标（hw poster-date）：左上、dateChip 底白字；解析不出就不占位
             if let badge = Self.releaseBadge(album.publishTime), !badge.isEmpty {
-                VStack {
-                    HStack {
+                VStack(spacing: 0) {
+                    HStack(spacing: 0) {
                         Text(badge)
                             .font(.system(size: Dim.fsCaption))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(Self.posterInk)
                             .padding(.horizontal, Dim.s1)
                             .padding(.vertical, Dim.hairline)
                             .background(p.dateChip)
                             .clipShape(RoundedRectangle(cornerRadius: Dim.s0, style: .continuous))
-                        Spacer()
+                        Spacer(minLength: 0)
                     }
-                    .padding(Dim.s3)
-                    Spacer()
+                    Spacer(minLength: 0)
                 }
+                .padding(Dim.s3)
             }
 
+            // 压字区（hw poster-meta）：上暗渐变 posterScrim → posterScrimMid → 透明
             VStack(alignment: .leading, spacing: Dim.s0) {
                 Text(album.name)
                     .font(.system(size: Dim.fsBody, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Self.posterInk)
                     .lineLimit(2)
                 Text(album.artistLine)
                     .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(.white.opacity(0.82))
+                    .foregroundStyle(Self.posterInk.opacity(Self.artistInk))
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -174,8 +204,15 @@ struct HomeView: View {
             .padding(.horizontal, Dim.s3)
             .padding(.bottom, Dim.s3)
             .background(
-                LinearGradient(colors: [p.posterScrim, p.posterScrimMid, .clear],
-                               startPoint: .bottom, endPoint: .top)
+                LinearGradient(
+                    stops: [
+                        .init(color: p.posterScrim, location: 0),
+                        .init(color: p.posterScrimMid, location: Self.scrimMidStop),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .bottom,
+                    endPoint: .top
+                )
             )
         }
         .aspectRatio(1, contentMode: .fit)
@@ -185,57 +222,37 @@ struct HomeView: View {
             RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous)
                 .stroke(p.line, lineWidth: Dim.hairline)
         )
+        .padding(.horizontal, Dim.s2)
     }
 
-    // MARK: - 新歌首发（最多 8 行）
+    // MARK: - 新歌首发（hw：前 8 行 TrackItem；点任意一首 = 全量 newSongs 进队列）
 
     private func songList(_ songs: [Track]) -> some View {
         let shown = Array(songs.prefix(newSongRows))
         return VStack(spacing: 0) {
             ForEach(Array(shown.enumerated()), id: \.element.id) { index, track in
-                songRow(track, index: index + 1, all: songs, startAt: index)
-                if index < shown.count - 1 {
-                    Rectangle()
-                        .fill(p.line)
-                        .frame(height: Dim.hairline)
-                        .padding(.leading, Dim.s4 + Dim.coverSm + Dim.s3)
-                }
+                TrackRow(
+                    track: track,
+                    index: index + 1,
+                    isFav: favIds.contains(track.id),
+                    showDur: true,
+                    playing: player.currentTrack?.id == track.id,
+                    onTap: {
+                        Task {
+                            await player.play(tracks: songs, startingAt: index, origin: Self.originHome)
+                        }
+                    },
+                    onSwipeToggle: { await toggleFav(track) }
+                )
             }
         }
     }
 
-    private func songRow(_ track: Track, index: Int, all: [Track], startAt: Int) -> some View {
-        Button {
-            Task { await player.play(tracks: all, startingAt: startAt, origin: "首页") }
-        } label: {
-            HStack(spacing: Dim.s3) {
-                Text(String(format: "%02d", index))
-                    .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(p.text2)
-                    .frame(width: Dim.seqW, alignment: .leading)
-                Text(track.name)
-                    .font(.system(size: Dim.fsBody))
-                    .foregroundStyle(p.text1)
-                    .lineLimit(1)
-                Spacer(minLength: Dim.s2)
-                Text(track.artistLine)
-                    .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(p.text2)
-                    .lineLimit(1)
-            }
-            .padding(.horizontal, Dim.s4)
-            .frame(height: Dim.rowHeight)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(index) \(track.name) \(track.artistLine)")
-    }
-
-    // MARK: - 巅峰榜（两列）
+    // MARK: - 巅峰榜（hw：两列封面卡 + 「榜」角标）
 
     private func toplistGrid(_ lists: [Toplist]) -> some View {
         let columns = [GridItem(.flexible(), spacing: Dim.s4), GridItem(.flexible(), spacing: Dim.s4)]
-        return LazyVGrid(columns: columns, spacing: Dim.s4) {
+        return LazyVGrid(columns: columns, spacing: Dim.s3) {
             ForEach(lists) { list in
                 NavigationLink(value: CollectionRoute(kind: "toplist", id: list.id, name: list.name)) {
                     toplistCard(list)
@@ -244,6 +261,7 @@ struct HomeView: View {
             }
         }
         .padding(.horizontal, Dim.s4)
+        .padding(.bottom, Dim.s3)
     }
 
     private func toplistCard(_ list: Toplist) -> some View {
@@ -259,8 +277,13 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity)
                 .aspectRatio(1, contentMode: .fill)
                 .clipped()
-                VStack { Rectangle().fill(p.hi).frame(height: Dim.hairline); Spacer() }
-                Text("榜")
+
+                VStack(spacing: 0) {
+                    Rectangle().fill(p.hi).frame(height: Dim.hairline)
+                    Spacer(minLength: 0)
+                }
+
+                Text("榜")   // hw Copy.badgeToplist
                     .font(.system(size: Dim.fsCaption))
                     .foregroundStyle(p.badgeInk)
                     .padding(.horizontal, Dim.s1)
@@ -290,40 +313,73 @@ struct HomeView: View {
         }
     }
 
-    // MARK: - 错误态
+    // MARK: - 首屏失败态（空态组件 + 重试；瞬时提示另走 ToastCenter）
 
     private var errorState: some View {
-        VStack(spacing: Dim.s3) {
-            Text(err)
-                .font(.system(size: Dim.fsBody))
-                .foregroundStyle(p.danger)
-            Button("重试") {
-                Task { await refresh() }
-            }
-            .font(.system(size: Dim.fsBody))
-            .foregroundStyle(p.accentText)
+        EmptyState(title: err, actionTitle: "重试") {
+            Task { await load() }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(.top, Dim.s5)
     }
 
-    // MARK: - 动作
+    // MARK: - 数据
 
-    private func refresh() async {
-        refreshing = true
+    private func load() async {
         err = ""
-        await app.loadHome()
-        if app.home == nil, let message = app.errorMessage { err = message }
-        refreshing = false
+        do {
+            let fresh = try await APIClient.shared.home()
+            app.home = fresh
+            await refreshFavMarks(fresh.newSongs)
+        } catch {
+            // 刷新失败不覆盖已有数据（hw 同口径）；只有连数据都没有时才占屏报错
+            let text = Self.describe(error)
+            if app.home == nil { err = text }
+            ToastCenter.shared.show(text)
+        }
     }
 
-    /// 发行日 → 「09-11」角标（hw `releaseBadge` 同口径；解析不出返回 nil 不占位）
+    // MARK: - 收藏（右滑手势的支撑，失败静默 + toast）
+
+    private func refreshFavMarks(_ tracks: [Track]) async {
+        let unknown = tracks.map(\.id).filter { !favIds.contains($0) }
+        guard !unknown.isEmpty else { return }
+        favIds.formUnion(await player.favoredIds(unknown))
+    }
+
+    private func setFav(_ trackId: String, _ fav: Bool) {
+        if fav { favIds.insert(trackId) } else { favIds.remove(trackId) }
+    }
+
+    /// 右滑过阈值：乐观翻转 + 服务端落地，失败回滚 + Copy.describe 文案 toast
+    private func toggleFav(_ track: Track) async -> Bool {
+        let wasFav = favIds.contains(track.id)
+        setFav(track.id, !wasFav)
+        guard let next = await player.toggleFavorite(track) else {
+            setFav(track.id, wasFav)
+            ToastCenter.shared.show(Copy.describe(status: Self.fallbackStatus, code: nil, message: nil))
+            return false
+        }
+        setFav(track.id, next)
+        return true
+    }
+
+    // MARK: - 文案
+
+    /// 错误 → 用户可读文案（一律经 Copy.describe，页面不自造错误话术）
+    private static func describe(_ error: Error) -> String {
+        guard let e = error as? ApiError else {
+            return Copy.describe(status: fallbackStatus, code: nil, message: nil)
+        }
+        return Copy.describe(status: e.status, code: e.code.isEmpty ? nil : e.code, message: e.message)
+    }
+
+    /// 发行日 → 「09-11」角标（hw releaseBadge 同口径：正则只认年月日，解析不出返回 nil 不占位）
     private static func releaseBadge(_ raw: String?) -> String? {
-        guard let raw, !raw.isEmpty else { return nil }
-        let parts = raw.split(separator: "-")
-        guard parts.count >= 3 else { return nil }
-        let month = String(parts[1])
-        let day = String(parts[2].prefix(2))
-        return month.count == 1 ? "0" + month + "-" + day : month + "-" + day
+        guard let raw, !raw.isEmpty,
+              let range = raw.range(of: "\\d{4}-(\\d{1,2})-(\\d{1,2})", options: .regularExpression)
+        else { return nil }
+        let parts = raw[range].split(separator: "-")
+        guard parts.count >= 3, let month = Int(parts[1]), let day = Int(parts[2]) else { return nil }
+        return String(format: "%02d-%02d", month, day)
     }
 }

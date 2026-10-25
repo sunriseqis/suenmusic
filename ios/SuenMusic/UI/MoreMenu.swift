@@ -15,7 +15,6 @@ struct MoreMenu: View {
     private let albumName: String
     private let hasArtist: Bool
     private let hasAlbum: Bool
-    private let topInset: CGFloat
     private let onClose: () -> Void
     private let onArtist: () -> Void
     private let onAlbum: () -> Void
@@ -24,7 +23,7 @@ struct MoreMenu: View {
     private var p: Palette { Palette(scheme) }
 
     init(sourceLabel: String, artistName: String, albumName: String,
-         hasArtist: Bool, hasAlbum: Bool, topInset: CGFloat,
+         hasArtist: Bool, hasAlbum: Bool,
          onClose: @escaping () -> Void, onArtist: @escaping () -> Void,
          onAlbum: @escaping () -> Void, onAnchor: @escaping () -> Void) {
         self.sourceLabel = sourceLabel
@@ -32,7 +31,6 @@ struct MoreMenu: View {
         self.albumName = albumName
         self.hasArtist = hasArtist
         self.hasAlbum = hasAlbum
-        self.topInset = topInset
         self.onClose = onClose
         self.onArtist = onArtist
         self.onAlbum = onAlbum
@@ -40,15 +38,22 @@ struct MoreMenu: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            p.scrim
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture(perform: onClose)
+        // 右上锚定：父容器已扣掉顶部安全区，这里再让出顶栏高度（Dim.touchMin），
+        // 卡片高度按可用高度上限收口 —— 小屏上也不会被底边切掉。
+        GeometryReader { proxy in
+            ZStack(alignment: .topTrailing) {
+                p.scrim
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onClose)
 
-            card
-                .padding(.top, topInset + Dim.touchMin)
-                .padding(.trailing, Dim.s3)
+                card
+                    .frame(maxHeight: max(0, proxy.size.height - Dim.touchMin - Dim.s3))
+                    .frameLog("more-card")
+                    .padding(.top, Dim.touchMin)
+                    .padding(.trailing, Dim.s3)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 

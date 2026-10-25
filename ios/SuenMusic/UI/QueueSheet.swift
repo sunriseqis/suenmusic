@@ -14,10 +14,9 @@ struct QueueSheet: View {
     @EnvironmentObject private var player: PlaybackService
     @Environment(\.colorScheme) private var scheme
 
-    private let bottomInset: CGFloat
     private let onClose: () -> Void
 
-    /// 抽屉高占屏幕比例（hw `height('70%')`）
+    /// 抽屉高占**可用高度**（安全区内父容器高度）的比例（hw `height('70%')`）
     private static let heightRatio: CGFloat = 0.7
 
     /// 正在拖的行 + 当前位移（拖拽排序用）
@@ -26,8 +25,7 @@ struct QueueSheet: View {
 
     private var p: Palette { Palette(scheme) }
 
-    init(bottomInset: CGFloat, onClose: @escaping () -> Void) {
-        self.bottomInset = bottomInset
+    init(onClose: @escaping () -> Void) {
         self.onClose = onClose
     }
 
@@ -41,10 +39,10 @@ struct QueueSheet: View {
 
                 drawer
                     .frame(height: proxy.size.height * Self.heightRatio)
+                    .frameLog("queue-drawer")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
-        .ignoresSafeArea()
     }
 
     private var drawer: some View {
@@ -57,7 +55,7 @@ struct QueueSheet: View {
             }
         }
         .padding(.top, Dim.s1)
-        .padding(.bottom, bottomInset)
+        .padding(.bottom, Dim.s3)
         .background(
             UnevenRoundedRectangle(topLeadingRadius: Dim.radiusLg,
                                    topTrailingRadius: Dim.radiusLg,

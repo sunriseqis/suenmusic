@@ -15,8 +15,6 @@ struct LyricPanel: View {
     @Environment(\.colorScheme) private var scheme
 
     private let title: String
-    private let topInset: CGFloat
-    private let bottomInset: CGFloat
     private let onClose: () -> Void
 
     /// idle | loading | ready | empty | error
@@ -34,10 +32,8 @@ struct LyricPanel: View {
 
     private var p: Palette { Palette(scheme) }
 
-    init(title: String, topInset: CGFloat, bottomInset: CGFloat, onClose: @escaping () -> Void) {
+    init(title: String, onClose: @escaping () -> Void) {
         self.title = title
-        self.topInset = topInset
-        self.bottomInset = bottomInset
         self.onClose = onClose
     }
 
@@ -46,12 +42,15 @@ struct LyricPanel: View {
             header
             content
         }
+        // 全屏 = 占满父容器给的安全区（调用方是播放页的全屏 GeometryReader）：
+        // 顶部/底部避让由容器承担，这里只补自己的呼吸留白，不再自己 ignoresSafeArea，
+        // 否则会把内容顶到刘海/指示条区域之外。
         .padding(.horizontal, Dim.s5)
-        .padding(.top, topInset + Dim.s3)
-        .padding(.bottom, bottomInset + Dim.s4)
+        .padding(.top, Dim.s3)
+        .padding(.bottom, Dim.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(p.bg)
-        .ignoresSafeArea()
+        .frameLog("lyrics")
         .task(id: player.currentTrack?.id) { await load() }
         .onChange(of: player.positionMs) { _, _ in syncActive() }
     }

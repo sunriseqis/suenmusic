@@ -17,7 +17,7 @@ struct DislikeDialog: View {
     private let onArtist: () -> Void
     private let onCancel: () -> Void
 
-    /// 卡片宽占屏幕比例（hw `width('86%')`）
+    /// 卡片宽占**可用宽度**（安全区内父容器宽度）的比例（hw `width('86%')`）
     private static let cardRatio: CGFloat = 0.86
     /// 无歌手信息时「这位歌手」的置灰透明度（hw `.opacity(0.5)`）
     private static let disabledOpacity: Double = 0.5
@@ -44,10 +44,10 @@ struct DislikeDialog: View {
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onCancel)
                 card.frame(width: proxy.size.width * Self.cardRatio)
+                    .frameLog("dislike-card")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .ignoresSafeArea()
     }
 
     private var card: some View {

@@ -27,6 +27,7 @@
 		13C0EE7106F2945215C6CBB6 /* ConfirmDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */; };
 		EBD68E852507BBC2FF2A0EA8 /* Copy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 895CDD7C9392AF7810F8C645 /* Copy.swift */; };
 		654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF95D12E5B52161C828D837 /* DailyView.swift */; };
+		542F7483066B836536CAEF2E /* DebugFrameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */; };
 		40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */; };
 		8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D08E3CBA663948F14CF5F /* Dimension.swift */; };
 		744D54399E658E190C59A4A0 /* DislikeDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */; };
@@ -48,6 +49,7 @@
 		1A0C635E25A5AFF5062390FF /* SettingsSheets.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7F25AC9EACC0DAC6A726FF /* SettingsSheets.swift */; };
 		361F98B71E8C983A6BFFF648 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E162C675C8DD23CC5669487 /* SettingsView.swift */; };
 		A693E0F4B1952EA1D227FCA9 /* SkeletonList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799441B953B7EEBAD4A157A6 /* SkeletonList.swift */; };
+		41B12D76F3610A9AC10542DF /* TabBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = B46C2F76CC398DE34BDCBB16 /* TabBar.swift */; };
 		82B3A16A629F6329B595DDFA /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE040F4F7A3752C1E9CC220 /* Theme.swift */; };
 		65A28D2864117188612A012B /* TrackRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE1507440DAAD97A262CC410 /* TrackRow.swift */; };
 		6D7E47582205724B6C775A9B /* WebButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1576CEAA3C86065B140D33 /* WebButton.swift */; };
@@ -107,6 +109,7 @@
 		08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmDialog.swift; sourceTree = "<group>"; };
 		895CDD7C9392AF7810F8C645 /* Copy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Copy.swift; sourceTree = "<group>"; };
 		8DF95D12E5B52161C828D837 /* DailyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyView.swift; sourceTree = "<group>"; };
+		F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugFrameLog.swift; sourceTree = "<group>"; };
 		5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		080D08E3CBA663948F14CF5F /* Dimension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dimension.swift; sourceTree = "<group>"; };
 		6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DislikeDialog.swift; sourceTree = "<group>"; };
@@ -128,6 +131,7 @@
 		9B7F25AC9EACC0DAC6A726FF /* SettingsSheets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsSheets.swift; sourceTree = "<group>"; };
 		7E162C675C8DD23CC5669487 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		799441B953B7EEBAD4A157A6 /* SkeletonList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonList.swift; sourceTree = "<group>"; };
+		B46C2F76CC398DE34BDCBB16 /* TabBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TabBar.swift; sourceTree = "<group>"; };
 		7FE040F4F7A3752C1E9CC220 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		BE1507440DAAD97A262CC410 /* TrackRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackRow.swift; sourceTree = "<group>"; };
 		4F1576CEAA3C86065B140D33 /* WebButton.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebButton.swift; sourceTree = "<group>"; };
@@ -225,6 +229,7 @@
 				08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */,
 				895CDD7C9392AF7810F8C645 /* Copy.swift */,
 				8DF95D12E5B52161C828D837 /* DailyView.swift */,
+				F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */,
 				5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */,
 				080D08E3CBA663948F14CF5F /* Dimension.swift */,
 				6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */,
@@ -246,6 +251,7 @@
 				9B7F25AC9EACC0DAC6A726FF /* SettingsSheets.swift */,
 				7E162C675C8DD23CC5669487 /* SettingsView.swift */,
 				799441B953B7EEBAD4A157A6 /* SkeletonList.swift */,
+				B46C2F76CC398DE34BDCBB16 /* TabBar.swift */,
 				7FE040F4F7A3752C1E9CC220 /* Theme.swift */,
 				BE1507440DAAD97A262CC410 /* TrackRow.swift */,
 				4F1576CEAA3C86065B140D33 /* WebButton.swift */,
@@ -401,6 +407,7 @@
 				13C0EE7106F2945215C6CBB6 /* ConfirmDialog.swift in Sources */,
 				EBD68E852507BBC2FF2A0EA8 /* Copy.swift in Sources */,
 				654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */,
+				542F7483066B836536CAEF2E /* DebugFrameLog.swift in Sources */,
 				40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */,
 				8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */,
 				744D54399E658E190C59A4A0 /* DislikeDialog.swift in Sources */,
@@ -422,6 +429,7 @@
 				1A0C635E25A5AFF5062390FF /* SettingsSheets.swift in Sources */,
 				361F98B71E8C983A6BFFF648 /* SettingsView.swift in Sources */,
 				A693E0F4B1952EA1D227FCA9 /* SkeletonList.swift in Sources */,
+				41B12D76F3610A9AC10542DF /* TabBar.swift in Sources */,
 				82B3A16A629F6329B595DDFA /* Theme.swift in Sources */,
 				65A28D2864117188612A012B /* TrackRow.swift in Sources */,
 				6D7E47582205724B6C775A9B /* WebButton.swift in Sources */,

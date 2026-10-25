@@ -15,7 +15,11 @@ struct RootView: View {
                 LoginView()
             }
         }
-        .sheet(isPresented: $showPlayer) {
+        // 播放页必须全屏呈现：sheet 自带顶部留白 + 圆角，会按「sheet 高度」裁掉页面的一部分，
+        // 而 PlayerView 是照 hw 全屏浮层设计的（沉浸底 + 封面 280 + 四个内部浮层）。
+        // hw 的入场是 translate(y:100%)→0 的 200ms EaseOut —— fullScreenCover 自带的底部滑入
+        // 正是同一动作，尺寸不再由系统 detent 决定。
+        .fullScreenCover(isPresented: $showPlayer) {
             PlayerView()
         }
         .task {

@@ -106,6 +106,14 @@ enum Dim {
     static let swipeDampAt: CGFloat = 150
     static let swipeThreshold: CGFloat = 85
     static let swipeOut: CGFloat = 360
+    /// 迷你播放条滑动切歌阈值（hw NativeRoot MINI_SWIPE_TH = 60px）
+    static let miniSwipeTh: CGFloat = 60
+    /// 迷你播放条拖拽位移上限（hw NativeRoot MINI_DRAG_CLAMP = ±80px）
+    static let miniDragClamp: CGFloat = 80
+
+    // ---- 自绘底部 Tab 栏（与 hw NativeRoot tabCell / tabSlider 同源） ----
+    /// Tab 格按压下沉量（hw tabCell `translate({ y: 1 })`，与 Btn.pressDrop 同值）
+    static let tabPressSink: CGFloat = 1
 }
 
 enum Motion {

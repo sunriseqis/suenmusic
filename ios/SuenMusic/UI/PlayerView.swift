@@ -68,6 +68,12 @@ private enum PlayerSpec {
     static let glowOpacity: Double = 0.15
     /// 歌词 peek 非当前行透明度（hw `.opacity(0.5)`）
     static let peekDimOpacity: Double = 0.5
+    /// 封面逐级收缩比例（自适应可用高度的阶梯，从 1.0 到 0.20）。
+    ///
+    /// 主列（顶栏 / 封面 / 曲名 / 推荐卡 / 进度 / 五键 / 歌词 peek）是一整块，
+    /// 高度不够时**只缩封面**：按这个序列取第一个能完整放进可视区的封面尺寸。
+    /// hw 在小屏上同样是收缩封面，绝不溢出；比例只作用于封面，其余元素尺寸不变。
+    static let coverShrink: [CGFloat] = [1.0, 0.86, 0.72, 0.58, 0.44, 0.30, 0.20]
 }
 
 /**
@@ -104,22 +110,29 @@ struct PlayerView: View {
     @State private var anchorInfo: AnchorInfo?
     /// 集合页（歌手 / 专辑）
     @State private var path: [CollectionRoute] = []
+    /// 入场淡入（hw translate(y:100%)→0 的 200ms EaseOut；位移由 fullScreenCover 自带的底部滑入承担，
+    /// 这里只补透明度 —— 纯视觉属性，不参与任何测量/布局）
+    @State private var entered = false
 
     private var p: Palette { Palette(scheme) }
     private var track: Track? { player.currentTrack }
 
     var body: some View {
         NavigationStack(path: $path) {
-            // 播放页是沉浸式全屏：自己读避让区并按 hw 的口径补 padding（不靠系统的默认留白）
-            GeometryReader { proxy in
-                ZStack {
-                    ambient
-                    page(topInset: proxy.safeAreaInsets.top, bottomInset: proxy.safeAreaInsets.bottom)
-                    layers(topInset: proxy.safeAreaInsets.top, bottomInset: proxy.safeAreaInsets.bottom)
+            // 沉浸式全屏：底色与封面光晕铺到屏幕边缘；**布局层一律留在安全区内**，
+            // 由 GeometryReader 把真实可用尺寸交给主列与四个内部浮层（谁也不许溢出）。
+            // 页面外层由 RootView 的 fullScreenCover 全屏呈现，不再被 sheet 的 detent 裁切。
+            ZStack {
+                p.bg.ignoresSafeArea()
+                ambient
+                GeometryReader { proxy in
+                    ZStack {
+                        page(width: proxy.size.width, height: proxy.size.height)
+                        layers
+                    }
+                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             }
-            .ignoresSafeArea()
-            .background(p.bg)
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: CollectionRoute.self) { route in
                 CollectionView(route: route)
@@ -142,6 +155,7 @@ struct PlayerView: View {
         }
         .onAppear {
             slide = Double(clampedPosition)
+            withAnimation(Motion.curve) { entered = true }
             #if DEBUG
             // 自动化验收钩子：SUEN_SHEET=lyrics|queue|more|anchor|dislike 时直接打开对应浮层，
             // 供 OCR 截图核对（模拟器无法脚本化点击）。默认不生效。
@@ -196,15 +210,51 @@ struct PlayerView: View {
 
     // MARK: - 页面主层
 
-    private func page(topInset: CGFloat, bottomInset: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            header
-            coverArea
-            foot
+    /// 主列：整块按**实际可用高度**铺 —— 顶栏 + 封面 + 曲名行 + 推荐卡 + 进度 + 五键 + 歌词 peek。
+    ///
+    /// 做法：ViewThatFits 从「封面上限」开始按 PlayerSpec.coverShrink 逐级收缩，
+    /// 取第一个能完整放进可视高度的版本。候选列里没有可无限拉伸的元素（不存在
+    /// maxHeight: .infinity），所以「放得下」= 真的放得下，不会出现内容被裁掉一半；
+    /// 横向左右各留 Dim.s5，封面宽度也计入了这个上限。
+    private func page(width: CGFloat, height: CGFloat) -> some View {
+        let cap = min(width - Dim.s5 * 2, hasReco ? Dim.coverReco : Dim.coverXl)
+        return ViewThatFits(in: .vertical) {
+            column(side: cap * PlayerSpec.coverShrink[0])
+            column(side: cap * PlayerSpec.coverShrink[1])
+            column(side: cap * PlayerSpec.coverShrink[2])
+            column(side: cap * PlayerSpec.coverShrink[3])
+            column(side: cap * PlayerSpec.coverShrink[4])
+            column(side: cap * PlayerSpec.coverShrink[5])
+            column(side: cap * PlayerSpec.coverShrink[6])
         }
         .padding(.horizontal, Dim.s5)
-        .padding(.top, topInset + Dim.s3)
-        .padding(.bottom, bottomInset + Dim.s4)
+        .padding(.vertical, Dim.s3)
+        .frame(width: width, height: height, alignment: .center)
+        .opacity(entered ? 1 : 0)
+        .frameLog("page")
+    }
+
+    /// 单个「封面尺寸」版本的主列（ViewThatFits 的候选）
+    private func column(side: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            header.frameLog("header")
+            VStack(spacing: Dim.s4) {
+                coverImage(side: side).frameLog("cover")
+                titleRow.frameLog("title")
+                if let reco = player.currentRecoReason, !reco.isEmpty {
+                    recoCard(reco).frameLog("reco")
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, Dim.s4)
+            foot.frameLog("foot")
+        }
+        .frameLog("column")
+    }
+
+    /// 有推荐理由卡时封面让位（hw has-reco：280 → 194）
+    private var hasReco: Bool {
+        !(player.currentRecoReason ?? "").isEmpty
     }
 
     /// 环境光晕（web `.ambient`）：封面铺满 + 模糊 + 0.15 透明度，主层浮在其上
@@ -259,21 +309,9 @@ struct PlayerView: View {
 
     // MARK: - 封面 + 曲名行 + 推荐理由卡
 
-    private var coverArea: some View {
-        VStack(spacing: Dim.s4) {
-            coverImage
-            titleRow
-            if let reco = player.currentRecoReason, !reco.isEmpty {
-                recoCard(reco)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private var coverImage: some View {
-        // 有推荐理由时封面收缩让位（hw `has-reco`）
-        let side = (player.currentRecoReason?.isEmpty == false) ? Dim.coverReco : Dim.coverXl
-        return AsyncImage(url: coverURL) { phase in
+    /// 封面：边长由调用方给（上限 280 / 有推荐卡 194；高度不足时按 PlayerSpec.coverShrink 收缩）
+    private func coverImage(side: CGFloat) -> some View {
+        AsyncImage(url: coverURL) { phase in
             if let image = phase.image {
                 image.resizable().scaledToFill()
             } else {
@@ -355,11 +393,26 @@ struct PlayerView: View {
         .padding(.vertical, Dim.s2)
     }
 
+    /// 进度条上界：时长未知（0）时**不能**给 0...1 —— 那会让 step(1000) 大于区间，
+    /// SwiftUI 的 Slider 前置断言直接 SIGILL 崩溃（2026-10-25 实测崩溃报告：
+    /// Slider.init → Normalizing.init(min:max:stride) 断言失败，进程 EXC_BAD_INSTRUCTION）。
+    /// 所以上界至少取一个步长，且步长不超过区间。
+    private var seekUpperBound: Double {
+        Double(max(player.durationMs, Int(PlayerSpec.seekStep)))
+    }
+
+    private var seekStepActual: Double {
+        min(PlayerSpec.seekStep, seekUpperBound)
+    }
+
     private var progress: some View {
-        Slider(value: $slide, in: 0...Double(max(player.durationMs, 1)),
-               step: PlayerSpec.seekStep) { editing in
+        // 值也夹在区间内：换歌/时长变小时 slide 可能越界
+        Slider(value: Binding(get: { min(max(slide, 0), seekUpperBound) },
+                              set: { slide = $0 }),
+               in: 0...seekUpperBound,
+               step: seekStepActual) { editing in
             dragging = editing
-            if !editing { player.seek(to: Int(slide)) }
+            if !editing { player.seek(to: Int(min(max(slide, 0), seekUpperBound))) }
         }
         .tint(p.accent)
         .accessibilityLabel("播放进度")
@@ -418,6 +471,7 @@ struct PlayerView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: Dim.peekH)
+        .frameLog("peek")
         .contentShape(Rectangle())
         .onTapGesture { openSheet(.lyrics) }
         .accessibilityLabel("展开歌词")
@@ -425,22 +479,23 @@ struct PlayerView: View {
 
     // MARK: - 浮层
 
+    /// 四个（含 dislike 共五个）内部浮层都画在**安全区之内**：主列拿到的 proxy.size 就是
+    /// 可用尺寸，浮层各自用自己的 GeometryReader 按它算比例（70% / 92% / 86% / 80%），
+    /// 超出部分由内部 ScrollView 滚动，不再依赖 sheet 的高度、也不会跑到屏幕外。
     @ViewBuilder
-    private func layers(topInset: CGFloat, bottomInset: CGFloat) -> some View {
+    private var layers: some View {
         switch sheet {
         case .lyrics:
-            LyricPanel(title: track?.name ?? "", topInset: topInset, bottomInset: bottomInset,
-                       onClose: { closeSheet() })
+            LyricPanel(title: track?.name ?? "", onClose: { closeSheet() })
                 .transition(.move(edge: .bottom))
         case .queue:
-            QueueSheet(bottomInset: bottomInset, onClose: { closeSheet() })
+            QueueSheet(onClose: { closeSheet() })
                 .transition(.move(edge: .bottom))
         case .more:
             MoreMenu(sourceLabel: sourceText, artistName: firstArtistName,
                      albumName: track?.al.name ?? "",
                      hasArtist: !firstArtistName.isEmpty && !(track?.ar.first?.id.isEmpty ?? true),
                      hasAlbum: !(track?.al.id.isEmpty ?? true),
-                     topInset: topInset,
                      onClose: { closeSheet() },
                      onArtist: { openCollection(kind: "artist") },
                      onAlbum: { openCollection(kind: "album") },

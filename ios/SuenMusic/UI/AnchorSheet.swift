@@ -169,8 +169,11 @@ struct AnchorSheet: View {
                     candidateList
                 }
                 .padding(Dim.s3)
+                // 宽 92% / 最高 80% 都按**父容器给的可用尺寸**算（父容器已在安全区内），
+                // 候选列表自己滚，卡片本体不会顶到屏幕外。
                 .frame(width: proxy.size.width * Self.cardRatio)
                 .frame(maxHeight: proxy.size.height * Self.cardMaxRatio)
+                .frameLog("anchor-card")
                 .background(
                     RoundedRectangle(cornerRadius: Dim.radiusLg, style: .continuous).fill(p.bg)
                 )
@@ -184,7 +187,6 @@ struct AnchorSheet: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .ignoresSafeArea()
         .task(id: player.currentTrack?.id) { await open() }
         .onDisappear { preview.stop(resumeMain: true, main: player) }
     }
