@@ -556,7 +556,9 @@ final class AudioCacheStore {
     static let shared = AudioCacheStore()
 
     /// 上限 4GB（与 Android 一致，用户拍板）
-    static let maxBytes: Int64 = 4 * 1024 * 1024 * 1024
+    /// 缓存上限 **2GB**（2026-10-25 与鸿蒙端对齐：hw `OfflineCache.ets` 的 `QUOTA_BYTES = 2 * 1024^3`；
+    /// 旧仓 iOS 是 4GB，两端不一致会让「已用 / 上限」显示与淘汰策略都不同）
+    static let maxBytes: Int64 = 2 * 1024 * 1024 * 1024
 
     private struct Sidecar: Codable {
         var total: Int64
