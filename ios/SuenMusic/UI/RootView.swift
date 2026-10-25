@@ -100,7 +100,11 @@ struct RootView: View {
                 PlayerBar { showPlayer = true }
             }
             // 长按 tab = 刷新该页（RefreshSignal 广播，页面各自监听）
+            // 背景铺到底：VStack 里底栏正好停在安全区上沿，下方会留出 34pt 的空白条 ——
+            // 观感就是「tab 和页面割裂、离底部太远」（用户实测）。这里让底色延伸进安全区，
+            // 药丸与文字仍按 hw 的边距摆放。
             TabBar(selection: $tab, onLongPress: { RefreshSignal.post($0) })
+                .background(DesignTokens.bg.ignoresSafeArea(edges: .bottom))
         }
     }
 

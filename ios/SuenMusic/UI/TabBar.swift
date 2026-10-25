@@ -42,9 +42,12 @@ struct TabBar: View {
         // 之前挂在 `.padding(.horizontal, s3)` 之后 → 量到屏宽 402，药丸宽多算 5pt，指示条整体偏右（用户实测“横线是歪的”）。
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { barW = $0 }
         // hw margin：左右 s3 / 上 s1 / 下 s2。画在 padding 外侧，不参与 barW 计量
-        .padding(.horizontal, Dim.s3)
+        // 左右贴边、底部交给安全区（用户实测：hw 的 s3 边距在 iOS 上看着「两边没贴边」、
+        // 底部 8pt 边距叠在 34pt 安全区上又显得「离屏幕底部太远」）。
+        // 这里改成贴边 + 底部不再额外加边距，home indicator 的避让由安全区本身完成。
+        .padding(.horizontal, 0)
         .padding(.top, Dim.s1)
-        .padding(.bottom, Dim.s2)
+        .padding(.bottom, 0)
         // hw 把 currentTab 的赋值包进 animateTo(duration: Motion.fast, curve: Motion.curve)：
         // 平移与文字变色同一条 100ms easeOut
         .animation(.easeOut(duration: Motion.fast), value: selection)
