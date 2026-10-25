@@ -27,7 +27,15 @@ export function createThrottle(
    * （实测 8 秒 status 仍 unknown、无错误），而同一文件本地却能瞬间起播。
    * 放行首 2MB 后 AVPlayer 能立刻起播，之后仍按码率节流 —— 上行保护目标不变。
    */
-  burstBytes: number = 2 * 1024 * 1024
+  /**
+   * 起始突发额度 **12MB**（覆盖我们绝大多数音频文件，约 5-7MB）。
+   *
+   * 2026-10-25 实测（mac 上裸 AVPlayer 打真实 URL，量到 readyToPlay）：
+   *   突发 2MB → ready 8.6-9.2s；4MB → 1.9s / 8.6s（不稳）；不节流 → 0.76s
+   * 结论：**AVFoundation 要攒很大一段前缀才肯就绪**（鸿蒙播放器不需要，所以 hw 2s 内能播）。
+   * 因此把突发额度开到覆盖整首，节流只对「超大文件/并发多流」这类真正会打爆上行的情况生效。
+   */
+  burstBytes: number = 12 * 1024 * 1024
 ): Transform {
   const BURST_SEC = 1.5;
   // 初始许可时刻回拨一个突发窗口：让开头的 1.5s 数据量可以瞬间发出
