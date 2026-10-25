@@ -44,7 +44,11 @@ struct DailyView: View {
             // 无触摸环境验 Live Activity / 播放页：SUEN_AUTOPLAY=1 进「专属」后自动播第一首
             if ProcessInfo.processInfo.environment["SUEN_AUTOPLAY"] == "1",
                let tracks = data?.tracks, !tracks.isEmpty {
-                await player.play(tracks: tracks, startingAt: 0, origin: "每日推荐")
+                // 可指定从第几首起播（0 基），便于挑"从未播过"的冷门曲测起播耗时
+                let idx = Int(ProcessInfo.processInfo.environment["SUEN_AUTOPLAY_INDEX"] ?? "") ?? 0
+                let start = min(max(0, idx), tracks.count - 1)
+                NSLog("[Start] 自动播放 index=\(start) id=\(tracks[start].id)")
+                await player.play(tracks: tracks, startingAt: start, origin: "每日推荐")
             }
             #endif
         }
