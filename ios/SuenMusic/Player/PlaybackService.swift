@@ -500,7 +500,11 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
 
     nonisolated func emitProgress(index: Int, positionMs: Int, durationMs: Int, playing: Bool) {
         Task { @MainActor in
-            if self.currentIndex != index { self.currentIndex = index }
+            // 进度回调只在引擎给的下标**在当前队列之内**时才采纳：
+            // 引擎在 item 未就绪时曾兜底 0，会把页面切到 queue[0]（曲名/封面与音频不符）。
+            if index >= 0, index < self.queue.count, self.currentIndex != index {
+                self.currentIndex = index
+            }
             self.positionMs = positionMs
             if durationMs > 0 { self.durationMs = durationMs }
             let wasPlaying = self.playing

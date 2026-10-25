@@ -32,6 +32,17 @@ final class AppState: ObservableObject {
             api.reloadTokenFromDefaults()
             NSLog("[Boot] 已从环境变量注入刷新令牌")
         }
+        // 无触摸环境（模拟器自动化验收）用账号直接登录：SUEN_USER + SUEN_PASS，配合 SUEN_BASE_URL。
+        // 注意：不能只在 !api.isLoggedIn 时登 —— 旧 accessToken 还在内存里时 isLoggedIn 为真，
+        // 但 /api/auth/me 会 401（令牌轮换过），结果是卡在登录页永远进不去。
+        if user == nil,
+           let u = DebugHooks.string("SUEN_USER"), !u.isEmpty,
+           let p = DebugHooks.string("SUEN_PASS"), !p.isEmpty {
+            NSLog("[Boot] 用注入账号登录 %@", u)
+            await login(address: DebugHooks.string("SUEN_BASE_URL") ?? "", username: u, password: p)
+            if isLoggedIn { await loadHome() }
+            return
+        }
         #endif
         guard api.isLoggedIn else { return }
         // 有刷新令牌就先探一次：服务端可达 + 令牌有效就恢复登录，否则回登录页

@@ -25,6 +25,13 @@ struct RootView: View {
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
             player.prewarm()
+            #if DEBUG
+            // 自动化验收：SUEN_PLAYER=1 启动后直接展开播放页（绕开 deep link 的系统确认弹框）
+            if DebugHooks.string("SUEN_PLAYER") == "1" {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                showPlayer = true
+            }
+            #endif
         }
         // 灵动岛 / 锁屏卡点击 → suenmusic://player：直接落到播放页（对应 widget 的 .widgetURL）
         .onOpenURL { url in

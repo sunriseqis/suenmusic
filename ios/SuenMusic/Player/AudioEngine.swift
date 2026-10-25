@@ -240,6 +240,7 @@ final class AudioEngine: NSObject {
         NSLog("[Start] setQueue 进入 autoplay=\(autoplay) startIndex=\(startIndex) tracks=\(tracks.count) tokenLen=\(token.count)")
         self.baseUrl = normalizedBase(baseUrl)
         self.sessionToken = token
+        logicalIndex = startIndex
         // ⚠️ 必须配置本地代理（2026-10-25 修的断线）：
         // 旧仓 2026-09-26 实测过「服务端对带 Range 的请求按码率限速（下限 40KB/s），
         // AVFoundation 在 40KB/s 下打不开 B 站 fMP4，永远停在 EvaluatingBufferingRate」。
@@ -512,6 +513,7 @@ final class AudioEngine: NSObject {
             consecutiveErrors = 0
         }
         suppressTransitionEvent = true
+        logicalIndex = index
 
         player.removeAllItems()
         itemIndex.removeAll()
@@ -738,6 +740,8 @@ final class AudioEngine: NSObject {
     /// 队列前瞻：保证"当前项之后"始终还有 LOOKAHEAD 首待播（惰性装载的核心）
     private static let lookahead = 2
     private var insertedThrough = -1
+    /// 最后一次已知的逻辑下标（item 尚未就绪时的兜底，禁止用 0）
+    private var logicalIndex = 0
 
     private func ensureLookahead() {
         guard !tracks.isEmpty else { return }
@@ -840,7 +844,11 @@ final class AudioEngine: NSObject {
 
     var currentIndex: Int {
         guard let item = player.currentItem, let idx = itemIndex[ObjectIdentifier(item)] else {
-            return 0
+            // ⚠️ 2026-10-25 修：原来兜底 `return 0` —— 起播早期 item 还没就绪时 `emitProgress`
+            // 会带 index=0 回传，把 PlaybackService.currentIndex 改成 0，于是**播放页显示 queue[0]
+            // 的歌名/封面，而音频放的是用户点的那首**（用户实测：黄金甲播出来页面是别的钢琴曲）。
+            // 兜底必须是「最后一次已知的逻辑下标」，而不是 0。
+            return logicalIndex
         }
         return idx
     }

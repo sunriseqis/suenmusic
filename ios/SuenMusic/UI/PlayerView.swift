@@ -405,16 +405,33 @@ struct PlayerView: View {
         min(PlayerSpec.seekStep, seekUpperBound)
     }
 
+    /// 时长短于这个门槛就不渲染 Slider。
+    ///
+    /// 踩过两次：SwiftUI 的 `Slider(value:in:step:)` 在 `step >= 区间长度` 时会在
+    /// `Normalizing.init(min:max:stride)` 里 precondition 失败 → SIGILL 崩溃。
+    /// 第一次修成「上界至少一个步长」仍在区间==步长（0...1000, step 1000）时崩。
+    /// 最终方案：**区间必须严格大于步长**才渲染，时长未知/过短时用静态轨道占位。
+    private static let sliderMinSpanMs: Int = 2000
+
     private var progress: some View {
-        // 值也夹在区间内：换歌/时长变小时 slide 可能越界
-        Slider(value: Binding(get: { min(max(slide, 0), seekUpperBound) },
-                              set: { slide = $0 }),
-               in: 0...seekUpperBound,
-               step: seekStepActual) { editing in
-            dragging = editing
-            if !editing { player.seek(to: Int(min(max(slide, 0), seekUpperBound))) }
+        Group {
+            if player.durationMs >= Self.sliderMinSpanMs {
+                Slider(value: Binding(get: { min(max(slide, 0), seekUpperBound) },
+                                      set: { slide = $0 }),
+                       in: 0...seekUpperBound,
+                       step: PlayerSpec.seekStep) { editing in
+                    dragging = editing
+                    if !editing { player.seek(to: Int(min(max(slide, 0), seekUpperBound))) }
+                }
+                .tint(p.accent)
+            } else {
+                // 时长未知：静态凹陷轨道占位（视觉不跳，也不崩）
+                Capsule()
+                    .fill(p.line)
+                    .frame(height: Dim.hairline * 2)
+            }
         }
-        .tint(p.accent)
+        .frame(height: Dim.touchMin / 2)
         .accessibilityLabel("播放进度")
     }
 
