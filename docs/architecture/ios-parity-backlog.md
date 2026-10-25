@@ -24,7 +24,7 @@
 POST anchor 不回锚点本体（写后再读）；**无锚点是 200 + {anchor:null} 而非 404**；
 dedup/preview 双键重复；网易云 account 可为 null 而 configured=true；batch 失败项缺字段。
 
-## 二、页面（批次 2，进行中：播放页 / 缓存+服务器 / 设置）
+## 二、页面（批次 2，**已交付并集成编译通过**）
 | 页面 | hw 来源 | 要点 |
 |---|---|---|
 | 播放页重写 | pages/PlayerPage.ets | 环境光晕(封面 blur60 op0.15)、封面 280/194、曲名 24、推荐理由卡、Slider(step 1s)、五键排(模式/上一首/60播放键渐变/下一首/队列)、歌词 peek 三行(58 高)、浮层层键 lyrics/queue/more/anchor/dislike |
@@ -55,6 +55,13 @@ WebDAV 是纯客户端 PUT/GET `<url>/suenmusic.sm`，不经服务端。
 hw 用 FormAbility + 2×2/2×4 两种尺寸；iOS 对应 **WidgetKit 桌面小组件**（与 Live Activity 无关，后者已关）。
 payload/配色/歌词 3 行窗口/按钮指令(play/pause/next/prev/favorite)/刷新节流 1000ms —— 规格见调研原文
 （`forms/SuenFormCard.ets`）。注意 iOS 小组件进程不能联网、不能读 App 内存，需 App 侧写共享容器。
+
+## 四·五、批次 2 实测结论（模拟器 OCR + 日志）
+- 播放页：eyebrow / 封面 / 曲名 24 / 进度 / 时间 / 歌词 peek 均渲染（截图 OCR：正在播放·每、小城大事、杨千嬅·温馨小品钢琴集、0:10、歌词行）
+- 设置页：播放段（缓存 177M/2.0、显示歌词翻译）、主题段（跟随系统/浅色/深色）、资料库段（黑名单）渲染正确
+- 歌词链路：日志逐行输出 `[Lyric] 当前行=…`，说明换歌事件与歌词加载都正常
+- Live Activity：`[LiveActivity] 已请求 activity id=… title=小城大事`；后台请求会被系统拒（Target is not foreground）并静默降级
+- **澄清悬案**：`emitTrackChange` 一直是通的 —— 之前“未触发”是 NSLog 混用 %d/%@ 格式符导致日志被吞
 
 ## 五、遗留待查
 1. `PlaybackService.emitTrackChange` 在自动播放路径上未触发（歌词加载挂在这里，已休眠）。代码路径检查无误，

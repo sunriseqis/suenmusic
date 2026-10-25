@@ -57,18 +57,22 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     }
 
     /// 拉取当前曲目的歌词（失败静默 —— 没有歌词不影响播放）
+    ///
+    /// 走 `LyricStore`：播放页歌词面板与 peek 预热的是同一份缓存，
+    /// 一首歌不该因为"卡片要一行、页面要整篇"而拉两遍。
     func loadLyrics(for trackId: String) {
         NSLog("[Lyric] 请求歌词 %@", trackId)
         lyricLines = []
         lastPushedLyric = ""
         Task { [weak self] in
-            guard let reply = await APIClient.shared.lyrics(trackId: trackId) else {
+            guard let doc = await LyricStore.shared.doc(for: trackId) else {
                 NSLog("[Lyric] 拉取失败 %@", trackId)
                 return
             }
-            let lrc = reply.lrc?.lyric ?? ""
-            let trans = reply.lrc?.tlyric?.lyric ?? ""
-            let lines = LyricParser.parse(lrc, translation: trans)
+            let lines = doc.lines.enumerated().map { index, line in
+                LyricLine(atMs: line.atMs, text: line.text,
+                          translation: index < doc.trans.count ? doc.trans[index] : "")
+            }
             await MainActor.run {
                 guard let self, self.currentTrack?.id == trackId else { return }
                 self.lyricLines = lines
@@ -185,8 +189,18 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     }
 
     func toggle() {
+        if playing { pause() } else { play() }
+    }
+
+    /// 明确暂停（播放页试听候选前要停主播放，否则两条音轨叠着放）
+    func pause() {
+        engine?.pause()
+    }
+
+    /// 明确起播（试听结束/失败后把主播放接回来）
+    func play() {
         guard let engine, engine.currentIndex >= 0 else { return }
-        if playing { engine.pause() } else { engine.play() }
+        engine.play()
     }
 
     /// 手动切歌：失败同样停在目标曲并标「无音源」
@@ -204,6 +218,206 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     func seek(to ms: Int) { engine?.seek(to: max(0, ms)) }
 
     func setRepeat(_ mode: String) { engine?.setRepeatMode(mode) }
+
+    // MARK: 队列操作（hw `MediaPlayerCore` 同语义：UI 只发意图，内核是数据源）
+
+    /// 队列快照（播放页队列抽屉的数据源）
+    var queueSnapshot: [Track] { queue }
+
+    /// 跳到指定下标并起播（hw `jumpTo(i, true)`）
+    func jumpTo(_ index: Int) {
+        guard queue.indices.contains(index), let engine else { return }
+        // 用户点了某一行 = 显式点播：失败停在当前曲、不自动跳（hw `manualLoad = true`）
+        manualLoad = true
+        armLoadWatchdog()
+        engine.jumpTo(index, autoplay: true)
+    }
+
+    /// 从队列摘除一项（hw `removeAt` 三种情形）：当前曲之前的只挪下标、摘当前曲原地装
+    /// 下一首、摘空则停止并清元数据。
+    func removeAt(_ index: Int) async {
+        guard queue.indices.contains(index) else { return }
+        let wasPlaying = playing
+        let removedCurrent = engine?.removeQueueItem(at: index) ?? false
+        queue.remove(at: index)
+
+        if queue.isEmpty {
+            currentIndex = -1
+            positionMs = 0
+            durationMs = 0
+            playing = false
+            noSource = false
+            currentRecoReason = nil
+            engine?.stop()
+            return
+        }
+        if removedCurrent {
+            let next = min(index, queue.count - 1)
+            currentIndex = next
+            engine?.seekToIndex(next, autoplay: wasPlaying, force: true)
+        } else if index < currentIndex {
+            currentIndex -= 1
+        }
+    }
+
+    /// 队列内移动一项（hw `moveItem`，拖拽排序）
+    func moveItem(from: Int, to: Int) {
+        guard queue.indices.contains(from), queue.indices.contains(to), from != to else { return }
+        engine?.moveQueueItem(from: from, to: to)
+        let moved = queue.remove(at: from)
+        queue.insert(moved, at: to)
+        if from == currentIndex {
+            currentIndex = to
+        } else if from < currentIndex && to >= currentIndex {
+            currentIndex -= 1
+        } else if from > currentIndex && to <= currentIndex {
+            currentIndex += 1
+        }
+    }
+
+    /// 强制重装当前曲（修正音源锚定后走新锚点）：清该曲离线缓存 → 丢缓冲重装 → 起播。
+    /// hw `retryCurrent(true)` 同口径：锚定后服务端已清解析缓存，重装即走新音源。
+    func reloadCurrentTrack(autoplay: Bool) async {
+        guard let engine, queue.indices.contains(currentIndex) else { return }
+        AudioCacheStore.shared.evict(id: queue[currentIndex].id)
+        manualLoad = true
+        armLoadWatchdog()
+        engine.reloadCurrent(index: currentIndex, positionMs: 0, autoplay: autoplay)
+    }
+
+    // MARK: 收藏（播放页红心，hw `toggleFav` 同口径）
+
+    private struct FavIdsBody: Encodable { let ids: [String] }
+    private struct FavCheckReply: Decodable { let favorites: [String: Bool] }
+    private struct FavAddBody: Encodable { let trackId: String; let track: Track? }
+    private struct FavAddReply: Decodable { let ok: Bool?; let added: Bool? }
+
+    /// 这批 id 里已收藏的（hw `favoredIds`：服务端单次上限 500）
+    func favoredIds(_ ids: [String]) async -> [String] {
+        guard !ids.isEmpty else { return [] }
+        do {
+            let r: FavCheckReply = try await APIClient.shared.post(
+                "/api/favorites/check", body: FavIdsBody(ids: ids))
+            return r.favorites.filter { $0.value }.map(\.key)
+        } catch {
+            // 静默：拉不到收藏标记只是红心不准，不该打断播放页
+            return []
+        }
+    }
+
+    /// 这首是否已收藏
+    func isFavored(_ trackId: String) async -> Bool {
+        guard !trackId.isEmpty else { return false }
+        return await favoredIds([trackId]).contains(trackId)
+    }
+
+    /// 切换收藏态。返回新状态；nil = 失败（调用方回滚并 toast）
+    func toggleFavorite(_ track: Track) async -> Bool? {
+        let was = await isFavored(track.id)
+        do {
+            if was {
+                try await APIClient.shared.removeFavorite(trackId: track.id)
+            } else {
+                let _: FavAddReply = try await APIClient.shared.post(
+                    "/api/favorites", body: FavAddBody(trackId: track.id, track: track))
+            }
+            return !was
+        } catch {
+            NSLog("[Fav] 切换失败 %@: %@", track.id, error.localizedDescription)
+            return nil
+        }
+    }
+
+    // MARK: 播放模式（内核只有 off/one/all；hw 的 shuffle 两态 iOS 内核未实现）
+
+    /// off = 顺序播放 / all = 列表循环 / one = 单曲循环
+    @Published private(set) var playMode: String = "off"
+
+    /// 循环切下一档（hw `cycleMode` 的 iOS 子集），返回切换后的模式
+    @discardableResult
+    func cycleMode() -> String {
+        switch playMode {
+        case "off": playMode = "all"
+        case "all": playMode = "one"
+        default: playMode = "off"
+        }
+        engine?.setRepeatMode(playMode)
+        return playMode
+    }
+
+    /// 模式文案（hw `Copy.modeOrder` 等同意）
+    var playModeLabel: String {
+        switch playMode {
+        case "all": return "列表循环"
+        case "one": return "单曲循环"
+        default: return "顺序播放"
+        }
+    }
+
+    // MARK: 专属推荐理由（hw `Track.recommendReason`）
+
+    /// 当前曲的专属推荐理由；nil = 不是每日推荐里的曲目（播放页不显示推荐卡）
+    @Published private(set) var currentRecoReason: String?
+
+    /// 「不喜欢」成功后请求每日推荐页重拉（hw `bumpDailyRefresh` 的等价通道）。
+    /// 注：DailyView 本次不在改动范围、尚未监听，先保证发出方存在。
+    static let dailyRefreshNeeded = Notification.Name("suenmusic.dailyRefreshNeeded")
+
+    /// 曲目 id → 推荐理由。iOS 的 `Track` 模型还没声明 `recommendReason`（Net/ 不在本次
+    /// 改动范围），这里按 `/api/recommend/daily` 的原始响应旁路取一份（失败静默）。
+    private var recoReasons: [String: String] = [:]
+    private var recoLoading = false
+    private var recoLoadedAt: Date = .distantPast
+    private static let recoReloadS: TimeInterval = 6 * 3600
+
+    private struct RecoRow: Decodable { let id: String; let recommendReason: String? }
+    private struct RecoReply: Decodable { let tracks: [RecoRow] }
+
+    /// 清洗 AI 输出（hw `Copy.cleanAiText` 同口径：去 Markdown 残留 / 引号 / 前导杂标点，规范空白）
+    private static func cleanAiText(_ raw: String) -> String {
+        var s = raw
+        for (pattern, replacement) in [
+            ("```[\\s\\S]*?```", " "),
+            ("`([^`]+)`", "$1"),
+            ("(?:^|\\n)\\s*#+\\s*", " "),
+            ("#+", ""),
+            ("\\*\\*([^*]+)\\*\\*", "$1"),
+            ("\\*([^*]+)\\*", "$1"),
+            ("__([^_]+)__", "$1"),
+            ("_([^_]+)_", "$1"),
+            ("~~([^~]+)~~", "$1"),
+            ("(?:^|\\n)\\s*>\\s*", " "),
+            ("(?:^|\\n)\\s*[-*+]\\s+", " "),
+            ("[\"“”'‘’]", ""),
+            ("\\s+", " "),
+        ] {
+            s = s.replacingOccurrences(of: pattern, with: replacement, options: .regularExpression)
+        }
+        s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        s = s.replacingOccurrences(of: "^[，,：:;；、\\-—\\s]+", with: "", options: .regularExpression)
+        return s.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 每日推荐的理由表按需拉一次（换歌时调；6 小时内不重复打服务端）
+    private func ensureRecoReasons() {
+        guard !recoLoading, Date().timeIntervalSince(recoLoadedAt) > Self.recoReloadS else { return }
+        recoLoading = true
+        Task { [weak self] in
+            let reply: RecoReply? = try? await APIClient.shared.get("/api/recommend/daily")
+            await MainActor.run {
+                guard let self else { return }
+                self.recoLoading = false
+                self.recoLoadedAt = Date()
+                var map: [String: String] = [:]
+                for row in reply?.tracks ?? [] {
+                    let text = Self.cleanAiText(row.recommendReason ?? "")
+                    if !text.isEmpty { map[row.id] = text }
+                }
+                self.recoReasons = map
+                self.currentRecoReason = self.currentTrack.flatMap { map[$0.id] }
+            }
+        }
+    }
 
     /// 切服/改地址后：把队列重发到新地址（原生队列里存的是绝对 URL，换 base 即全失效）
     func rebind(baseUrl: String) {
@@ -234,6 +448,8 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             // reason 1 = 播完自动切下一首（hw：advance 走 manualLoad=false）
             if reason == 1 { self.manualLoad = false }
             self.currentIndex = index
+            self.ensureRecoReasons()
+            self.currentRecoReason = self.recoReasons[id]
             self.loadLyrics(for: id)   // 换歌即拉歌词（Live Activity 的歌词行靠它）
             self.noSource = false
             // 换歌是元数据变更 → 立刻推 Live Activity（不受 1s 地板限制）

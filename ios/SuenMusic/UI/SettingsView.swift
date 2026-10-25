@@ -1,15 +1,18 @@
 import SwiftUI
 
 /**
- * 设置页 —— **对齐鸿蒙端 pages/SettingsPage.ets** 的三分段结构。
+ * 设置页 —— 逐项对齐鸿蒙端 pages/SettingsPage.ets（本机 / 智能 / 高级 三分段）。
  *
- * 分段与 hw 同名同序：本机 / 智能 / 高级。
- *   · 本机：主题（三分段）+ 资料库（离线缓存说明、黑名单待接入）+ 账号（账号信息行，点行即改密码 + 退出登录二次确认）
- *   · 智能：画像/调优（hw 走服务端 AI 设置面板，iOS 接入排后续批次；这里如实说明，不放死开关）
- *   · 高级：设备（检查更新三形态）+ 多服务端（当前地址）+ 音源授权
+ * 页面结构（与 hw 同名同序）：
+ *   标题「设置」18 Bold → NeuTabs(本机/智能/高级) → 分段内容；
+ *   分区标签 = 11 Medium text2 + 右侧延伸发丝线，内容卡片 = panel 底 + 发丝描边 + radiusMd。
  *
- * 检查更新与 hw 同形态：版本号 / 已是最新 / 新版本 x.y.z；
- * 有新版本时用 openURL 打开服务端直链（iOS 无静默安装，交给侧载工具签名）。
+ *   · 本机：播放（缓存用量行 + 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
+ *   · 智能：画像折叠卡（summary → 分隔线 → profileLines → ledgerLines）/ 调优（guidance 输入 + 上一次回显）
+ *   · 高级：检查更新（三形态）/ 桌面卡片（iOS 暂无 widget）/ 多服务端 / 音源授权（只读）
+ *
+ * 五张弹层在 SettingsSheets.swift；本页只负责挂载与数据。
+ * 提示统一走 ToastCenter，二次确认统一走 ConfirmDialog（不再用系统 alert）。
  */
 struct SettingsView: View {
     @EnvironmentObject private var app: AppState
@@ -19,151 +22,149 @@ struct SettingsView: View {
 
     /// DEBUG 钩子：SIMCTL_CHILD_SUEN_SETTINGS_SEG=2 直接落「高级」段（无触摸环境验界面用）
     @State private var seg = SettingsView.initialSeg()
-    @State private var showPassword = false
-    @State private var pwOld = ""
-    @State private var pwNew = ""
-    @State private var pwNew2 = ""
-    @State private var pwBusy = false
-    @State private var showSignOut = false
-    @State private var updating = false
+    @State private var sheet: SettingsSheetKind?
+    @State private var showServers = false
+
+    // 本机：缓存用量（行内直显 已用/上限）
+    @State private var cacheUsed: Int64 = 0
+    @State private var clearCacheAsk = false
+
+    // 本机：开关（与 hw 同键）
+    @AppStorage("lyric_translation") private var lyricTrans = true
+
+    // 本机：资料库黑名单计数
+    @State private var dislikes: [DislikeEntry] = []
+
+    // 账号
+    @State private var signOutAsk = false
+
+    // 智能
+    @State private var persona: PersonaReply?
+    @State private var personaOpen = false
+    @State private var guidance = ""
+    @State private var tuning = false
+    @AppStorage("last_tune_prompt") private var lastTune = ""
+
+    // 高级
     @State private var updState = ""
-    @State private var toast = ""
+    @State private var checkingUpd = false
+    @State private var cardHelpOpen = false
+    @AppStorage("auto_failover") private var autoFailover = true
+    @State private var biliLabel = "未授权"
+    @State private var neteaseLabel = "未授权"
 
     private let segLabels = ["本机", "智能", "高级"]
 
     private var p: Palette { Palette(scheme) }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Dim.s3) {
-                segmented
-                if seg == 0 {
-                    localTab
-                } else if seg == 1 {
-                    smartTab
-                } else {
-                    advancedTab
+        ZStack(alignment: .bottom) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Dim.s4) {
+                    Text("设置")
+                        .font(.system(size: Dim.fsHeadline, weight: .bold))
+                        .foregroundStyle(p.text1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    NeuTabs(titles: segLabels, selection: $seg)
+                    if seg == 0 {
+                        localTab
+                    } else if seg == 1 {
+                        smartTab
+                    } else {
+                        advancedTab
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, Dim.s4)
+                .padding(.top, Dim.s4)
+                .padding(.bottom, Dim.s5)
             }
-            .padding(.horizontal, Dim.s4)
-            .padding(.bottom, Dim.s6)
+            .scrollIndicators(.hidden)
+
+            sheetLayer
+            dialogLayer
         }
         .background(p.bg)
-        .navigationTitle("设置")
-        .navigationBarTitleDisplayMode(.inline)
-        .sheet(isPresented: $showPassword) { passwordSheet }
-        .alert("退出登录", isPresented: $showSignOut) {
-            Button("取消", role: .cancel) {}
-            Button("退出", role: .destructive) { app.signOut() }
-        } message: {
-            Text("退出后本机缓存与离线数据保留，重新登录即可继续收听。")
+        .toolbar(.hidden, for: .navigationBar)
+        .animation(Motion.curve, value: sheet)
+        .animation(Motion.curve, value: showServers)
+        .task {
+            loadCacheUsage()
+            await loadDislikes()
+            await loadPersona()
+            await loadSources()
         }
-        .overlay(alignment: .bottom) {
-            if !toast.isEmpty {
-                Text(toast)
-                    .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(p.text1)
-                    .padding(.horizontal, Dim.s4)
-                    .padding(.vertical, Dim.s2)
-                    .background(p.panel2)
-                    .clipShape(Capsule())
-                    .padding(.bottom, Dim.s5)
-            }
-        }
-    }
-
-    // MARK: - 三分段
-
-    private var segmented: some View {
-        HStack(spacing: Dim.s2) {
-            ForEach(0..<segLabels.count, id: \.self) { i in
-                Button {
-                    seg = i
-                } label: {
-                    Text(segLabels[i])
-                        .font(.system(size: Dim.fsBody))
-                        .foregroundStyle(seg == i ? p.onAccent : p.text2)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: Dim.segH)
-                        .background(seg == i ? p.accent : p.panel2)
-                        .clipShape(RoundedRectangle(cornerRadius: Dim.radiusTab, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.top, Dim.s3)
     }
 
     // MARK: - 本机
 
     private var localTab: some View {
-        VStack(alignment: .leading, spacing: Dim.s3) {
-            sectionLabel("主题")
+        VStack(alignment: .leading, spacing: Dim.s4) {
+            secLabel("播放")
             card {
-                HStack(spacing: Dim.s2) {
-                    ForEach(ThemeMode.allCases) { mode in
-                        Button {
-                            theme.set(mode)
-                        } label: {
-                            Text(mode.label)
-                                .font(.system(size: Dim.fsMinor))
-                                .foregroundStyle(theme.mode == mode ? p.onAccent : p.text2)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: Dim.segH)
-                                .background(theme.mode == mode ? p.accent : p.panel2)
-                                .clipShape(RoundedRectangle(cornerRadius: Dim.radiusTab, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
+                // 行内直接给用量（点击 = 清缓存确认）
+                rowButton("缓存", value: SettingsFmt.short(cacheUsed) + "/" + SettingsFmt.short(cacheQuota), first: true) {
+                    loadCacheUsage()
+                    clearCacheAsk = true
+                }
+                .accessibilityLabel("清空离线缓存：已用 " + SettingsFmt.short(cacheUsed)
+                                    + "，上限 " + SettingsFmt.short(cacheQuota))
+                toggleRow("显示歌词翻译", "原文行下方同时显示翻译", isOn: $lyricTrans)
+            }
+
+            secLabel("主题")
+            card {
+                NeuTabs(titles: ThemeMode.allCases.map(\.label), selection: themeBinding)
+                    .padding(Dim.s3)
+            }
+
+            secLabel("资料库")
+            card {
+                rowButton("黑名单",
+                          value: "歌曲 " + String(dislikeCount("track")) + " · 歌手 " + String(dislikeCount("artist")),
+                          first: true) {
+                    Task {
+                        await loadDislikes()
+                        sheet = .dislikes
                     }
                 }
-                .padding(Dim.s3)
+                .accessibilityLabel("黑名单")
+                rowButton("歌单导入", value: "QQ 歌单") { sheet = .importPlaylist }
+                    .accessibilityLabel("打开歌单导入")
+                // 行本身即触发点：点击直接预检并开弹层
+                rowButton("去重", value: "本机收藏") { sheet = .dedupe }
+                    .accessibilityLabel("打开去重")
+                rowButton("数据备份", value: "文件 · WebDAV") { sheet = .backup }
+                    .accessibilityLabel("打开数据备份")
             }
 
-            sectionLabel("资料库")
+            secLabel("账号")
             card {
-                row("离线缓存", value: "播放时自动缓存")
-                divider
-                row("黑名单", value: "待接入")
-            }
-
-            sectionLabel("账号")
-            card {
-                if let u = app.user {
-                    Button {
-                        pwOld = ""; pwNew = ""; pwNew2 = ""
-                        showPassword = true
-                    } label: {
-                        HStack {
-                            Text(u.displayName.isEmpty ? u.username : u.displayName)
-                                .font(.system(size: Dim.fsBody))
-                                .foregroundStyle(p.text1)
-                            Spacer()
-                            Text(u.username + "-" + (u.role == "admin" ? "管理员" : "用户"))
-                                .font(.system(size: Dim.fsMinor))
-                                .foregroundStyle(p.text2)
-                        }
-                        .frame(height: Dim.touchMin)
-                        .padding(.horizontal, Dim.s4)
-                        .contentShape(Rectangle())
+                if let user = app.user {
+                    rowButton(accountName(user), value: accountTag(user), first: true) {
+                        sheet = .password
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("账号信息，点击修改密码")
-
-                    divider
+                    .accessibilityLabel("账号信息 " + accountName(user) + " " + accountTag(user) + "，点击修改密码")
                     Button {
-                        showSignOut = true
+                        signOutAsk = true
                     } label: {
-                        HStack {
+                        HStack(spacing: Dim.s2) {
                             Text("退出登录")
                                 .font(.system(size: Dim.fsBody))
                                 .foregroundStyle(p.danger)
-                            Spacer()
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .frame(height: Dim.touchMin)
                         .padding(.horizontal, Dim.s4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(p.line).frame(height: Dim.hairline)
+                    }
+                    .accessibilityLabel("退出登录")
+                } else {
+                    rowStatic("未登录", value: "", first: true)
                 }
             }
         }
@@ -172,152 +173,350 @@ struct SettingsView: View {
     // MARK: - 智能
 
     private var smartTab: some View {
-        VStack(alignment: .leading, spacing: Dim.s3) {
-            sectionLabel("画像")
-            card { row("兴趣画像", value: "待接入") }
-            sectionLabel("调优")
-            card { row("AI 调优", value: "待接入") }
-            Text("hw 侧这两项走服务端 AI 设置面板，iOS 接入排在后续批次。")
-                .font(.system(size: Dim.fsCaption))
-                .foregroundStyle(p.text2)
-                .padding(.horizontal, Dim.s1)
+        VStack(alignment: .leading, spacing: Dim.s4) {
+            secLabel("画像")
+            personaCard
+
+            secLabel("调优")
+            card {
+                VStack(alignment: .leading, spacing: Dim.s2) {
+                    NeuInput($guidance, placeholder: "例如：少一点电音")
+                    HStack(spacing: Dim.s3) {
+                        VStack(alignment: .leading, spacing: Dim.s0) {
+                            Text("上一次")
+                                .font(.system(size: Dim.fsCaption))
+                                .foregroundStyle(p.text2)
+                            Text(lastTune.isEmpty ? "还没有记录" : lastTune)
+                                .font(.system(size: Dim.fsBody))
+                                .foregroundStyle(p.text1)
+                                .lineLimit(2)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        WebButton(tuning ? "调优中…" : "提交",
+                                  variant: .primary, size: .md,
+                                  disabled: tuning || trimmedGuidance.isEmpty) {
+                            Task { await submitTune() }
+                        }
+                        .accessibilityLabel(tuning ? "正在调优" : "提交调优意见")
+                    }
+                }
+                .padding(Dim.s3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
+    }
+
+    /// 画像折叠卡：头 44（有 summary 时「音乐画像」，否则「尚未生成」）+ chevron
+    private var personaCard: some View {
+        VStack(spacing: 0) {
+            Button {
+                personaOpen.toggle()
+            } label: {
+                HStack(spacing: Dim.s2) {
+                    Text(hasPersonaSummary ? "音乐画像" : "尚未生成")
+                        .font(.system(size: Dim.fsBody))
+                        .foregroundStyle(p.text1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    WebIcon(personaOpen ? .chevronUp : .chevronDown, size: Dim.icon18)
+                        .foregroundStyle(p.text2)
+                }
+                .frame(height: Dim.touchMin)
+                .padding(.horizontal, Dim.s4)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(personaOpen ? "收起画像" : "展开画像")
+
+            if personaOpen {
+                personaBody
+            }
+        }
+        .background(p.panel)
+        .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous)
+                .strokeBorder(p.line, lineWidth: Dim.hairline)
+        )
+    }
+
+    private var personaBody: some View {
+        let lines = SettingsPersonaMd.lines(persona)
+        return VStack(alignment: .leading, spacing: Dim.s2) {
+            if lines.isEmpty {
+                Text("暂无")
+                    .font(.system(size: Dim.fsBody))
+                    .foregroundStyle(p.text2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                    mdRow(line)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, Dim.s4)
+        .padding(.top, Dim.s0)
+        .padding(.bottom, Dim.s3)
+        .overlay(alignment: .top) {
+            Rectangle().fill(p.line).frame(height: Dim.hairline)
+        }
+    }
+
+    @ViewBuilder
+    private func mdRow(_ line: SettingsPersonaLine) -> some View {
+        switch line.kind {
+        case .rule:
+            Rectangle()
+                .fill(p.line)
+                .frame(height: Dim.hairline)
+                .frame(maxWidth: .infinity)
+        case .title:
+            let size = line.minor ? Dim.fsBody : Dim.fsSub
+            Text(line.text)
+                .font(.system(size: size, weight: .medium))
+                .foregroundStyle(p.text1)
+                .lineSpacing(lineSpacing(size, 22))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .bullet:
+            let size = line.minor ? Dim.fsMinor : Dim.fsBody
+            Text("· " + line.text)
+                .font(.system(size: size))
+                .foregroundStyle(p.text2)
+                .lineSpacing(lineSpacing(size, 20))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .body:
+            let size = line.minor ? Dim.fsMinor : Dim.fsBody
+            Text(line.text)
+                .font(.system(size: size))
+                .foregroundStyle(line.minor ? p.text2 : p.text1)
+                .lineSpacing(lineSpacing(size, line.minor ? 20 : 22))
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// hw 的 lineHeight 在 SwiftUI 里用 lineSpacing 补（系统默认行高 ≈ 字号 × 1.2）
+    private func lineSpacing(_ fontSize: CGFloat, _ lineHeight: CGFloat) -> CGFloat {
+        max(0, lineHeight - fontSize * 1.2)
     }
 
     // MARK: - 高级
 
     private var advancedTab: some View {
-        VStack(alignment: .leading, spacing: Dim.s3) {
-            sectionLabel("设备")
+        VStack(alignment: .leading, spacing: Dim.s4) {
+            secLabel("设备")
+            card {
+                rowButton("检查更新", value: updateLabel, first: true,
+                          accentValue: updState.hasPrefix("new=")) {
+                    Task { await checkUpdate() }
+                }
+                .accessibilityLabel("检查更新，当前 " + updateLabel)
+            }
+
+            secLabel("卡片")
+            card {
+                // iOS 尚无桌面 widget：先固定「未添加」，点击给说明
+                rowButton("桌面卡片", value: "未添加", first: true) {
+                    cardHelpOpen = true
+                }
+                .accessibilityLabel("桌面卡片：未添加")
+            }
+
+            secLabel("多服务端")
             card {
                 Button {
-                    Task { await checkUpdate() }
+                    showServers = true
                 } label: {
-                    HStack {
-                        Text("检查更新")
+                    HStack(spacing: Dim.s2) {
+                        Text("服务端管理")
                             .font(.system(size: Dim.fsBody))
                             .foregroundStyle(p.text1)
-                        Spacer()
-                        Text(updateLabel)
-                            .font(.system(size: Dim.fsMinor))
-                            .foregroundStyle(updState.hasPrefix("new=") ? p.accentText : p.text2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        WebIcon(.chevronRight, size: Dim.icon16)
+                            .foregroundStyle(p.text2)
                     }
                     .frame(height: Dim.touchMin)
                     .padding(.horizontal, Dim.s4)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("检查更新，当前 " + updateLabel)
+                .accessibilityLabel("打开服务端管理")
+                toggleRow("自动切换服务器", "网络异常时自动尝试其它服务端", isOn: $autoFailover)
             }
 
-            sectionLabel("多服务端")
-            card { row("当前地址", value: ServerRouter.shared.currentBaseURL) }
-
-            sectionLabel("音源授权")
+            secLabel("音源授权")
             card {
-                row("bilibili", value: "已授权")
-                divider
-                row("网易云", value: "已授权")
+                rowStatic("bilibili", value: biliLabel, first: true)
+                rowStatic("网易云", value: neteaseLabel)
             }
         }
     }
 
-    // MARK: - 组件
+    // MARK: - 通用组件
 
-    private func sectionLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: Dim.fsCaption))
-            .foregroundStyle(p.text2)
-            .padding(.leading, Dim.s1)
-            .padding(.top, Dim.s2)
+    /// 分区标签：小字 + 右侧延伸发丝线
+    private func secLabel(_ title: String) -> some View {
+        HStack(spacing: Dim.s3) {
+            Text(title)
+                .font(.system(size: Dim.fsCaption, weight: .medium))
+                .foregroundStyle(p.text2)
+            Rectangle()
+                .fill(p.line)
+                .frame(height: Dim.hairline)
+                .frame(maxWidth: .infinity)
+        }
+        .frame(maxWidth: .infinity)
     }
 
-    private func card<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    /// 面板容器：panel 底 + 发丝描边 + 中圆角
+    private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         VStack(spacing: 0) { content() }
+            .frame(maxWidth: .infinity)
             .background(p.panel)
             .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous)
-                    .stroke(p.line, lineWidth: Dim.hairline)
+                    .strokeBorder(p.line, lineWidth: Dim.hairline)
             )
     }
 
-    private func row(_ title: String, value: String) -> some View {
-        HStack {
-            Text(title)
+    /// 可点击行：44 高 / 左右 16 / 左 13 text1 + 右 12 text2；first = 组内首行不加顶线
+    private func rowButton(_ name: String, value: String, first: Bool = false,
+                           accentValue: Bool = false,
+                           action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            rowLabel(name, value: value, accentValue: accentValue)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .top) {
+            if !first {
+                Rectangle().fill(p.line).frame(height: Dim.hairline)
+            }
+        }
+    }
+
+    /// 静态展示行（不可点）
+    private func rowStatic(_ name: String, value: String, first: Bool = false) -> some View {
+        rowLabel(name, value: value, accentValue: false)
+            .overlay(alignment: .top) {
+                if !first {
+                    Rectangle().fill(p.line).frame(height: Dim.hairline)
+                }
+            }
+    }
+
+    private func rowLabel(_ name: String, value: String, accentValue: Bool) -> some View {
+        HStack(spacing: Dim.s2) {
+            Text(name)
                 .font(.system(size: Dim.fsBody))
                 .foregroundStyle(p.text1)
-            Spacer()
-            Text(value)
-                .font(.system(size: Dim.fsMinor))
-                .foregroundStyle(p.text2)
-                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if !value.isEmpty {
+                Text(value)
+                    .font(.system(size: Dim.fsMinor))
+                    .foregroundStyle(accentValue ? p.accentText : p.text2)
+                    .lineLimit(1)
+            }
         }
         .frame(height: Dim.touchMin)
         .padding(.horizontal, Dim.s4)
     }
 
-    private var divider: some View {
-        Rectangle()
-            .fill(p.line)
-            .frame(height: Dim.hairline)
-            .padding(.leading, Dim.s4)
-    }
-
-    // MARK: - 改密码弹层
-
-    private var passwordSheet: some View {
-        VStack(alignment: .leading, spacing: Dim.s3) {
-            Text("修改密码")
-                .font(.system(size: Dim.fsSection, weight: .semibold))
-                .foregroundStyle(p.text1)
-            input { SecureField("当前密码", text: $pwOld) }
-            input { SecureField("新密码（至少 6 位）", text: $pwNew) }
-            input { SecureField("再输一次新密码", text: $pwNew2) }
-            if !pwNew2.isEmpty && pwNew != pwNew2 {
-                Text("两次输入的新密码不一致")
-                    .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(p.danger)
+    /// 开关行（标题 + 副行 + 右侧 Toggle）；hw 里这类行一律带顶线
+    private func toggleRow(_ title: String, _ subtitle: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: Dim.s2) {
+            VStack(alignment: .leading, spacing: Dim.s0) {
+                Text(title)
+                    .font(.system(size: Dim.fsBody))
+                    .foregroundStyle(p.text1)
+                Text(subtitle)
+                    .font(.system(size: Dim.fsCaption))
+                    .foregroundStyle(p.text2)
             }
-            Button {
-                Task { await changePassword() }
-            } label: {
-                Text(pwBusy ? "提交中…" : "确认修改")
-                    .font(.system(size: Dim.fsTitle, weight: .medium))
-                    .foregroundStyle(p.onAccent)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: Dim.touchMin)
-                    .background(passwordReady ? p.accent : p.track)
-                    .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(!passwordReady || pwBusy)
-
-            Text("改完会用新会话继续（其它设备上的登录会失效）")
-                .font(.system(size: Dim.fsCaption))
-                .foregroundStyle(p.text2)
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .tint(p.accent)
+                .accessibilityLabel(title)
         }
-        .padding(Dim.s4)
-        .presentationDetents([.medium])
-        .background(p.bg)
+        .frame(minHeight: Dim.touchMin)
+        .padding(.horizontal, Dim.s4)
+        .overlay(alignment: .top) {
+            Rectangle().fill(p.line).frame(height: Dim.hairline)
+        }
     }
 
-    private func input<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .font(.system(size: Dim.fsSub))
-            .foregroundStyle(p.text1)
-            .padding(.horizontal, Dim.s3)
-            .frame(height: Dim.inputH)
-            .background(p.panel2)
-            .clipShape(RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Dim.radiusRow, style: .continuous)
-                    .stroke(p.line, lineWidth: Dim.hairline)
+    // MARK: - 弹层挂载
+
+    @ViewBuilder
+    private var sheetLayer: some View {
+        switch sheet {
+        case .dislikes:
+            SettingsDislikesSheet(items: $dislikes, reload: { await loadDislikes() }, onClose: closeSheet)
+        case .importPlaylist:
+            SettingsImportSheet(onClose: closeSheet)
+        case .dedupe:
+            SettingsDedupeSheet(onClose: closeSheet)
+        case .backup:
+            SettingsBackupSheet(onClose: closeSheet)
+        case .password:
+            SettingsPasswordSheet(onClose: closeSheet)
+        case nil:
+            EmptyView()
+        }
+        if showServers {
+            ServerListSheet(onClose: { showServers = false })
+                .transition(.move(edge: .bottom))
+        }
+    }
+
+    @ViewBuilder
+    private var dialogLayer: some View {
+        if clearCacheAsk {
+            ConfirmDialog(
+                title: "清空离线缓存",
+                message: "将删除全部 " + SettingsFmt.short(cacheUsed) + " 离线缓存（正在播放的除外），之后播放会重新联网下载。",
+                confirmTitle: "清空",
+                danger: true,
+                onCancel: { clearCacheAsk = false },
+                onConfirm: {
+                    clearCacheAsk = false
+                    clearCache()
+                }
             )
+        }
+        if signOutAsk {
+            ConfirmDialog(
+                title: "退出登录",
+                message: "退出后本机缓存与离线快照保留，重新登录即可继续收听。",
+                confirmTitle: "退出",
+                danger: true,
+                onCancel: { signOutAsk = false },
+                onConfirm: {
+                    signOutAsk = false
+                    app.signOut()
+                }
+            )
+        }
+        if cardHelpOpen {
+            ConfirmDialog(
+                title: "桌面卡片",
+                message: SettingsView.cardHelpText,
+                confirmTitle: "知道了",
+                single: true,
+                onCancel: { cardHelpOpen = false },
+                onConfirm: { cardHelpOpen = false }
+            )
+        }
     }
 
-    // MARK: - 逻辑
+    private func closeSheet() {
+        sheet = nil
+    }
+
+    // MARK: - 数据
 
     private static func initialSeg() -> Int {
         #if DEBUG
@@ -327,9 +526,97 @@ struct SettingsView: View {
         #endif
     }
 
-    private var passwordReady: Bool {
-        !pwBusy && !pwOld.isEmpty && pwNew.count >= 6 && pwNew == pwNew2
+    /// iOS 暂无桌面 widget 的说明文案（hw 的卡片说明是 HarmonyOS 服务卡片专属，不能照搬）
+    private static let cardHelpText = "iOS 桌面小组件还在开发中，这一版没有可添加的卡片。\n\n"
+        + "· 进度：会补 2×2 与 2×4 两种尺寸，2×2 只显示封面 / 歌名 / 播放键，2×4 多显示歌手与滚动歌词。\n"
+        + "· 按钮：播放 / 暂停、上一首、下一首，点击即生效（App 未运行时走冷启动）。\n"
+        + "· 主题：跟随设置里「主题」的浅色 / 深色；「跟随系统」时随系统深浅切换。"
+
+    private var cacheQuota: Int64 {
+        AudioCacheStore.maxBytes
     }
+
+    private func loadCacheUsage() {
+        cacheUsed = AudioCacheStore.shared.usedBytes()
+    }
+
+    private func clearCache() {
+        AudioCacheStore.shared.clear()
+        ToastCenter.shared.show("已清空离线缓存")
+        loadCacheUsage()
+    }
+
+    private func dislikeCount(_ type: String) -> Int {
+        dislikes.reduce(0) { $0 + (($1.type ?? "") == type ? 1 : 0) }
+    }
+
+    private func loadDislikes() async {
+        // 静默：拉不到只是计数不显示
+        if let list = try? await APIClient.shared.dislikes() {
+            dislikes = list
+        }
+    }
+
+    private func loadPersona() async {
+        persona = try? await APIClient.shared.persona()
+    }
+
+    private var hasPersonaSummary: Bool {
+        guard let summary = persona?.summary else { return false }
+        return !summary.isEmpty
+    }
+
+    private var trimmedGuidance: String {
+        guidance.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func submitTune() async {
+        let text = trimmedGuidance
+        guard !text.isEmpty, !tuning else { return }
+        tuning = true
+        defer { tuning = false }
+        do {
+            persona = try await APIClient.shared.tunePersona(guidance: text)
+            lastTune = text
+            guidance = ""
+            ToastCenter.shared.show("画像已更新")
+        } catch {
+            ToastCenter.shared.show(SettingsErrorText.api(error))
+        }
+    }
+
+    private func loadSources() async {
+        if let st = try? await APIClient.shared.bilibiliAccount() {
+            biliLabel = sourceLabel(st)
+        } else {
+            biliLabel = "未授权"
+        }
+        if let st = try? await APIClient.shared.neteaseAccount() {
+            // 网易云的 account 可能为 null 而 configured 为 true —— 授权与否以 configured 为准
+            neteaseLabel = sourceLabel(st)
+        } else {
+            neteaseLabel = "未授权"
+        }
+    }
+
+    /// 有昵称显示昵称；缺昵称但已配置显示「已授权」
+    private func sourceLabel(_ st: SourceAccount) -> String {
+        if let name = st.account?.name, !name.isEmpty { return name }
+        return st.configured ? "已授权" : "未授权"
+    }
+
+    // MARK: - 账号
+
+    private func accountName(_ user: PublicUser) -> String {
+        user.displayName.isEmpty ? user.username : user.displayName
+    }
+
+    /// 右侧「用户名-角色」（admin → 管理员）
+    private func accountTag(_ user: PublicUser) -> String {
+        user.username + "-" + (user.role == "admin" ? "管理员" : "用户")
+    }
+
+    // MARK: - 检查更新
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
@@ -347,9 +634,9 @@ struct SettingsView: View {
     }
 
     private func checkUpdate() async {
-        guard !updating else { return }
-        updating = true
-        defer { updating = false }
+        guard !checkingUpd else { return }
+        checkingUpd = true
+        defer { checkingUpd = false }
         do {
             let reply = try await APIClient.shared.checkUpdate(
                 versionName: appVersion, versionCode: appBuild, force: true
@@ -360,53 +647,117 @@ struct SettingsView: View {
                 openForInstall(url, versionName: latest.versionName)
             } else {
                 updState = "latest"
-                showToast("已是最新版本")
+                ToastCenter.shared.show("已是最新版本")
             }
         } catch {
+            // 失败不占行尾形态：回落「版本号」，原因只弹 toast
             updState = ""
-            showToast((error as? ApiError)?.message ?? "检查更新失败")
+            ToastCenter.shared.show(SettingsErrorText.described(error))
         }
     }
 
-    /// 更新投递阶梯（对齐旧仓 §5.3）：
-    /// ① altstore://install?url=… ② sidestore://install?url=… ③ 都没有 → 交给 Safari 下载。
-    /// 前两步依赖 Info.plist 的 LSApplicationQueriesSchemes（已登记）；
-    /// 走 Safari 不是失败，是免费签名下的正常路径。
+    /// 更新投递阶梯：① altstore://install ② sidestore://install ③ 都没有 → 交给 Safari 下载。
     private func openForInstall(_ urlString: String, versionName: String) {
         let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? urlString
         for scheme in ["altstore", "sidestore"] {
-            if let probe = URL(string: "\(scheme)://install?url=\(encoded)"),
+            if let probe = URL(string: scheme + "://install?url=" + encoded),
                UIApplication.shared.canOpenURL(probe) {
                 UIApplication.shared.open(probe)
-                showToast("新版本 " + versionName + "：已交给 " + scheme + " 安装")
+                ToastCenter.shared.show("新版本 " + versionName + "：已交给 " + scheme + " 安装")
                 return
             }
         }
         if let target = URL(string: urlString) {
             openURL(target)
-            showToast("新版本 " + versionName + "：已交给浏览器下载（未装侧载工具）")
+            ToastCenter.shared.show("新版本 " + versionName + "：已交给浏览器下载（未装侧载工具）")
         }
     }
 
-    private func changePassword() async {
-        guard passwordReady else { return }
-        pwBusy = true
-        defer { pwBusy = false }
-        do {
-            let session = try await APIClient.shared.changePassword(oldPassword: pwOld, newPassword: pwNew)
-            APIClient.shared.adopt(session)
-            showPassword = false
-            showToast("密码已更新")
-        } catch {
-            showToast((error as? ApiError)?.message ?? "修改失败")
+    // MARK: - 主题
+
+    private var themeBinding: Binding<Int> {
+        Binding(
+            get: {
+                ThemeMode.allCases.firstIndex(of: theme.mode) ?? 0
+            },
+            set: { index in
+                let mode = ThemeMode.allCases[index]
+                theme.set(mode)
+                ToastCenter.shared.show("主题：" + mode.label)
+            }
+        )
+    }
+}
+
+// MARK: - 弹层种类
+
+/// 设置页的五张弹层（与 hw 的 sheet 字符串一一对应）
+enum SettingsSheetKind: String, Identifiable {
+    case dislikes
+    case importPlaylist
+    case dedupe
+    case backup
+    case password
+
+    var id: String { rawValue }
+}
+
+// MARK: - 画像 md 行
+
+/// 画像 md 行（kind 与 hw MdLine 同值：正文 / 标题 / 列表项 / 分隔线；minor = 次级行）
+struct SettingsPersonaLine {
+    enum Kind {
+        case body
+        case title
+        case bullet
+        case rule
+    }
+
+    let kind: Kind
+    let text: String
+    let minor: Bool
+}
+
+/// 画像三段 md 合并解析（summary → 分隔线 → profileLines → ledgerLines）
+enum SettingsPersonaMd {
+    static func lines(_ persona: PersonaReply?) -> [SettingsPersonaLine] {
+        guard let persona else { return [] }
+        var out: [SettingsPersonaLine] = []
+        push(persona.summary ?? "", minor: false, into: &out)
+        let mark = out.count
+        for line in persona.profileLines { push(line, minor: true, into: &out) }
+        // summary 与特征段之间补一条分隔线（两边都有内容才补，与 hw 同判据）
+        if mark > 0 && mark < out.count {
+            out.insert(SettingsPersonaLine(kind: .rule, text: "", minor: false), at: mark)
+        }
+        for line in persona.ledgerLines { push(line, minor: true, into: &out) }
+        return out
+    }
+
+    private static func push(_ raw: String, minor: Bool, into out: inout [SettingsPersonaLine]) {
+        for piece in raw.split(separator: "\n", omittingEmptySubsequences: false) {
+            let text = piece.trimmingCharacters(in: .whitespaces)
+            if text.isEmpty { continue }
+            if text == "---" || text == "***" || text == "___" {
+                out.append(SettingsPersonaLine(kind: .rule, text: "", minor: minor))
+            } else if text.hasPrefix("#") {
+                let stripped = text.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
+                out.append(SettingsPersonaLine(kind: .title, text: stripInline(stripped), minor: minor))
+            } else if text.hasPrefix("- ") || text.hasPrefix("* ") || text.hasPrefix("• ") {
+                out.append(SettingsPersonaLine(kind: .bullet, text: stripInline(String(text.dropFirst(2))), minor: minor))
+            } else {
+                out.append(SettingsPersonaLine(kind: .body, text: stripInline(text), minor: minor))
+            }
         }
     }
 
-    private func showToast(_ text: String) {
-        toast = text
-        Task {
-            try? await Task.sleep(nanoseconds: 2_200_000_000)
-            await MainActor.run { if toast == text { toast = "" } }
-        }
+    /// 去掉 md 行内记号（双星号 / 单星号 / 反引号）：Text 不渲染富文本，裸记号非常刺眼
+    private static func stripInline(_ raw: String) -> String {
+        let tick = String(UnicodeScalar(96) ?? " ")
+        return raw
+            .replacingOccurrences(of: "**", with: "")
+            .replacingOccurrences(of: "*", with: "")
+            .replacingOccurrences(of: tick, with: "")
+            .trimmingCharacters(in: .whitespaces)
     }
 }

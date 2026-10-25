@@ -31,6 +31,8 @@ struct RootView: View {
                 tab = index
             }
         }
+        // 全端提示的唯一渲染落点（ToastCenter.shared.show 只写状态，这里画）
+        .overlay { ToastOverlay() }
     }
 
     private var mainTabs: some View {

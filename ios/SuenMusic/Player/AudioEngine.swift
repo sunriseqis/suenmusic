@@ -410,6 +410,83 @@ final class AudioEngine: NSObject {
         refreshRemoteCommandAvailability()
     }
 
+    // MARK: 队列变更（播放页的队列抽屉：跳播 / 删除 / 拖拽排序）
+    //
+    // 数据源永远是内核的 `tracks`（UI 只拿快照、只发意图）；下标语义照 hw
+    // `MediaPlayerCore.jumpTo / removeAt / moveItem` 逐条对齐。
+
+    /// 队列逻辑快照（Swift 数组是值类型，UI 拿到的是副本，改不动内核）
+    var queueSnapshot: [SuenTrack] { tracks }
+
+    /// 跳到指定下标并（可选）起播（hw `jumpTo`）：点的是当前曲 = 从头再来
+    func jumpTo(_ index: Int, autoplay: Bool) {
+        guard tracks.indices.contains(index) else { return }
+        if index == currentIndex {
+            seek(to: 0)
+            if autoplay { play() }
+            return
+        }
+        rebuildQueue(from: index, positionMs: 0, autoplay: autoplay, reason: 2)
+    }
+
+    /// 摘除队列里的一项（hw `removeAt` 的内核侧）。
+    ///
+    /// 返回 true = 被摘的正是当前曲，**调用方必须立刻装载新的当前曲**：本方法只把属于
+    /// 它的条目从播放器里摘掉并暂停，绝不自行接续（否则会出现"删掉 A 却在放 B"）。
+    @discardableResult
+    func removeQueueItem(at index: Int) -> Bool {
+        guard tracks.indices.contains(index) else { return false }
+        let wasCurrent = index == currentIndex
+        if wasCurrent { player.pause() }
+        // ① 先按**旧**下标挑出要摘的条目：itemIndex 以 ObjectIdentifier 为键，
+        //    下标改完就再也找不回条目了（顺序错了会留下占位的幽灵条目）。
+        var victims: [AVPlayerItem] = []
+        for item in player.items() where itemIndex[ObjectIdentifier(item)] == index {
+            victims.append(item)
+        }
+        let victimKeys = Set(victims.map { ObjectIdentifier($0) })
+        for item in victims {
+            player.remove(item)
+            reportedFailures.remove(ObjectIdentifier(item))
+        }
+        // ② 逻辑队列摘除 + 剩余条目下标整体前移一位
+        tracks.remove(at: index)
+        var remapped: [ObjectIdentifier: Int] = [:]
+        for (key, logical) in itemIndex where !victimKeys.contains(key) {
+            remapped[key] = logical > index ? logical - 1 : logical
+        }
+        itemIndex = remapped
+        if insertedThrough >= index { insertedThrough -= 1 }
+        return wasCurrent
+    }
+
+    /// 队列内移动一项（hw `moveItem`，拖拽排序）。
+    ///
+    /// AVQueuePlayer 的接续顺序由**实际入队顺序**决定，光挪逻辑数组会让"下一首"还是
+    /// 旧顺序（高亮 A、接续 B）—— 所以按新序就地重建，保留当前曲、进度与播放意图。
+    func moveQueueItem(from: Int, to: Int) {
+        guard tracks.indices.contains(from), tracks.indices.contains(to), from != to else { return }
+        let current = currentIndex
+        let seconds = player.currentTime().seconds
+        let positionMs = seconds.isFinite ? max(0, Int(seconds * 1000)) : 0
+        let wasPlaying = playingIntent
+        let moved = tracks.remove(at: from)
+        tracks.insert(moved, at: to)
+        // 下标修正（hw 同口径）：挪走当前项要跟着挪；别的项跨过当前项要相应 ±1
+        let newIndex: Int
+        if from == current {
+            newIndex = to
+        } else if from < current && to >= current {
+            newIndex = current - 1
+        } else if from > current && to <= current {
+            newIndex = current + 1
+        } else {
+            newIndex = current
+        }
+        rebuildQueue(from: min(max(0, newIndex), max(0, tracks.count - 1)),
+                     positionMs: positionMs, autoplay: wasPlaying, reason: 2)
+    }
+
     func statusSnapshot() -> [String: Any] {
         let positionMs = Int(player.currentTime().seconds * 1000)
         let duration = currentItemDurationMs()

@@ -700,6 +700,56 @@ final class AudioCacheStore {
         return sum
     }
 
+    /// 已缓存曲目数（缓存页「清空全部」的禁用依据 + 确认文案里的「N 首」）。
+    ///
+    /// 只数磁盘上真实存在的 `.bin`，**不经过 `entry(for:)`** —— 那条路会给每首被查询过的曲子
+    /// 建一个空文件（与 `usedBytes()` 同一口径：磁盘真相，不是本进程摸过谁）。
+    func entryCount() -> Int {
+        guard let list = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil) else { return 0 }
+        return list.filter { $0.pathExtension == "bin" }.count
+    }
+
+    /**
+     * 缓存页的「清空全部」：删掉所有缓存，**跳过正在播放 / 下载中的条目**
+     * （hw `OfflineCache.clearAll` 同语义）。
+     *
+     * 与 `clear()` 的分工：`clear()` 是核弹（退出登录 / 磁盘损坏时用），连正在伺服的文件一起废掉；
+     * 这里必须保住当前播放那一首 —— 它在本地代理里还有活动读者（`isEvictable == false`），
+     * 删掉文件会让流的下一次 `read()` 返回 nil，表现是「播到一半断了」。
+     *
+     * 返回实际删除的曲目数。
+     */
+    @discardableResult
+    func clearAll() -> Int {
+        dictLock.lock()
+        let live = Array(entries.values)
+        // 正在播（有活动读者）或正在下载的条目按文件名保护起来
+        let keep = Set(live.filter { !$0.isEvictable }.map { Self.fileName(for: $0.id) })
+        let dead = live.filter { $0.isEvictable }
+        for entry in dead { entries.removeValue(forKey: entry.id) }
+        dictLock.unlock()
+        dead.forEach { $0.abandon() }
+
+        var removed = 0
+        if let list = try? FileManager.default.contentsOfDirectory(
+            at: root, includingPropertiesForKeys: nil) {
+            for url in list where !keep.contains(url.deletingPathExtension().lastPathComponent) {
+                switch url.pathExtension {
+                case "bin":
+                    if (try? FileManager.default.removeItem(at: url)) != nil { removed += 1 }
+                case "json":
+                    // 旁挂元数据跟着音频一起删，否则下次启动会留一堆孤儿
+                    try? FileManager.default.removeItem(at: url)
+                default:
+                    break
+                }
+            }
+        }
+        cacheLog("clearAll", "已清空 \(removed) 首缓存（保留 \(keep.count) 首在播/下载中）")
+        return removed
+    }
+
     // MARK: 驱逐
 
     func evict(id: String) {
