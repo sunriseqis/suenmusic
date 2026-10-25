@@ -181,27 +181,42 @@ struct FavoritesView: View {
     }
 
     private var list: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(Array(shownTracks.enumerated()), id: \.element.id) { index, track in
-                    // 收藏页每行都是收藏：行内不画红心，右滑 = 取消收藏且滑出消失（hw markFav: false）
-                    TrackRow(
-                        track: track,
-                        index: index + 1,
-                        isFav: true,
-                        markFav: false,
-                        swipeRemoveOnUnfavorite: true,
-                        showDur: true,
-                        playing: isPlaying(track),
-                        onTap: { Task { await play(at: index) } },
-                        onSwipeToggle: { await unfavorite(track.id) }
-                    )
+        // `List` + `.swipeActions`：右滑取消收藏由系统仲裁方向，滚动不受影响。
+        List {
+            ForEach(Array(shownTracks.enumerated()), id: \.element.id) { index, track in
+                // 收藏页每行都是收藏：行内不画红心，右滑 = 取消收藏（hw markFav: false）
+                TrackRow(
+                    track: track,
+                    index: index + 1,
+                    isFav: true,
+                    markFav: false,
+                    swipeRemoveOnUnfavorite: true,
+                    showDur: true,
+                    playing: isPlaying(track),
+                    onTap: { Task { await play(at: index) } },
+                    onSwipeToggle: { await unfavorite(track.id) }
+                )
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    Button {
+                        Task { await unfavorite(track.id) }
+                    } label: {
+                        Label("取消收藏", systemImage: "heart.slash")
+                    }
+                    .tint(DesignTokens.swipeFavBg)
                 }
-                footer
             }
-            .padding(.bottom, Dim.s6)
+            footer
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
+        .refreshable { await load(reset: true) }
     }
 
     @ViewBuilder

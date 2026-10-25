@@ -113,25 +113,44 @@ struct DailyView: View {
             if tracks.isEmpty {
                 emptyState(data)
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                            TrackRow(
-                                track: track,
-                                index: index + 1,
-                                isFav: favIds.contains(track.id),
-                                dislikeable: true,
-                                showDur: false,
-                                playing: player.currentTrack?.id == track.id,
-                                onTap: { Task { await playAt(index) } },
-                                onSwipeToggle: { await toggleFav(track) },
-                                onDislike: { dislikeAsk = track }
-                            )
+                // 用系统 `List` + `.swipeActions` 承载右滑收藏：
+                //   · 方向仲裁由系统做 → 纵向滚动与横向滑动天生不冲突（自绘 DragGesture 会抢滚动；
+                //     UIKit pan 在 SwiftUI 扁平化的行上收不到触摸，两条路都试过）；
+                //   · hw 的等价实现是 `PanGesture(direction: .Horizontal)`，系统 swipe 就是同一语义。
+                List {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        TrackRow(
+                            track: track,
+                            index: index + 1,
+                            isFav: favIds.contains(track.id),
+                            dislikeable: true,
+                            showDur: false,
+                            playing: player.currentTrack?.id == track.id,
+                            onTap: { Task { await playAt(index) } },
+                            onSwipeToggle: { await toggleFav(track) },
+                            onDislike: { dislikeAsk = track }
+                        )
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        // 右滑收藏用系统 `.swipeActions`：方向仲裁由系统做，纵向滚动不受影响
+                        //（与 hw `PanGesture(direction: .Horizontal)` 同语义）。
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            let on = favIds.contains(track.id)
+                            Button {
+                                Task { await toggleFav(track) }
+                            } label: {
+                                Label(on ? "取消收藏" : "收藏",
+                                      systemImage: on ? "heart.slash" : "heart")
+                            }
+                            .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
                         }
                     }
-                    .padding(.bottom, Dim.s6)
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .scrollIndicators(.hidden)
+                .refreshable { await load() }
             }
         }
     }

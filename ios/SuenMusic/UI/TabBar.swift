@@ -64,22 +64,21 @@ struct TabBar: View {
 
     private func cell(_ label: String, _ index: Int) -> some View {
         let on = selection == index
-        return Button {
-            selection = index
-        } label: {
-            Text(label)
-                .font(.system(size: Dim.fsMinor, weight: on ? .medium : .regular))
-                .foregroundStyle(on ? DesignTokens.text1 : DesignTokens.text2)
-                // hw `.tab{padding:0 0 8px}`：文字上移，给滑块底部的琥珀指示条让位
-                .padding(.bottom, Dim.s2)
-                // hw `layoutWeight(1)` + `justifyContent(Center)`
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(TabCellPressStyle())
-        // 长按 0.5s → 请求该页刷新。
-        // ⚠️ 必须 highPriority：Button 会先吃掉长按，simultaneousGesture 在这个位置不生效（用户实测「长按无效」）。
-        .highPriorityGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress?(index) })
+        // 用普通视图 + 两种手势承载，而不是 Button：Button 会吃掉长按（实测长按刷新无效）。
+        // 点按 = 切页；长按 0.5s = 请求该页刷新。
+        return Text(label)
+            .font(.system(size: Dim.fsMinor, weight: on ? .medium : .regular))
+            .foregroundStyle(on ? DesignTokens.text1 : DesignTokens.text2)
+            // hw `.tab{padding:0 0 8px}`：文字上移，给滑块底部的琥珀指示条让位
+            .padding(.bottom, Dim.s2)
+            // hw `layoutWeight(1)` + `justifyContent(Center)`
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { selection = index }
+            .onLongPressGesture(minimumDuration: 0.5) {
+                NSLog("[Tab] 长按 tab=\(index) → 刷新")
+                onLongPress?(index)
+            }
         .accessibilityLabel(label)
         .accessibilityValue(on ? "已选中" : "未选中")
         // hw `accessibilityLevel(currentTab === idx ? 'yes' : 'no')` 的 iOS 等价

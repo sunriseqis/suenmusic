@@ -82,19 +82,7 @@ struct TrackRow: View {
         .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd))
         .contentShape(Rectangle())
         .onTapGesture { handleTap() }
-        // 右滑手势交给 UIKit 识别器（见 HorizontalSwipeInstaller 注释）：
-        // SwiftUI 的 DragGesture 会和外层 ScrollView 抢手势，导致「行上滑不动列表」。
-        .background(
-            HorizontalSwipeInstaller(
-                onChanged: { dx in
-                    guard !vanishing else { return }
-                    swipeX = dx > Dim.swipeDampAt
-                        ? Dim.swipeDampAt + (dx - Dim.swipeDampAt) * Self.dampFactor
-                        : dx
-                },
-                onEnded: { endSwipe() }
-            )
-        )
+        // 右滑收藏改由调用方的 `List` + `.swipeActions` 提供（方向仲裁由系统做）。
     }
 
     // MARK: - 底层右滑动作区
