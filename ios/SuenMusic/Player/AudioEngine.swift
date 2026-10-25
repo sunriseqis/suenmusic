@@ -647,7 +647,7 @@ final class AudioEngine: NSObject {
         let status = item.map { Int($0.status.rawValue) } ?? -1
         let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
         let errText = item?.error.map { "\($0)" } ?? "-"
-        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms rate=\(player.rate) reason=\(reason) err=\(errText) intent=\(playingIntent)")
+        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms dur=\(currentItemDurationMs())ms rate=\(player.rate) reason=\(reason) err=\(errText) intent=\(playingIntent)")
 
         // 兜底（2026-10-25）：有音源却起不来 —— tcs 已是 playing、item 未 failed、但 5s 内进度一直是 0。
         // 实测 qq_002TTnfc13TkgO 就是这种：服务端 206 正常、ttfb 2.25s，AVFoundation 却停在 unknown。
@@ -776,6 +776,13 @@ final class AudioEngine: NSObject {
     }
 
     private func currentItemDurationMs() -> Int {
+        // ① 优先用**服务端给的真实时长**（锚定到不同长度视频时才准；代理把它放在响应头里）
+        let idxNow = currentIndex
+        if tracks.indices.contains(idxNow) {
+            let real = AudioCacheStore.shared.realDurationMs(tracks[idxNow].id)
+            if real > 0 { return real }
+        }
+        // ② 其次用 AVPlayerItem 自己解析出的时长
         if let item = player.currentItem {
             let sec = item.duration.seconds
             if sec.isFinite && sec > 0 { return Int(sec * 1000) }

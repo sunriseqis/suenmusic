@@ -661,6 +661,19 @@ final class AudioCacheStore {
 
     /// 是否**完整**落在磁盘上（断网可听的判定依据）。
     /// 刻意不经过 `entry(for:)` —— 那会给每首查询过的曲子建一个空文件。
+    /// 该曲目的**真实时长**（毫秒，来自流响应头 `X-Audio-Duration-Ms`）。
+    /// 0 = 还不知道。
+    ///
+    /// 为什么引擎要用它而不是曲目元数据：手动锚定可以把一首歌指到**时长完全不同**的视频，
+    /// 此时 QQ 元数据的 dt 是错的（真机报障：「选了 2 分多的音源，界面还显示 3 分多，播完自动切歌」）。
+    /// 服务端 `/api/stream` 已经把这个值放在响应头里，代理解析进 entry，这里只做只读查询（不建条目）。
+    func realDurationMs(_ id: String) -> Int {
+        dictLock.lock()
+        let entry = entries[id]
+        dictLock.unlock()
+        return entry?.declaredDurationMs ?? 0
+    }
+
     func isComplete(_ id: String) -> Bool {
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: fileURL(id).path),
               let size = attrs[.size] as? NSNumber, size.int64Value > 0 else { return false }
