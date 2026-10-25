@@ -565,6 +565,7 @@ final class AudioEngine: NSObject {
             guard let idx = self.itemIndex[ObjectIdentifier(item)] else { return }
 
             if self.repeatMode == .repeatOne {
+                NSLog("[Loop] repeat-one 命中 idx=\(idx) dur=\(self.currentItemDurationMs()) 源=\(self.durationSource())")
                 // 单曲循环：**重建条目**而不是 seek(0)。
                 // seek 会留下两个问题（用户实测）：① 时间基已到末尾，周期观察者不再回调 → 进度条卡在结尾；
                 // ② 音源长度与元数据不一致时，条目仍报旧时长。
@@ -730,7 +731,7 @@ final class AudioEngine: NSObject {
         let status = item.map { Int($0.status.rawValue) } ?? -1
         let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
         let errText = item?.error.map { "\($0)" } ?? "-"
-        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms dur=\(currentItemDurationMs())ms rate=\(player.rate) reason=\(reason) err=\(errText) intent=\(playingIntent)")
+        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms dur=\(currentItemDurationMs())ms 源=\(durationSource()) rate=\(player.rate) err=\(errText) intent=\(playingIntent)")
 
         // 兜底（2026-10-25）：有音源却起不来 —— tcs 已是 playing、item 未 failed、但 5s 内进度一直是 0。
         // 实测 qq_002TTnfc13TkgO 就是这种：服务端 206 正常、ttfb 2.25s，AVFoundation 却停在 unknown。
@@ -913,17 +914,28 @@ final class AudioEngine: NSObject {
         player.currentItem.map { ObjectIdentifier($0) }
     }
 
+    /// 时长是从哪儿来的（排查「页面显示元数据长度」用）
+    private func durationSource() -> String {
+        let idxNow = currentIndex
+        if tracks.indices.contains(idxNow), AudioCacheStore.shared.realDurationMs(tracks[idxNow].id) > 0 { return "header" }
+        if let item = player.currentItem, item.duration.seconds.isFinite, item.duration.seconds > 0 { return "item" }
+        return "metadata"
+    }
+
     private func currentItemDurationMs() -> Int {
-        // ① 优先用**服务端给的真实时长**（锚定到不同长度视频时才准；代理把它放在响应头里）
+        // ① 先用 **AVPlayerItem 解析出的真实媒体时长**：
+        //    条目就是我们实际在播的那个视频/音频，它报的长度才是真的。
+        //    （用户实测：叱咤红人真实 2:56，页面显示 3:08 —— 因为之前让响应头优先，
+        //      而服务端在没有锚点时会用元数据兜底，于是把 3:08 当成了「真实时长」。）
+        if let item = player.currentItem {
+            let sec = item.duration.seconds
+            if sec.isFinite && sec > 0 { return Int(sec * 1000) }
+        }
+        // ② 条目还没解析出时长时，才用服务端响应头（锚定曲目它就是真实视频时长）
         let idxNow = currentIndex
         if tracks.indices.contains(idxNow) {
             let real = AudioCacheStore.shared.realDurationMs(tracks[idxNow].id)
             if real > 0 { return real }
-        }
-        // ② 其次用 AVPlayerItem 自己解析出的时长
-        if let item = player.currentItem {
-            let sec = item.duration.seconds
-            if sec.isFinite && sec > 0 { return Int(sec * 1000) }
         }
         // 流尚未探测到时长时退回元数据（Web 端还会用已知真实时长覆盖）
         let idx = currentIndex

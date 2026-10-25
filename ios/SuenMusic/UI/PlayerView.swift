@@ -154,11 +154,20 @@ struct PlayerView: View {
         .interactiveDismissDisabled()
         .task(id: track?.id) { await syncTrackState() }
         .onChange(of: track?.id) { _, _ in
+            // 换歌：拖动状态一并复位（否则新歌的进度条会被旧的拖动值锁住）
+            dragging = false
+            slide = 0
             // 切歌自动收起 dislike / more / anchor；lyrics 与 queue 跨曲保留（hw onTrackChanged）
             if sheet == .dislike || sheet == .more || sheet == .anchor { closeSheet() }
             refreshPeek()
         }
-        .onChange(of: player.positionMs) { _, _ in
+        .onChange(of: player.positionMs) { _, newValue in
+            // 位置大幅回跳（换歌 / 单曲循环重头 / 外部 seek）= 旧拖动状态已失效，必须复位。
+            // 否则 `dragging` 卡在 true，进度条永远显示拖动时的旧值 —— 用户实测
+            // 「音频已经重头播了，进度条却冻在结尾」。
+            if newValue + 3_000 < Int(slide) {
+                dragging = false
+            }
             if !dragging { slide = Double(clampedPosition) }
             refreshPeek()
         }
