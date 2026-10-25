@@ -18,11 +18,14 @@ struct TabBar: View {
     private static let labels = ["发现", "专属", "收藏", "搜索", "设置"]
 
     @Binding private var selection: Int
+    /// 长按某一格 → 请求该页刷新（替代下拉刷新，见 RefreshSignal 注释）
+    private let onLongPress: ((Int) -> Void)?
     /// hw `barW`：横条自身实测宽（含内嵌 padding）。首帧未测量时为 0
     @State private var barW: CGFloat = 0
 
-    init(selection: Binding<Int>) {
+    init(selection: Binding<Int>, onLongPress: ((Int) -> Void)? = nil) {
         self._selection = selection
+        self.onLongPress = onLongPress
     }
 
     var body: some View {
@@ -74,6 +77,8 @@ struct TabBar: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(TabCellPressStyle())
+        // 长按 0.5s → 请求该页刷新（替代下拉刷新；下拉会与行内右滑抢手势）
+        .simultaneousGesture(LongPressGesture(minimumDuration: 0.5).onEnded { _ in onLongPress?(index) })
         .accessibilityLabel(label)
         .accessibilityValue(on ? "已选中" : "未选中")
         // hw `accessibilityLevel(currentTab === idx ? 'yes' : 'no')` 的 iOS 等价

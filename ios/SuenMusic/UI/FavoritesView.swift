@@ -74,6 +74,10 @@ struct FavoritesView: View {
             if items.isEmpty { await load(reset: true) }
             player.warm(shownTracks, limit: 10)
         }
+        .onReceive(NotificationCenter.default.publisher(for: RefreshSignal.name)) { note in
+            guard (note.object as? Int) == 2 else { return }
+            Task { await load(reset: true) }
+        }
     }
 
     // MARK: - 头部（AI 摘要 → 主标题 + 副题）

@@ -99,7 +99,8 @@ struct RootView: View {
             if player.currentTrack != nil {
                 PlayerBar { showPlayer = true }
             }
-            TabBar(selection: $tab)
+            // 长按 tab = 刷新该页（RefreshSignal 广播，页面各自监听）
+            TabBar(selection: $tab, onLongPress: { RefreshSignal.post($0) })
         }
     }
 

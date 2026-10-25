@@ -99,6 +99,10 @@ struct DailyView: View {
         .onReceive(NotificationCenter.default.publisher(for: PlaybackService.dailyRefreshNeeded)) { _ in
             Task { await load() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: RefreshSignal.name)) { note in
+            guard (note.object as? Int) == 1 else { return }
+            Task { await load() }
+        }
     }
 
     // MARK: - 主体
