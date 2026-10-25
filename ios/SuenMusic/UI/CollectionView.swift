@@ -95,41 +95,51 @@ struct CollectionView: View {
         } else if !err.isEmpty && tracks.isEmpty {
             failure
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    header
-                    actions
-                    if !notice.isEmpty {
-                        Text(notice)
-                            .font(.system(size: Dim.fsCaption))
-                            .foregroundStyle(p.text2)
-                            .multilineTextAlignment(.center)
-                            .frame(maxWidth: .infinity)
-                            .padding(.horizontal, Dim.s4)
-                            .padding(.top, Dim.s1)
-                    }
-                    if tracks.isEmpty {
-                        EmptyState(icon: .list, title: emptyTitle, subtitle: emptyHint)
-                            .frame(minHeight: Dim.coverXl)
-                    } else {
-                        ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
-                            TrackRow(
-                                track: track,
-                                index: index + 1,
-                                isFav: favIds.contains(track.id),
-                                showDur: true,
-                                playing: isPlaying(track),
-                                onTap: { Task { await play(at: index) } },
-                                onSwipeToggle: { await toggleFav(track) }
-                            )
+            // List + swipeActions：右滑收藏由系统仲裁方向（等价 hw PanGesture(direction:.horizontal)）
+            List {
+                header.listRowChrome()
+                actions.listRowChrome()
+                if !notice.isEmpty {
+                    Text(notice)
+                        .font(.system(size: Dim.fsCaption))
+                        .foregroundStyle(p.text2)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .padding(.horizontal, Dim.s4)
+                        .padding(.top, Dim.s1)
+                        .listRowChrome()
+                }
+                if tracks.isEmpty {
+                    EmptyState(icon: .list, title: emptyTitle, subtitle: emptyHint)
+                        .frame(minHeight: Dim.coverXl)
+                        .listRowChrome()
+                } else {
+                    ForEach(Array(tracks.enumerated()), id: \.element.id) { index, track in
+                        TrackRow(
+                            track: track,
+                            index: index + 1,
+                            isFav: favIds.contains(track.id),
+                            showDur: true,
+                            playing: isPlaying(track),
+                            onTap: { Task { await play(at: index) } },
+                            onSwipeToggle: { await toggleFav(track) }
+                        )
+                        .listRowChrome()
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            let on = favIds.contains(track.id)
+                            Button { Task { await toggleFav(track) } } label: {
+                                Label(on ? "取消收藏" : "收藏", systemImage: on ? "heart.slash" : "heart")
+                            }
+                            .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
                         }
                     }
-                    if route.kind == "artist" && !albums.isEmpty {
-                        albumSection
-                    }
                 }
-                .padding(.bottom, Dim.s6)
+                if route.kind == "artist" && !albums.isEmpty {
+                    albumSection.listRowChrome()
+                }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
             .scrollIndicators(.hidden)
         }
     }
@@ -439,3 +449,5 @@ struct CollectionView: View {
         }
     }
 }
+
+

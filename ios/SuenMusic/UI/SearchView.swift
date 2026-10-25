@@ -218,22 +218,47 @@ struct SearchView: View {
     // MARK: - 结果列表
 
     private var resultList: some View {
+        Group {
+            if slice == 0 { songList } else { otherSlices }
+        }
+    }
+
+    /// 单曲分片：`List` + `.swipeActions`（右滑收藏的方向仲裁交给系统，滚动不受影响）
+    private var songList: some View {
+        List {
+            blockHead("单曲", songs.count, more: hasMore[0], showPlayAll: true)
+                .listRowChrome()
+            ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
+                TrackRow(
+                    track: track,
+                    index: index + 1,
+                    isFav: favIds.contains(track.id),
+                    showDur: true,
+                    playing: isPlaying(track),
+                    onTap: { Task { await playSong(at: index) } },
+                    onSwipeToggle: { await toggleFav(track) }
+                )
+                .listRowChrome()
+                .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                    let on = favIds.contains(track.id)
+                    Button { Task { await toggleFav(track) } } label: {
+                        Label(on ? "取消收藏" : "收藏", systemImage: on ? "heart.slash" : "heart")
+                    }
+                    .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
+                }
+            }
+            footer.listRowChrome()
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .scrollIndicators(.hidden)
+    }
+
+    /// 专辑 / 歌手 / 歌单分片：仍是普通滚动列表（卡片网格，没有右滑语义）
+    private var otherSlices: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 switch slice {
-                case 0:
-                    blockHead("单曲", songs.count, more: hasMore[0], showPlayAll: true)
-                    ForEach(Array(songs.enumerated()), id: \.element.id) { index, track in
-                        TrackRow(
-                            track: track,
-                            index: index + 1,
-                            isFav: favIds.contains(track.id),
-                            showDur: true,
-                            playing: isPlaying(track),
-                            onTap: { Task { await playSong(at: index) } },
-                            onSwipeToggle: { await toggleFav(track) }
-                        )
-                    }
                 case 1:
                     blockHead("专辑", albums.count, more: hasMore[1], showPlayAll: false)
                     grid {

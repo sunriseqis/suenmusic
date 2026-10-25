@@ -67,26 +67,48 @@ struct HomeView: View {
     // MARK: - 主体
 
     private func content(_ home: HomeData) -> some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                offlineBanner
-                welcome(home)
-                if !home.newAlbums.isEmpty {
-                    // hw Copy.sectionNewAlbums（iOS Copy 表暂无区块名条目，用同字面量）
-                    sectionTitle("新碟首发")
-                    posterRail(home.newAlbums)
-                }
-                if !home.newSongs.isEmpty {
-                    sectionTitle("新歌首发")
-                    songList(home.newSongs)
-                }
-                if !home.toplists.isEmpty {
-                    sectionTitle("巅峰榜")
-                    toplistGrid(home.toplists)
+        // 用 `List` 承载：只有 List 的行才能拿到系统 `.swipeActions`（右滑收藏的方向仲裁由系统做，
+        // 滚动不受影响）。每个区块作为一行、行修饰符 listRowChrome() 去掉系统内边距与分割线。
+        List {
+            offlineBanner.listRowChrome()
+            welcome(home).listRowChrome()
+            if !home.newAlbums.isEmpty {
+                sectionTitle("新碟首发").listRowChrome()
+                posterRail(home.newAlbums).listRowChrome()
+            }
+            if !home.newSongs.isEmpty {
+                sectionTitle("新歌首发").listRowChrome()
+                ForEach(Array(home.newSongs.prefix(newSongRows).enumerated()), id: \.element.id) { index, track in
+                    TrackRow(
+                        track: track,
+                        index: index + 1,
+                        isFav: favIds.contains(track.id),
+                        showDur: true,
+                        playing: player.currentTrack?.id == track.id,
+                        onTap: {
+                            Task {
+                                await player.play(tracks: home.newSongs, startingAt: index, origin: Self.originHome)
+                            }
+                        },
+                        onSwipeToggle: { await toggleFav(track) }
+                    )
+                    .listRowChrome()
+                    .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                        let on = favIds.contains(track.id)
+                        Button { Task { await toggleFav(track) } } label: {
+                            Label(on ? "取消收藏" : "收藏", systemImage: on ? "heart.slash" : "heart")
+                        }
+                        .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
+                    }
                 }
             }
-            .padding(.bottom, Dim.s6)
+            if !home.toplists.isEmpty {
+                sectionTitle("巅峰榜").listRowChrome()
+                toplistGrid(home.toplists).listRowChrome()
+            }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .scrollIndicators(.hidden)
         .refreshable { await load() }
         .navigationDestination(for: CollectionRoute.self) { route in
@@ -247,27 +269,6 @@ struct HomeView: View {
     }
 
     // MARK: - 新歌首发（hw：前 8 行 TrackItem；点任意一首 = 全量 newSongs 进队列）
-
-    private func songList(_ songs: [Track]) -> some View {
-        let shown = Array(songs.prefix(newSongRows))
-        return VStack(spacing: 0) {
-            ForEach(Array(shown.enumerated()), id: \.element.id) { index, track in
-                TrackRow(
-                    track: track,
-                    index: index + 1,
-                    isFav: favIds.contains(track.id),
-                    showDur: true,
-                    playing: player.currentTrack?.id == track.id,
-                    onTap: {
-                        Task {
-                            await player.play(tracks: songs, startingAt: index, origin: Self.originHome)
-                        }
-                    },
-                    onSwipeToggle: { await toggleFav(track) }
-                )
-            }
-        }
-    }
 
     // MARK: - 巅峰榜（hw：两列封面卡 + 「榜」角标）
 
