@@ -107,7 +107,7 @@ final class AudioEngine: NSObject {
     /// 真机验收通过后可以关掉。
     private var nowPlayingDebugLog = true
     /// 等 item ready 的最多轮数（100ms 一轮 → 3s）
-    private static let playReadyMaxTries = 30
+    private static let playReadyMaxTries = 100   // 100 × 100ms = 10s：冷曲目首拉实测要 9-10s 才 ready
     private var playAttempts = 0
     private var playRetries = 0
     /// 起播后进度持续为 0 的 tick 计数（2s/tick）与重载次数
@@ -802,16 +802,15 @@ final class AudioEngine: NSObject {
 
     /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
     private func streamUrl(_ track: SuenTrack) -> String {
-        // 2026-10-25 定案：**直连服务端**。
-        //   之前踩的坑是上游 B 站把音频声明成 octet-stream，而 iOS AVPlayer 认 MIME、不自己嗅探，
-        //   直连就报 -11828「不支持此媒体的格式」。现在服务端 /api/stream 已按首块嗅探回 audio/mp4，
-        //   直连即可（mac 上实测 AVURLAsset isPlayable=true / 268.5s）。
-        //   本地代理仅当整首已落盘时用于省流量（缓存命中路径另测）。
-        if AudioCacheStore.shared.isComplete(track.id),
-           let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
+        // 2026-10-25 v4（实测：列表逐首点，起播 10s 左右）：
+        //   直连时 AVFoundation 会连发多次 Range 请求，而冷曲目每次都要服务端现场去上游取（1-2s/次），
+        //   攒到 9-10s item 才 ready。日志证据：playWhenReady 后 item=unknown 持续 9.8s。
+        //   修法：走**本地代理**（它按整首顺序预拉，一次全速），AVPlayer 的区间请求全部从本地磁盘秒回。
+        //   代理的首次整拉不带 Range → 服务端不限速（旧仓 §九-10），所以又快又对。
+        _ = LocalStreamProxy.shared.entry(trackId: track.id)   // 立刻开始后台整首预拉
+        if let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
             return local
         }
-        _ = LocalStreamProxy.shared.entry(trackId: track.id)
         return directStreamUrl(track.id)
     }
 

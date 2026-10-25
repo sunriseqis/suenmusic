@@ -1086,7 +1086,10 @@ final class ProxyConnection {
     /// 此时干净收尾让播放器重发请求，好过挂死在这里。
     private static let waitTimeout: TimeInterval = 25
     /// 等上游响应头的最长时间（原 12s：起播被它串行拖慢；直连路径已接管首播，这里只服务<b>缓存命中</b>场景）
-    private static let metadataTimeout: TimeInterval = 1.5
+    /// 等上游响应头的最长时间。
+    /// 2026-10-25：曾压到 1.5s 想「快速失败」，但冷曲目上游解析实测可达 2.25s →
+    /// 代理直接回 504 → AVPlayer 反复重发 → 起播被拖成 7-9s。恢复成 8s：宁可慢一点成功，也不要快一点失败。
+    private static let metadataTimeout: TimeInterval = 8
 
     private let connection: NWConnection
     private weak var proxy: LocalStreamProxy?
@@ -1204,7 +1207,7 @@ final class ProxyConnection {
         var head = Data()
         if let first = target.read(offset: 0, length: 16) {
             head = first
-        } else if target.waitForBytes(offset: 0, length: 1, timeout: 0.3),
+        } else if target.waitForBytes(offset: 0, length: 1, timeout: 2.0),
                   let first = target.read(offset: 0, length: 16) {
             head = first
         }

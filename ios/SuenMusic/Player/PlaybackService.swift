@@ -88,6 +88,15 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
+    // MARK: 预热（降低起播延迟）
+
+    /// 应用启动/回前台时调一次：把引擎（AVAudioSession + 观察者）建好，并预取流会话令牌。
+    /// 这样用户点歌时省掉「引擎初始化 + 一次 token 往返」（模拟器实测 token 往返 ~120ms，真机更久）。
+    func prewarm() {
+        guard ensureEngine() != nil else { return }
+        Task { _ = await validToken() }
+    }
+
     // MARK: 用户意图
 
     func play(tracks: [Track], startingAt index: Int, origin: String = "") async {

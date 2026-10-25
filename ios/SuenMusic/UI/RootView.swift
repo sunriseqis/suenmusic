@@ -18,6 +18,10 @@ struct RootView: View {
         .sheet(isPresented: $showPlayer) {
             PlayerView()
         }
+        .task {
+            // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
+            player.prewarm()
+        }
         // 灵动岛 / 锁屏卡点击 → suenmusic://player：直接落到播放页（对应 widget 的 .widgetURL）
         .onOpenURL { url in
             guard url.scheme == "suenmusic" else { return }
