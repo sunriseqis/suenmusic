@@ -321,7 +321,7 @@ struct SettingsView: View {
 
     private static func initialSeg() -> Int {
         #if DEBUG
-        return Int(ProcessInfo.processInfo.environment["SUEN_SETTINGS_SEG"] ?? "") ?? 0
+        return DebugHooks.int("SUEN_SETTINGS_SEG") ?? 0
         #else
         return 0
         #endif

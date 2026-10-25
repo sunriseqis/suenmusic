@@ -230,6 +230,7 @@ final class AudioEngine: NSObject {
     func setQueue(baseUrl: String, token: String, tracks: [SuenTrack],
                   startIndex: Int, startPositionMs: Int,
                   autoplay: Bool, tailOnly: Bool) throws {
+        NSLog("[Start] setQueue 进入 autoplay=\(autoplay) startIndex=\(startIndex) tracks=\(tracks.count) tokenLen=\(token.count)")
         self.baseUrl = normalizedBase(baseUrl)
         self.sessionToken = token
 
@@ -424,16 +425,16 @@ final class AudioEngine: NSObject {
 
         player.removeAllItems()
         itemIndex.removeAll()
-        var previous: AVPlayerItem?
-        for i in index..<tracks.count {
-            let item = makeItem(for: tracks[i])
-            itemIndex[ObjectIdentifier(item)] = i
-            player.insert(item, after: previous)
-            previous = item
-        }
+        insertedThrough = index - 1
+        // ⚠️ 惰性装载（2026-10-25 修「点了不出声」）：
+        // 原来一次性 insert 队列里全部 40 首，每首都要 AVFoundation 准备，实测在模拟器要 10s+，
+        // 而 startPlayback() 在这循环之后才调用 —— 于是"点的那首半天不出声"。
+        // 现在只装当前 + LOOKAHEAD 首，其余在播放推进时按需补（见 ensureLookahead()）。
+        ensureLookahead()
         // 无条件 seek：AVQueuePlayer 的时间轴是全局的，换条目后不归零会承接上一首的
         // 位置 —— 上一首 4:19 结束、下一首从 4:20 继续走，但新的 item 并没有起播。
         player.seek(to: CMTime(seconds: Double(max(0, positionMs)) / 1000.0, preferredTimescale: 600))
+        NSLog("[Start] rebuildQueue 结束 autoplay=\(autoplay) items=\(player.items().count) intent=\(playingIntent)")
         if autoplay { startPlayback() }
 
         suppressTransitionEvent = false
@@ -623,9 +624,40 @@ final class AudioEngine: NSObject {
         playWhenReady()
     }
 
+    /// 诊断打点（真机排障用）：每 2s 打一次播放器真实状态。
+    private var lastDiagAt = Date.distantPast
+
+    private func diagTick(_ positionMs: Int) {
+        let now = Date()
+        guard now.timeIntervalSince(lastDiagAt) >= 2 else { return }
+        lastDiagAt = now
+        let item = player.currentItem
+        let status = item.map { Int($0.status.rawValue) } ?? -1
+        let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
+        let errText = item?.error.map { "\($0)" } ?? "-"
+        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms rate=\(player.rate) reason=\(reason) err=\(errText) intent=\(playingIntent)")
+    }
+    /// 队列前瞻：保证"当前项之后"始终还有 LOOKAHEAD 首待播（惰性装载的核心）
+    private static let lookahead = 2
+    private var insertedThrough = -1
+
+    private func ensureLookahead() {
+        guard !tracks.isEmpty else { return }
+        let target = min(tracks.count - 1, player.items().count > 0
+            ? (itemIndex[ObjectIdentifier(player.items().last!)] ?? insertedThrough) + Self.lookahead
+            : insertedThrough + Self.lookahead + 1)
+        while insertedThrough < target, insertedThrough + 1 < tracks.count {
+            insertedThrough += 1
+            let item = makeItem(for: tracks[insertedThrough])
+            itemIndex[ObjectIdentifier(item)] = insertedThrough
+            player.insert(item, after: player.items().last)
+        }
+    }
+
     private func playWhenReady() {
         guard playingIntent else { return }
         playAttempts += 1
+        if playAttempts == 1 { NSLog("[Start] playWhenReady 开始 intent=\(playingIntent) item=\(player.currentItem != nil)") }
         let item = player.currentItem
         let ready = item?.status == .readyToPlay
 
@@ -673,6 +705,8 @@ final class AudioEngine: NSObject {
         reportCurrentItemFailureIfNeeded()
         let posMs = max(0, Int(time.seconds * 1000))
         let durMs = currentItemDurationMs()
+        diagTick(posMs)
+        ensureLookahead()
         events?.emitProgress(index: currentIndex, positionMs: posMs, durationMs: max(0, durMs), playing: player.rate > 0)
         resyncNowPlayingIfStale()
     }

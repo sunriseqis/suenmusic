@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		9E7DBE51CF7A78806DCD8892 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CB4B9CDA13A6DAD3E61A410 /* AppState.swift */; };
+		1C854548B5EB4E7D7FA9D701 /* DebugHooks.swift in Sources */ = {isa = PBXBuildFile; fileRef = F62DF35719DAC88E21432D2C /* DebugHooks.swift */; };
 		9785D0B9F97BF9DBE7C0973D /* SuenMusicApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90C371ABB4C7CC4CF23462AF /* SuenMusicApp.swift */; };
 		E8935D117D8D366787871D9E /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9132D2266CDFF81E5AF87EA /* APIClient.swift */; };
 		77A745AA672692146FFB1696 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A3C60080FCBCCCE48E85DAD /* Models.swift */; };
@@ -68,6 +69,7 @@
 
 /* Begin PBXFileReference section */
 		1CB4B9CDA13A6DAD3E61A410 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		F62DF35719DAC88E21432D2C /* DebugHooks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugHooks.swift; sourceTree = "<group>"; };
 		90C371ABB4C7CC4CF23462AF /* SuenMusicApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SuenMusicApp.swift; sourceTree = "<group>"; };
 		F9132D2266CDFF81E5AF87EA /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
 		0A3C60080FCBCCCE48E85DAD /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
@@ -144,6 +146,7 @@
 			isa = PBXGroup;
 			children = (
 				1CB4B9CDA13A6DAD3E61A410 /* AppState.swift */,
+				F62DF35719DAC88E21432D2C /* DebugHooks.swift */,
 				90C371ABB4C7CC4CF23462AF /* SuenMusicApp.swift */,
 				13EBF53C97796A7B6D8673EB /* Info.plist */,
 			);
@@ -322,6 +325,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9E7DBE51CF7A78806DCD8892 /* AppState.swift in Sources */,
+				1C854548B5EB4E7D7FA9D701 /* DebugHooks.swift in Sources */,
 				9785D0B9F97BF9DBE7C0973D /* SuenMusicApp.swift in Sources */,
 				E8935D117D8D366787871D9E /* APIClient.swift in Sources */,
 				77A745AA672692146FFB1696 /* Models.swift in Sources */,

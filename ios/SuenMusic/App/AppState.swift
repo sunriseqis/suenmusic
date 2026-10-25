@@ -23,7 +23,7 @@ final class AppState: ObservableObject {
         #if DEBUG
         // 真机自动化验证用：SIMCTL_CHILD_* / devicectl --environment-variables 注入令牌，跳过手输登录
         let env = ProcessInfo.processInfo.environment
-        if let token = env["SUEN_REFRESH_TOKEN"], !token.isEmpty,
+        if let token = DebugHooks.string("SUEN_REFRESH_TOKEN"), !token.isEmpty,
            UserDefaults.standard.string(forKey: "suenmusic.refreshToken") != token {
             UserDefaults.standard.set(token, forKey: "suenmusic.refreshToken")
             if let base = env["SUEN_BASE_URL"], !base.isEmpty {

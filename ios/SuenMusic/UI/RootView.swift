@@ -58,7 +58,7 @@ struct RootView: View {
     /// 用法：SIMCTL_CHILD_SUEN_TAB=settings xcrun simctl launch booted com.suenmusic.app
     private static func initialTab() -> Int {
         #if DEBUG
-        switch ProcessInfo.processInfo.environment["SUEN_TAB"] ?? "" {
+        switch DebugHooks.string("SUEN_TAB") ?? "" {
         case "daily": return 1
         case "favorites": return 2
         case "search": return 3
