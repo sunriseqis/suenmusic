@@ -195,13 +195,20 @@ async function forward(
   upstream: Response,
   headOnly: boolean,
   bytesPerSec?: number,
-  durationMs?: number
+  durationMs?: number,
+  overrideContentType?: string | null
 ): Promise<Readable | undefined> {
   reply.code(upstream.status);
 
   for (const name of PASSTHROUGH_HEADERS) {
     const value = upstream.headers.get(name);
     if (value) reply.header(name, value);
+  }
+
+  // MIME 修正必须发生在**发送之前**（HEAD 也会走这里；之前放在 forward 之后，头已经发出去了 ——
+  // 实测 HEAD 仍回 octet-stream，AVFoundation 预探看到就判不可播，卡在 EvaluatingBufferingRate）
+  if (overrideContentType) {
+    reply.header('content-type', overrideContentType);
   }
 
   /**
@@ -457,9 +464,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     const sourceMs = anchorSec > 0 ? Math.round(anchorSec * 1000) : metadataMs;
     // MIME 修正：AVPlayer 认 MIME，上游给 octet-stream 时必须改写成真实音频类型（见 sniffAudioType 注释）
     const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream) : null;
-    const body = await forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs);
-    if (sniffedType) reply.header('content-type', sniffedType);
-    return body;
+    return forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs, sniffedType);
   };
 
   // fastify 的 exposeHeadRoutes 会给 GET 自动挂 HEAD

@@ -233,6 +233,12 @@ final class AudioEngine: NSObject {
         NSLog("[Start] setQueue 进入 autoplay=\(autoplay) startIndex=\(startIndex) tracks=\(tracks.count) tokenLen=\(token.count)")
         self.baseUrl = normalizedBase(baseUrl)
         self.sessionToken = token
+        // ⚠️ 必须配置本地代理（2026-10-25 修的断线）：
+        // 旧仓 2026-09-26 实测过「服务端对带 Range 的请求按码率限速（下限 40KB/s），
+        // AVFoundation 在 40KB/s 下打不开 B 站 fMP4，永远停在 EvaluatingBufferingRate」。
+        // 修法是让播放**走本地代理**，而代理的首次整卡拉取不带 Range（服务端对无 Range 的全量下载不节流）。
+        // 这里一直漏了 configure → 代理 upstreamBase 为空 → 播放全程直连 → 被限速 → 点了不出声。
+        LocalStreamProxy.shared.configure(base: self.baseUrl, token: token)
 
         suppressTransitionEvent = true
         defer { suppressTransitionEvent = false }

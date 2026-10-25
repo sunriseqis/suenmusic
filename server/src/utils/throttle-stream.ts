@@ -18,13 +18,24 @@ import type { TransformCallback } from 'node:stream';
 export function createThrottle(
   bytesPerSec: number,
   /** 每收到一块数据回调一次（用于"空闲守护"重置计时） */
-  onActivity?: () => void
+  onActivity?: () => void,
+  /**
+   * 起始**字节级突发额度**（默认 2MB，不限速直接放行）。
+   *
+   * 为什么需要：原实现只有 1.5 秒时间窗突发，按音频码率（~33KB/s）算只放行约 50KB。
+   * iOS 的 AVPlayer 在 EvaluatingBufferingRate 阶段拿到这种涓流会**一直不开始播放**
+   * （实测 8 秒 status 仍 unknown、无错误），而同一文件本地却能瞬间起播。
+   * 放行首 2MB 后 AVPlayer 能立刻起播，之后仍按码率节流 —— 上行保护目标不变。
+   */
+  burstBytes: number = 2 * 1024 * 1024
 ): Transform {
   const BURST_SEC = 1.5;
   // 初始许可时刻回拨一个突发窗口：让开头的 1.5s 数据量可以瞬间发出
   // （否则第一块就要等满自己的发送时长，起播延迟 +1s）
   let next = Date.now() - BURST_SEC * 1000;
   let timer: NodeJS.Timeout | null = null;
+  /// 已发出的字节数（用于起始突发额度）
+  let sentBytes = 0;
 
   return new Transform({
     transform(chunk: Buffer, _enc: string, cb: TransformCallback) {
@@ -37,8 +48,10 @@ export function createThrottle(
       next = Math.max(next, now - BURST_SEC * 1000);
       const end = next + (chunk.length / bytesPerSec) * 1000;
       next = end;
+      sentBytes += chunk.length;
 
-      if (end <= now) {
+      // 起始突发额度内直接放行（见参数注释）
+      if (sentBytes <= burstBytes || end <= now) {
         cb(null, chunk);
         return;
       }
