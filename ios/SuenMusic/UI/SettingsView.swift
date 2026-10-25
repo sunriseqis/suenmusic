@@ -357,10 +357,7 @@ struct SettingsView: View {
             if reply.available, let latest = reply.latest {
                 updState = "new=" + latest.versionName
                 let url = APIClient.shared.updateDownloadURL(path: reply.downloadPath, token: reply.downloadToken)
-                if let target = URL(string: url) {
-                    openURL(target)
-                    showToast("新版本 " + latest.versionName + "：已交给浏览器下载，装好后用侧载工具签名安装")
-                }
+                openForInstall(url, versionName: latest.versionName)
             } else {
                 updState = "latest"
                 showToast("已是最新版本")
@@ -368,6 +365,26 @@ struct SettingsView: View {
         } catch {
             updState = ""
             showToast((error as? ApiError)?.message ?? "检查更新失败")
+        }
+    }
+
+    /// 更新投递阶梯（对齐旧仓 §5.3）：
+    /// ① altstore://install?url=… ② sidestore://install?url=… ③ 都没有 → 交给 Safari 下载。
+    /// 前两步依赖 Info.plist 的 LSApplicationQueriesSchemes（已登记）；
+    /// 走 Safari 不是失败，是免费签名下的正常路径。
+    private func openForInstall(_ urlString: String, versionName: String) {
+        let encoded = urlString.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? urlString
+        for scheme in ["altstore", "sidestore"] {
+            if let probe = URL(string: "\(scheme)://install?url=\(encoded)"),
+               UIApplication.shared.canOpenURL(probe) {
+                UIApplication.shared.open(probe)
+                showToast("新版本 " + versionName + "：已交给 " + scheme + " 安装")
+                return
+            }
+        }
+        if let target = URL(string: urlString) {
+            openURL(target)
+            showToast("新版本 " + versionName + "：已交给浏览器下载（未装侧载工具）")
         }
     }
 

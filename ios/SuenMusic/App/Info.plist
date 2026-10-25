@@ -41,6 +41,14 @@
 		</dict>
 	</array>
 
+	<!-- 更新通道（旧仓 §九-6）：不登记这两个 scheme，canOpenURL 恒 false，
+	     更新会被静默降级成「用 Safari 打开」，用户拿不到重签工具的直接安装入口 -->
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>altstore</string>
+		<string>sidestore</string>
+	</array>
+
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
