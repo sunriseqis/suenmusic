@@ -110,6 +110,9 @@ final class AudioEngine: NSObject {
     private static let playReadyMaxTries = 30
     private var playAttempts = 0
     private var playRetries = 0
+    /// 起播后进度持续为 0 的 tick 计数（2s/tick）与重载次数
+    private var zeroProgressTicks = 0
+    private var zeroProgressReloads = 0
 
     init(events: AudioEngineEvents) throws {
         self.events = events
@@ -645,6 +648,21 @@ final class AudioEngine: NSObject {
         let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
         let errText = item?.error.map { "\($0)" } ?? "-"
         NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms rate=\(player.rate) reason=\(reason) err=\(errText) intent=\(playingIntent)")
+
+        // 兜底（2026-10-25）：有音源却起不来 —— tcs 已是 playing、item 未 failed、但 5s 内进度一直是 0。
+        // 实测 qq_002TTnfc13TkgO 就是这种：服务端 206 正常、ttfb 2.25s，AVFoundation 却停在 unknown。
+        // 处理：重载当前曲一次（新建 item + 重新 play）；再不行交给上层失败语义。
+        if playingIntent, player.timeControlStatus == .playing, positionMs == 0, item?.status != .failed {
+            zeroProgressTicks += 1
+            if zeroProgressTicks == 3, zeroProgressReloads < 1 {
+                zeroProgressReloads += 1
+                NSLog("[Start] 起播 6s 仍无进度，重载当前曲一次")
+                reloadCurrent(index: currentIndex, positionMs: 0, autoplay: true)
+            }
+        } else if positionMs > 0 {
+            zeroProgressTicks = 0
+            zeroProgressReloads = 0
+        }
     }
     /// 队列前瞻：保证"当前项之后"始终还有 LOOKAHEAD 首待播（惰性装载的核心）
     private static let lookahead = 2
