@@ -21,6 +21,7 @@ import { getLibraryTracks, saveLibraryTracks } from '../db/repo/library.ts';
 import { getRejectionStats, listActiveRejections } from '../db/repo/ai-rejections.ts';
 import { heuristicTag } from './ai-tags.ts';
 import { coolingArtists, pickTopArtistForToday, topArtists } from './artist-stats.ts';
+import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track, Album } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
 
@@ -509,6 +510,18 @@ export async function buildCandidatePool(
 
   const push = (track: Track, source: CandidateSource): boolean => {
     if (isJunk(track)) {
+      droppedRef.n += 1;
+      return false;
+    }
+    /**
+     * 翻奏 / 钢琴 / 纯音乐版本**不进候选池**（统一判定见 services/content-filter.ts）。
+     *
+     * 实测这道口子漏进来的代价很高：池子 2846 条里 100+ 条是钢琴集，而 AI 把
+     * 「钢琴 + 流行」当同质好料反复挑，导致某天 40 首里 6 首是纯音乐。
+     * 放在 push 里 = 所有来源（相似歌手 / 网友歌单 / 本尊老歌 / 巅峰榜）一次覆盖，
+     * 不需要在每个来源各写一遍。
+     */
+    if (isCoverOrInstrumental(track)) {
       droppedRef.n += 1;
       return false;
     }

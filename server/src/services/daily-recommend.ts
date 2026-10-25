@@ -21,6 +21,7 @@ import { getSongDetail } from '../sources/qq/home.ts';
 import { getDislikeSets } from '../db/repo/library.ts';
 import { runDailyFlow, LAND_MIN } from './ai-flow.ts';
 import { isJunk } from './ai-recall.ts';
+import { isCoverOrInstrumental } from './content-filter.ts';
 import { getActiveUserIds } from './library-topup.ts';
 import { cleanAiText } from '../utils/text.ts';
 import { todayStr } from '../utils/dates.ts';
@@ -225,12 +226,15 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
         }
 
         // 黑名单与非歌曲垃圾过滤（自然缩水，不喜欢/非歌曲不重排不硬凑，杜绝短音频与吟唱）
+        // 翻奏 / 钢琴 / 纯音乐同样在这里兜一层：历史歌单（以及本轮改动之前生成的
+        // payload）里可能已经存着这类曲目，读取路径直接不返回它们，不必等下一轮生成。
         const dislikes = getDislikeSets(userId);
         const filteredTracks = tracks.filter(
           t =>
             !dislikes.trackIds.has(t.id) &&
             !(t.ar ?? []).some(a => dislikes.artistMids.has(a.mid ?? '')) &&
-            !isJunk(t)
+            !isJunk(t) &&
+            !isCoverOrInstrumental(t)
         );
 
         // 挂载推荐理由（自动清洗 Markdown 符号）

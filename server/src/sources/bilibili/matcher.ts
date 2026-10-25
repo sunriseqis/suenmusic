@@ -39,6 +39,12 @@ const NEGATIVE_KEYWORDS = [
   '伴奏',
   '纯伴奏',
   '伴奏带',
+  // 纯音乐 / 无人声版本：与 services/content-filter.ts 的曲目侧判定同口径，
+  // 免得这边把一首"钢琴纯音乐"视频当原曲匹配回来（标题里常有 instrumental / 纯音乐）。
+  '纯音乐',
+  '純音樂',
+  'instrumental',
+  '无人声',
   '吉他弹唱',
   '钢琴版',
   '鼓谱',

@@ -20,6 +20,7 @@ import { fetchSearchSlice } from '../sources/qq/search.ts';
 import type { Track } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
 import { invalidateLocalCatalogCache } from './local-catalog.ts';
+import { isCoverOrInstrumental } from './content-filter.ts';
 
 const log = createLogger('playlist-pool');
 
@@ -297,7 +298,18 @@ async function ingestPlaylist(dissid: string, keyword: string): Promise<boolean>
   if (!detail || detail.tracks.length === 0) return false;
 
   const db = getDatabase();
-  const items = detail.tracks.slice(0, MAX_ITEMS_PER_PLAYLIST);
+  const allItems = detail.tracks.slice(0, MAX_ITEMS_PER_PLAYLIST);
+  /**
+   * 翻奏 / 钢琴 / 纯音乐版本**不进候选池**（判定见 services/content-filter.ts）。
+   *
+   * 只在写 `playlist_pool_items` 时排除：曲目照样 upsert 进 `tracks`（否则
+   * 播放/解析会缺数据），但每日推荐的候选集合只从池子里取，于是它就再也不会
+   * 被选中。网友歌单里这类钢琴集很多，不拦的话 AI 会当成同质好料反复挑。
+   */
+  const items = allItems.filter(t => !isCoverOrInstrumental(t));
+  if (items.length < allItems.length) {
+    log.info(`跳过翻奏/纯音乐条目 ${allItems.length - items.length} 首（歌单 ${dissid}）`);
+  }
   // 记"有多少首是库里没有的"：全都有 = 这个歌单已经没新东西了
   let trackNew = 0;
   for (const t of items) {
@@ -332,8 +344,8 @@ async function ingestPlaylist(dissid: string, keyword: string): Promise<boolean>
     return false;
   }
 
-  // 曲目也写进曲目表：后面播放/解析需要它们在场
-  upsertTracks(items);
+  // 曲目也写进曲目表：后面播放/解析需要它们在场（翻奏条目同样保留，只是不进池）
+  upsertTracks(allItems);
   invalidateLocalCatalogCache();
 
   // 一首新的都没有 = 这个歌单对我们已经没价值，直接标记消耗，别占池子
