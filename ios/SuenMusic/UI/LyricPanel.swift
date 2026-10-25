@@ -43,10 +43,13 @@ struct LyricPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // 头部（收起键）**跟着面板位移一起走**，不加任何延迟淡入：
+            // 上一版把 opacity 套在整块 VStack 上，等于给按钮也加了延迟 → 观感是「面板先跑、按钮在追」。
             header
+            // 只有正文延迟淡入（避免列表在面板还没滑到位时先硬弹）
             content
+                .opacity(contentShown ? 1 : 0)
         }
-        .opacity(contentShown ? 1 : 0)
         // 全屏 = 占满父容器给的安全区（调用方是播放页的全屏 GeometryReader）：
         // 顶部/底部避让由容器承担，这里只补自己的呼吸留白，不再自己 ignoresSafeArea，
         // 否则会把内容顶到刘海/指示条区域之外。
@@ -57,7 +60,8 @@ struct LyricPanel: View {
         .background(p.bg.ignoresSafeArea())
         .onAppear {
             // 滑入 200ms；正文延后 120ms 淡入（100ms easeOut），不抢面板的位移
-            withAnimation(.easeOut(duration: Motion.fast).delay(Motion.standard * 0.6)) {
+            // 位移 200ms；正文再滞后 80ms（100ms 淡入）。延迟过大就会觉得「字在追面板」
+            withAnimation(.easeOut(duration: Motion.fast).delay(Motion.standard * 0.4)) {
                 contentShown = true
             }
         }

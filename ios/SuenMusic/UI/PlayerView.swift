@@ -527,7 +527,11 @@ struct PlayerView: View {
         switch sheet {
         case .lyrics:
             LyricPanel(title: track?.name ?? "", onClose: { closeSheet() })
-                .transition(.move(edge: .bottom))
+                // 进入：整块上滑；退出：上滑 + 淡出（正文与面板同时走，不会出现「字比面板慢」）
+                .transition(.asymmetric(
+                    insertion: .move(edge: .bottom),
+                    removal: .move(edge: .bottom).combined(with: .opacity)
+                ))
                 // 歌词页是整页浮层：滑入时要盖住下面的播放页主体（含 peek 歌词）
                 .zIndex(2)
         case .queue:
