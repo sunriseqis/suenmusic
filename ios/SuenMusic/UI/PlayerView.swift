@@ -548,9 +548,8 @@ struct PlayerView: View {
                 // 歌词页是整页浮层：滑入时要盖住下面的播放页主体（含 peek 歌词）
                 .zIndex(2)
         case .queue:
+            // 转场交给 QueueSheet 内部：遮罩淡出、抽屉位移（整块位移会让遮罩慢一拍）
             QueueSheet(onClose: { closeSheet() })
-                // 只位移，不加 opacity：长列表叠加淡出会掉帧（用户实测「展开收起异常卡顿」）
-                .transition(.move(edge: .bottom))
         case .more:
             MoreMenu(sourceLabel: sourceText, artistName: firstArtistName,
                      albumName: track?.al.name ?? "",

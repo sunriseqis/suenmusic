@@ -32,13 +32,18 @@ struct QueueSheet: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
+                // 遮罩只淡入淡出、抽屉只位移 —— 两者必须分开。
+                // 之前整个 sheet 套 `.move(edge:.bottom)`，遮罩跟着往下滑，
+                // 观感就是「列表收走了，遮罩慢一拍」（用户实测）。
                 p.scrim
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onClose)
+                    .transition(.opacity)
 
                 drawer
                     .frame(height: proxy.size.height * Self.heightRatio)
+                    .transition(.move(edge: .bottom))
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
