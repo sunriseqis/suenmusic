@@ -22,12 +22,20 @@ export struct QueueView {
   @StorageLink(K_QUEUE_VERSION) @Watch('onQueueChanged') queueVersion: number = 0;
   @StorageLink(K_INDEX) currentIndex: number = -1;
   @State items: Track[] = [];
+  /** 列表滚动控制器：呼出时把当前曲滚到**居中**（iOS 端同处理；hw 原先打开停在第一位） */
+  private scroller: Scroller = new Scroller();
   /** 队列 sheet 形态（T10 批次 F）：显示右上关闭钮（web QueuePanel head-close） */
   showClose: boolean = false;
   onClose: () => void = () => {};
 
   aboutToAppear(): void {
     this.refresh();
+    // 呼出即把当前曲滚到中间：必须等 List 完成首帧布局，否则 scrollToIndex 打空。
+    setTimeout(() => {
+      if (this.currentIndex >= 0 && this.currentIndex < this.items.length) {
+        this.scroller.scrollToIndex(this.currentIndex, true, ScrollAlign.CENTER);
+      }
+    }, 60);
   }
 
   onQueueChanged(): void {
@@ -83,7 +91,7 @@ export struct QueueView {
           subtitle: Copy.emptyQueueSub
         })
       } else {
-        List({ space: 0 }) {
+        List({ space: 0, scroller: this.scroller }) {
           ForEach(this.items, (item: Track, i: number) => {
             ListItem() {
               Row({ space: Dim.s2 }) {
