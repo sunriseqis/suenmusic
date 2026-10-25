@@ -12,6 +12,8 @@ enum WebIconName {
     case chevronDown, chevronLeft, chevronRight, chevronUp, plus
     case modeOrder, modeLoop, modeRepeatOne, modeShuffle, modeShuffleOnce
     case pin, dislikeSong, dislikeArtist
+    /// 斜杠爱心：播放页推荐理由卡右上角的「不喜欢」（用户 2026-10-25 指定）
+    case heartSlash, heartSlashFilled
 }
 
 extension WebIconName {
@@ -39,6 +41,8 @@ extension WebIconName {
         case .modeShuffle: return "shuffle"
         case .modeShuffleOnce: return "shuffle"
         case .pin: return "pin"
+        case .heartSlash: return "heart.slash"
+        case .heartSlashFilled: return "heart.slash.fill"
         case .dislikeSong: return "hand.thumbsdown"
         case .dislikeArtist: return "hand.thumbsdown.fill"
         }

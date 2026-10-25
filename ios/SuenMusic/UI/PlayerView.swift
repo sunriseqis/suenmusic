@@ -15,12 +15,15 @@ struct GlyphKey: View {
     private let name: WebIconName
     private let box: CGFloat
     private let color: Color
+    /// 显式字形尺寸（nil = 按盒尺查表）。推荐理由卡的不喜欢键要更小（12pt），所以允许覆盖。
+    private let glyphOverride: CGFloat?
     private let action: () -> Void
 
-    init(_ name: WebIconName, box: CGFloat = Dim.touchMin, color: Color,
-         action: @escaping () -> Void) {
+    init(_ name: WebIconName, box: CGFloat = Dim.touchMin, glyph: CGFloat? = nil,
+         color: Color, action: @escaping () -> Void) {
         self.name = name
         self.box = box
+        self.glyphOverride = glyph
         self.color = color
         self.action = action
     }
@@ -35,6 +38,7 @@ struct GlyphKey: View {
 
     /// 与 WebButton 键壳同表：≤28 → 15，≤36 → 18，其余 → 21
     private var glyph: CGFloat {
+        if let glyphOverride { return glyphOverride }
         if box <= Dim.btnSm { return Dim.iconSm }
         if box <= Dim.btnMd { return Dim.icon18 }
         return Dim.iconLg
@@ -378,7 +382,8 @@ struct PlayerView: View {
                     .font(.system(size: Dim.fsCaption, weight: .medium))
                     .foregroundStyle(p.text2)
                 Spacer(minLength: 0)
-                GlyphKey(.dislikeSong, box: Dim.btnMd,
+                // 用户 2026-10-25：图标换成「斜杠爱心」，并比原来小一档（hw 这里是 36 盒 + 12pt 字形）
+                GlyphKey(.heartSlash, box: Dim.btnMd, glyph: Dim.icon12,
                          color: sheet == .dislike ? p.danger : p.text2) {
                     openSheet(sheet == .dislike ? .none : .dislike)
                 }
