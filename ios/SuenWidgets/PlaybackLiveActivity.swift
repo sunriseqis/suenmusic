@@ -80,14 +80,18 @@ struct PlaybackLiveActivityWidget: Widget {
                 // 用户 2026-10-25 定的形态：**左侧封面独占一列，右侧四行**
                 //   1 歌名  2 歌手·专辑  3 进度  4 歌词
                 // 之前把歌词/进度放在 .bottom 区域会和封面抢横向空间，歌词也不居中 → 重排。
-                DynamicIslandExpandedRegion(.leading) {
-                    PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.touchMin)   // 44：左侧封面独占一列
-                }
-                DynamicIslandExpandedRegion(.trailing) {
-                    PlaybackIslandRows(state: context.state)
-                }
+                // 形态：**左侧封面独占一列，右侧四行**（歌名 / 歌手·专辑 / 进度 / 歌词）。
+                // ⚠️ 不能拆到 .leading / .trailing：这两个区域的宽高由系统决定（leading 很窄、trailing 很高），
+                //    实测 44pt 封面被压成空白、四行被拉成大间距。整块放进 .bottom 自己排版才可控。
                 DynamicIslandExpandedRegion(.bottom) {
-                    PlaybackControls(playing: context.state.playing, compact: true)
+                    VStack(spacing: Dim.s2) {
+                        HStack(alignment: .top, spacing: Dim.s2) {
+                            PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.btnMd)
+                            PlaybackIslandRows(state: context.state)
+                        }
+                        PlaybackControls(playing: context.state.playing, compact: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } compactLeading: {
                 // 单击岛 → 打开 App 并落到播放页（系统规定 tap 只能打开 App，用 URL 指定落地页）
@@ -123,7 +127,8 @@ private struct PlaybackIslandRows: View {
     private var p: Palette { Palette(scheme) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Dim.s0) {
+        // spacing 1：四行必须紧贴，不能被系统区域拉成大间距
+        VStack(alignment: .leading, spacing: 1) {
             Text(state.title.isEmpty ? "暂无歌曲播放" : state.title)
                 .font(.system(size: Dim.fsMinor, weight: .semibold))
                 .foregroundStyle(p.text1)
