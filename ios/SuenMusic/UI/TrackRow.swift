@@ -79,7 +79,10 @@ struct TrackRow: View {
                 .offset(x: swipeX)
         }
         .frame(height: Dim.rowHeight)
-        .clipShape(RoundedRectangle(cornerRadius: Dim.radiusMd))
+        // hw 的行是**直角**：只有底沿一条发丝线（TrackItem.ets:260-271 的 border 只设 left/bottom，
+        // 外层只 clip(true)，没有 borderRadius）；圆角只属于右滑动作区。
+        // 之前这里套了 radiusMd，列表看起来就是「每行一个圆角卡片」（用户实测 web/hw 都没有）。
+        .clipped()
         .contentShape(Rectangle())
         .onTapGesture { handleTap() }
         // 右滑收藏改由调用方的 `List` + `.swipeActions` 提供（方向仲裁由系统做）。
