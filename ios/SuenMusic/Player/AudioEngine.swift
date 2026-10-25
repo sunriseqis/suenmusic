@@ -25,6 +25,11 @@ enum EngineThread {
     static func onMain(_ body: @escaping () -> Void) {
         if Thread.isMainThread { body() } else { DispatchQueue.main.async(execute: body) }
     }
+
+    /// 延迟在主线程执行（起播等 ready 的轮询、兜底重试用）
+    static func after(_ seconds: Double, _ body: @escaping () -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: body)
+    }
 }
 
 
@@ -101,6 +106,10 @@ final class AudioEngine: NSObject {
     /// 只有 Xcode、没有真机的阶段，这行日志是唯一能自证"数据源已就绪"的手段。
     /// 真机验收通过后可以关掉。
     private var nowPlayingDebugLog = true
+    /// 等 item ready 的最多轮数（100ms 一轮 → 3s）
+    private static let playReadyMaxTries = 30
+    private var playAttempts = 0
+    private var playRetries = 0
 
     init(events: AudioEngineEvents) throws {
         self.events = events
@@ -596,10 +605,47 @@ final class AudioEngine: NSObject {
     ///
     /// 不等 `timeControlStatus` 走完 waiting → playing 再报 —— 否则从用户按下播放
     /// 到按钮变样之间会有一段空窗（网络慢时尤其明显）。
+    /**
+     * 起播。
+     *
+     * ⚠️ 2026-10-25 真机 bug：点的那一首永远不出声，跳到下一首才响。
+     * 根因：rebuildQueue 在 removeAllItems() 之后立刻 insert + seek + play，而
+     * automaticallyWaitsToMinimizeStalling = false 时，对**尚未 ready** 的 item 调 play
+     * 会长期停在 waitingToPlayAtSpecifiedRate（不报错、不出声）；跳到下一首等于新建
+     * item 再 play 一次，所以能响。
+     *
+     * 修法：等 currentItem.status == .readyToPlay 再 play（最多 3s）；
+     * 起播后 1.2s 仍在 waiting 就重试一次 play（兜底）。
+     */
     private func startPlayback() {
-        // playImmediately 跳过 buffering-rate 评估，避免起播前长时间 waiting
-        player.playImmediately(atRate: 1.0)
-        reportPlaying(true)
+        playAttempts = 0
+        playRetries = 0
+        playWhenReady()
+    }
+
+    private func playWhenReady() {
+        guard playingIntent else { return }
+        playAttempts += 1
+        let item = player.currentItem
+        let ready = item?.status == .readyToPlay
+
+        if ready || playAttempts > Self.playReadyMaxTries {
+            player.playImmediately(atRate: 1.0)
+            reportPlaying(true)
+            // 兜底：1.2s 后仍在 waiting 就再推一次（最多 2 次，不无限重试）
+            EngineThread.after(1.2) { [weak self] in
+                guard let self, self.playingIntent else { return }
+                if self.player.timeControlStatus != .playing, self.playRetries < 2 {
+                    self.playRetries += 1
+                    NSLog("[Start] 起播后仍在 waiting（第 %d 次重试）", self.playRetries)
+                    self.player.playImmediately(atRate: 1.0)
+                }
+            }
+            return
+        }
+        EngineThread.after(0.1) { [weak self] in
+            self?.playWhenReady()
+        }
     }
 
     /// 当前条目确实挂了就上报（每个条目只报一次，Web 端负责解析重试）。
