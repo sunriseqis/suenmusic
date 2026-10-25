@@ -86,21 +86,21 @@ struct PlaybackLiveActivityWidget: Widget {
                     // hw 2×4 卡片的三栏结构（封面列 | 信息列 | 运输列）：
                     // 岛内空间小，纵向复用比「三键单独一行」更省高度、信息也更密。
                     HStack(alignment: .center, spacing: Dim.s2) {
-                        PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.coverSm, dark: context.state.dark)
+                        PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.coverSm, dark: true)
                         PlaybackIslandRows(state: context.state)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                        PlaybackIslandTransport(playing: context.state.playing, dark: context.state.dark)
+                        PlaybackIslandTransport(playing: context.state.playing, dark: true)
                     }
                     .frame(maxWidth: .infinity)
                 }
             } compactLeading: {
                 // 单击岛 → 打开 App 并落到播放页（系统规定 tap 只能打开 App，用 URL 指定落地页）
-                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: context.state.dark)
+                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: true)
                     .widgetURL(URL(string: "suenmusic://player"))
             } compactTrailing: {
-                PlaybackIslandPlayPause(playing: context.state.playing, dark: context.state.dark)
+                PlaybackIslandPlayPause(playing: context.state.playing, dark: true)
             } minimal: {
-                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: context.state.dark)
+                PlaybackArtwork(jpeg: context.state.coverJPEG, size: Dim.iconSm, dark: true)
                     .widgetURL(URL(string: "suenmusic://player"))
             }
             // keylineTint 挂在 DynamicIsland 构造器上、拿不到环境 → 只能用 token 本身
@@ -122,8 +122,10 @@ struct SuenWidgetsBundle: WidgetBundle {
 /// 灵动岛 expanded 右侧四行：歌名 / 歌手·专辑 / 进度 / 歌词（用户 2026-10-25 定的形态）
 private struct PlaybackIslandRows: View {
     let state: PlaybackActivityAttributes.ContentState
+    /// 恒为 true：灵动岛背景由系统绘制（恒黑），只能用深色配色，否则黑底深字不可读
+    var dark: Bool = true
 
-    private var p: Palette { Palette(dark: state.dark) }
+    private var p: Palette { Palette(dark: true) }
 
     var body: some View {
         // spacing 1：四行必须紧贴，不能被系统区域拉成大间距
