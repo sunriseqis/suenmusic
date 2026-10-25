@@ -113,54 +113,55 @@ const PASSTHROUGH_HEADERS = [
 ];
 
 /**
- * 从文件头字节认容器（与 iOS 侧 `AudioCacheStore.sniffContentType` 同口径）。
+ * 从文件头字节认容器（与 iOS 侧 AudioCacheStore.sniffContentType 同口径）。
  *
- * 为什么需要：上游（B 站）常把音频声明成 `application/octet-stream`，
- * 浏览器/鸿蒙播放器会自己嗅探，**iOS 的 AVPlayer 不会** —— 它会因为 MIME 不认识而
- * 永远不进入 readyToPlay（表现为「点了不出声」）。服务端这里补一次嗅探，对所有客户端都对。
+ * 为什么服务端必须做这件事：B 站上游把音频声明成 application/octet-stream。
+ * 浏览器与鸿蒙播放器会自己嗅探容器，**iOS 的 AVPlayer 不会** ——
+ * 它按 MIME 判定格式，遇到 octet-stream 直接报 -11828「不支持此媒体的格式」，
+ * 表现为「点了不出声」。mac 上实测：同一 URL 强制 MIME=audio/mp4 后 isPlayable=true。
  */
 function sniffAudioType(head: Buffer | null): string | null {
   if (!head || head.length < 12) return null;
   const at = (offset: number, tag: string): boolean =>
     head.length >= offset + tag.length &&
     head.subarray(offset, offset + tag.length).toString('latin1') === tag;
-  if (at(4, 'ftyp')) return 'audio/mp4';       // MP4/CMAF（B 站 m4s 分片同此）
+  if (at(4, 'ftyp')) return 'audio/mp4';
   if (at(0, 'ID3')) return 'audio/mpeg';
   if (at(0, 'fLaC')) return 'audio/flac';
   if (at(0, 'OggS')) return 'audio/ogg';
   if (at(0, 'RIFF') && at(8, 'WAVE')) return 'audio/wav';
-  // 裸 MPEG 帧同步
   if (head[0] === 0xff && (head[1] & 0xe0) === 0xe0) return 'audio/mpeg';
   return null;
 }
 
+/** sourceUrl → 推断出的 audio MIME（10 分钟内复用，避免每个请求都探一次） */
+const sniffedTypeCache = new Map<string, { type: string; at: number }>();
+
 /**
- * 取出流的第一个 chunk（用于嗅探容器），**不销毁流**。
+ * 上游只声明 octet-stream 时，**另发一个小请求**（1KB）取首块来推断真实容器。
  *
- * ⚠️ 不能用 `for await ... return`：从异步迭代器提前 return 会调用 iterator.return()，
- *   把 Node 流 destroy 掉，后续数据全丢（实测响应被截成 ~16KB）。
- *   这里用 `read()` / 'readable' 事件，取完立刻 pause，等下游接上再 resume。
+ * 不能就地嗅响应体：AVPlayer 首次探测只发 Range: bytes=0-1，上游只回 2 字节，
+ * 凑不够 12 字节认不出 ftyp。
  */
-async function peekFirstChunk(stream: Readable): Promise<Buffer | null> {
-  const immediate = stream.read() as Buffer | null;
-  if (immediate) return immediate;
-  return await new Promise<Buffer | null>((resolve) => {
-    const done = (value: Buffer | null) => {
-      stream.removeListener('readable', onReadable);
-      stream.removeListener('end', onEnd);
-      resolve(value);
-    };
-    const onReadable = () => {
-      const chunk = stream.read() as Buffer | null;
-      if (chunk) {
-        stream.pause();
-        done(chunk);
-      }
-    };
-    const onEnd = () => done(null);
-    stream.once('readable', onReadable);
-    stream.once('end', onEnd);
-  });
+async function sniffUpstreamType(sourceUrl: string, upstream: Response): Promise<string | null> {
+  const declared = (upstream.headers.get('content-type') ?? '').toLowerCase();
+  if (declared && !declared.includes('octet-stream')) return null;
+  const cached = sniffedTypeCache.get(sourceUrl);
+  if (cached && Date.now() - cached.at < 10 * 60_000) return cached.type;
+  try {
+    const probe = await fetchAudioStream(sourceUrl, 'bytes=0-1023', { source: 'bilibili' });
+    if (!probe.ok && probe.status !== 206) {
+      await probe.body?.cancel();
+      return null;
+    }
+    const head = Buffer.from(await probe.arrayBuffer());
+    const type = sniffAudioType(head);
+    log.info(`MIME 嗅探 ${sourceUrl.slice(-24)} → ${type ?? 'null'}（首块 ${head.length} 字节，前8=${head.subarray(0, 8).toString('hex')}）`);
+    if (type) sniffedTypeCache.set(sourceUrl, { type, at: Date.now() });
+    return type;
+  } catch {
+    return null;
+  }
 }
 function authorize(req: any, trackId: string): string {
   const query = req.query as Record<string, unknown>;
@@ -246,28 +247,7 @@ async function forward(
     return undefined;
   }
 
-  const rawStream = Readable.fromWeb(upstream.body as any);
-  // content-type 缺失或上游只给 octet-stream 时，嗅探首个 chunk 补成真正的音频类型
-  const declaredType = (upstream.headers.get('content-type') ?? '').toLowerCase();
-  let bodyStream: Readable = rawStream;
-  if (declaredType === '' || declaredType.includes('octet-stream')) {
-    const first = await peekFirstChunk(rawStream);
-    const sniffed = sniffAudioType(first);
-    if (sniffed) {
-      reply.header('content-type', sniffed);
-      log.info(`stream: 上游 ${declaredType || '(空)'} → 嗅探为 ${sniffed}`);
-    }
-    if (first) {
-      bodyStream = Readable.from(
-        (async function* () {
-          yield first;
-          rawStream.resume();
-          for await (const chunk of rawStream) yield chunk;
-        })()
-      );
-    }
-  }
-  const stream = bodyStream;
+  const stream = Readable.fromWeb(upstream.body as any);
 
   /**
    * 空闲守护：上游超过 STREAM_IDLE_MS 没有任何字节就放弃。
@@ -352,10 +332,13 @@ export function registerStreamRoutes(app: FastifyInstance): void {
 
     const row = getSource(trackId);
     let upstream: Response | null = null;
+    /// 本次取流的真实源地址（供 MIME 嗅探用；upstream 的 URL 拿不到原始字符串）
+    let sniffSourceUrl: string | null = null;
     /** 缓存里的地址已被上游拒绝，需要强制重解析 */
     let urlExpired = false;
 
     if (row?.ok && row.audioUrl) {
+      sniffSourceUrl = row.audioUrl;
       try {
         upstream = await fetchAudioStream(row.audioUrl, upstreamRange, { source: row.source });
       } catch (err) {
@@ -432,6 +415,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
         return;
       }
 
+      sniffSourceUrl = outcome.sourceUrl;
       upstream = await fetchAudioStream(outcome.sourceUrl, upstreamRange, { source: outcome.source });
     }
 
@@ -471,7 +455,11 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     const metadataMs = getTrack(trackId)?.dt ?? 0;
     const anchorSec = getAnchor(trackId)?.durationSec ?? 0;
     const sourceMs = anchorSec > 0 ? Math.round(anchorSec * 1000) : metadataMs;
-    return forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs);
+    // MIME 修正：AVPlayer 认 MIME，上游给 octet-stream 时必须改写成真实音频类型（见 sniffAudioType 注释）
+    const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream) : null;
+    const body = await forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs);
+    if (sniffedType) reply.header('content-type', sniffedType);
+    return body;
   };
 
   // fastify 的 exposeHeadRoutes 会给 GET 自动挂 HEAD

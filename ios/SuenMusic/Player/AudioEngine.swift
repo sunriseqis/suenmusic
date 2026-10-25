@@ -619,6 +619,9 @@ final class AudioEngine: NSObject {
      * 起播后 1.2s 仍在 waiting 就重试一次 play（兜底）。
      */
     private func startPlayback() {
+        // autoplay 语义 = 用户就是要它现在播：把意图立起来，别让 playWhenReady 的 guard 挡掉
+        // （2026-10-25 实测：rebuildQueue 结束时 intent=false，起播被自己的 guard 挡住 → 永远不出声）
+        playingIntent = true
         playAttempts = 0
         playRetries = 0
         playWhenReady()
@@ -664,6 +667,14 @@ final class AudioEngine: NSObject {
         if ready || playAttempts > Self.playReadyMaxTries {
             player.playImmediately(atRate: 1.0)
             reportPlaying(true)
+            let st = player.currentItem.map { Int($0.status.rawValue) } ?? -1
+            NSLog("[Start] play 后立即 tcs=\(player.timeControlStatus.rawValue) item=\(st)")
+            EngineThread.after(1.5) { [weak self] in
+                guard let self else { return }
+                let s2 = self.player.currentItem.map { Int($0.status.rawValue) } ?? -1
+                let e2 = self.player.currentItem?.error.map { "\($0)" } ?? "-"
+                NSLog("[Start] play 后 1.5s tcs=\(self.player.timeControlStatus.rawValue) item=\(s2) reason=\(self.player.reasonForWaitingToPlay?.rawValue ?? "-") err=\(e2)")
+            }
             // 兜底：1.2s 后仍在 waiting 就再推一次（最多 2 次，不无限重试）
             EngineThread.after(1.2) { [weak self] in
                 guard let self, self.playingIntent else { return }
@@ -760,17 +771,16 @@ final class AudioEngine: NSObject {
 
     /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
     private func streamUrl(_ track: SuenTrack) -> String {
-        // 起播优先（2026-10-25 修「像缓存完才起播」）：**整首已在磁盘**时才走本地代理；
-        // 否则直连服务端 —— 实测服务端首字节 ~0.34s，而代理要先等上游响应头（旧值 12s）+ 嗅探首字节（3s），
-        // 那条串行链把起播拖成了"等缓存"。
+        // 2026-10-25 定案：**直连服务端**。
+        //   之前踩的坑是上游 B 站把音频声明成 octet-stream，而 iOS AVPlayer 认 MIME、不自己嗅探，
+        //   直连就报 -11828「不支持此媒体的格式」。现在服务端 /api/stream 已按首块嗅探回 audio/mp4，
+        //   直连即可（mac 上实测 AVURLAsset isPlayable=true / 268.5s）。
+        //   本地代理仅当整首已落盘时用于省流量（缓存命中路径另测）。
         if AudioCacheStore.shared.isComplete(track.id),
            let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
-            NSLog("[Start] %@ 命中本地缓存 → 走代理", track.id)
             return local
         }
-        // 直连的同时后台预热缓存（不阻塞起播；下次播放/断网就靠这份）
         _ = LocalStreamProxy.shared.entry(trackId: track.id)
-        NSLog("[Start] %@ 直连服务端（后台预热缓存）", track.id)
         return directStreamUrl(track.id)
     }
 
