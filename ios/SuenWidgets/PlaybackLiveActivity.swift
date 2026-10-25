@@ -28,23 +28,31 @@ struct PlaybackLockScreenView: View {
                     .font(.system(size: Dim.fsSub, weight: .semibold))
                     .foregroundStyle(p.text1)
                     .lineLimit(1)
-                Text(state.artist)
+                // 有歌词就把「歌手」这一行换成**当前歌词行**（滚到哪唱到哪），没有则回退歌手名。
+                // 歌词由主 App 按播放位置算好随 ContentState 推过来 —— 渲染进程不能联网、也不该算时间轴。
+                Text(state.lyricLine.isEmpty ? state.artist : state.lyricLine)
                     .font(.system(size: Dim.fsMinor))
-                    .foregroundStyle(p.text2)
-                    .lineLimit(1)
+                    .foregroundStyle(state.lyricLine.isEmpty ? p.text2 : p.accent)
+                    .lineLimit(2)
                 progress
             }
 
             HStack(spacing: Dim.s3) {
-                Image(systemName: "backward.fill")
-                    .font(.system(size: Dim.icon14))
-                    .foregroundStyle(p.text1)
-                Image(systemName: state.playing ? "pause.fill" : "play.fill")
-                    .font(.system(size: Dim.icon16))
-                    .foregroundStyle(p.accent)
-                Image(systemName: "forward.fill")
-                    .font(.system(size: Dim.icon14))
-                    .foregroundStyle(p.text1)
+                Button(intent: PrevTrackIntent()) {
+                    Image(systemName: "backward.fill")
+                        .font(.system(size: Dim.icon14))
+                        .foregroundStyle(p.text1)
+                }.buttonStyle(.plain)
+                Button(intent: PlayPauseIntent()) {
+                    Image(systemName: state.playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: Dim.icon16))
+                        .foregroundStyle(p.accent)
+                }.buttonStyle(.plain)
+                Button(intent: NextTrackIntent()) {
+                    Image(systemName: "forward.fill")
+                        .font(.system(size: Dim.icon14))
+                        .foregroundStyle(p.text1)
+                }.buttonStyle(.plain)
             }
         }
         .padding(Dim.s3)
@@ -95,11 +103,13 @@ struct PlaybackLockScreenView: View {
 /// 灵动岛 + 锁屏的 Widget 声明（widget target 的 @main 由 Package/WidgetBundle 提供）
 struct PlaybackLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: PlaybackActivityAttributes.self) { _ in
-            // 锁屏呈现**故意留空**（2026-10-25 用户裁定）：
-            //   锁屏已经有系统媒体卡（MPNowPlayingInfoCenter，关不掉），再放一张我们的卡就是重复信息。
-            //   只保留灵动岛三态（compact/minimal/expanded）——那才是系统卡给不了的。
-            EmptyView()
+        ActivityConfiguration(for: PlaybackActivityAttributes.self) { context in
+            // 锁屏卡**必须有内容**：Apple 文档（Displaying live data with Live Activities）明确写
+            // 「must support all presentations … The Lock Screen presentation appears on the Lock Screen
+            //  of iPhone and iPad」—— 不能只留灵动岛。之前返回 EmptyView() 的结果是锁屏上一个空壳面板，
+            // 比重复更难看，所以这里用完整卡（与 hw 2×4 卡片对位）。
+            PlaybackLockScreenView(state: context.state)
+                .widgetURL(URL(string: "suenmusic://player"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -110,8 +120,10 @@ struct PlaybackLiveActivityWidget: Widget {
                         Text(context.state.title)
                             .font(.system(size: Dim.fsMinor, weight: .semibold))
                             .lineLimit(1)
-                        Text(context.state.artist)
+                        // 灵动岛 expanded 的 center：有歌词显示歌词行，没有则显示歌手
+                        Text(context.state.lyricLine.isEmpty ? context.state.artist : context.state.lyricLine)
                             .font(.system(size: Dim.fsCaption))
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }

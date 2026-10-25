@@ -165,6 +165,11 @@ final class APIClient {
     var isLoggedIn: Bool { accessToken != nil || refreshToken != nil }
 
     /// 重新从 UserDefaults 读取刷新令牌（DEBUG 环境变量注入后调用）
+    /// 歌词（LRC 原文 + 译文）。失败返回 nil —— 没有歌词不影响播放。
+    func lyrics(trackId: String) async -> LyricReply? {
+        try? await send("/api/lyrics/\(trackId)")
+    }
+
     func reloadTokenFromDefaults() {
         refreshToken = UserDefaults.standard.string(forKey: tokenKey)
     }

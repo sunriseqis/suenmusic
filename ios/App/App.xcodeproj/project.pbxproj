@@ -15,6 +15,7 @@
 		2CC1734B80EB096854C0A995 /* AudioCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */; };
 		0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26564CB8956642BA586CAE68 /* AudioEngine.swift */; };
 		3A205C4948385C33E67CDB95 /* LiveActivityController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 124878B40A780CA59CFA04D7 /* LiveActivityController.swift */; };
+		66E1E36271D662A6E11C8CDA /* LyricLines.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */; };
 		1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059196BD216930E1443BF606 /* Notifier.swift */; };
 		3FE146DF39D7EC019014584A /* PlaybackActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AF95A7A2C91B4A0BC58B8D /* PlaybackActivity.swift */; };
 		17F97A167EE528500D51DFA9 /* PlaybackIntents.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE809ACBA2E26D446C14F274 /* PlaybackIntents.swift */; };
@@ -76,6 +77,7 @@
 		9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheStore.swift; sourceTree = "<group>"; };
 		26564CB8956642BA586CAE68 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		124878B40A780CA59CFA04D7 /* LiveActivityController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveActivityController.swift; sourceTree = "<group>"; };
+		5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricLines.swift; sourceTree = "<group>"; };
 		059196BD216930E1443BF606 /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		42AF95A7A2C91B4A0BC58B8D /* PlaybackActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackActivity.swift; sourceTree = "<group>"; };
 		EE809ACBA2E26D446C14F274 /* PlaybackIntents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackIntents.swift; sourceTree = "<group>"; };
@@ -168,6 +170,7 @@
 				9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */,
 				26564CB8956642BA586CAE68 /* AudioEngine.swift */,
 				124878B40A780CA59CFA04D7 /* LiveActivityController.swift */,
+				5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */,
 				059196BD216930E1443BF606 /* Notifier.swift */,
 				42AF95A7A2C91B4A0BC58B8D /* PlaybackActivity.swift */,
 				EE809ACBA2E26D446C14F274 /* PlaybackIntents.swift */,
@@ -332,6 +335,7 @@
 				2CC1734B80EB096854C0A995 /* AudioCacheStore.swift in Sources */,
 				0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */,
 				3A205C4948385C33E67CDB95 /* LiveActivityController.swift in Sources */,
+				66E1E36271D662A6E11C8CDA /* LyricLines.swift in Sources */,
 				1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */,
 				3FE146DF39D7EC019014584A /* PlaybackActivity.swift in Sources */,
 				17F97A167EE528500D51DFA9 /* PlaybackIntents.swift in Sources */,

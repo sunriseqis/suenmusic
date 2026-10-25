@@ -33,6 +33,17 @@ struct AuthConfig: Codable {
 
 // MARK: - 曲目
 
+/// `GET /api/lyrics/:id` 的返回（字段与 hw 同口径）
+struct LyricReply: Decodable {
+    struct Body: Decodable {
+        let lyric: String?
+        let tlyric: Trans?
+    }
+    struct Trans: Decodable { let lyric: String? }
+    let id: String
+    let lrc: Body?
+}
+
 struct TrackArtist: Codable, Hashable, Identifiable {
     let id: String
     let name: String

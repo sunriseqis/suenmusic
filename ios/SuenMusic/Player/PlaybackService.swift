@@ -44,6 +44,40 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     private static let maxFailStreak = 2
     /// 连播静默跳过的延迟（服务端瞬时抖动时不至于把整条队列连跳掉）
     private static let skipDelayMs = 600
+    // MARK: 歌词（供 Live Activity 与播放页共用）
+
+    /// 当前曲目的歌词行（按时间戳升序）
+    private var lyricLines: [LyricLine] = []
+    /// 上一次推进 Live Activity 的歌词行（换行才推，省 ActivityKit 预算）
+    private var lastPushedLyric: String = ""
+
+    /// 当前位置应该显示的歌词（没有歌词返回空串）
+    var currentLyricLine: String {
+        LyricParser.line(atMs: positionMs, in: lyricLines)
+    }
+
+    /// 拉取当前曲目的歌词（失败静默 —— 没有歌词不影响播放）
+    func loadLyrics(for trackId: String) {
+        NSLog("[Lyric] 请求歌词 %@", trackId)
+        lyricLines = []
+        lastPushedLyric = ""
+        Task { [weak self] in
+            guard let reply = await APIClient.shared.lyrics(trackId: trackId) else {
+                NSLog("[Lyric] 拉取失败 %@", trackId)
+                return
+            }
+            let lrc = reply.lrc?.lyric ?? ""
+            let trans = reply.lrc?.tlyric?.lyric ?? ""
+            let lines = LyricParser.parse(lrc, translation: trans)
+            await MainActor.run {
+                guard let self, self.currentTrack?.id == trackId else { return }
+                self.lyricLines = lines
+                NSLog("[Lyric] %@ 行数=%d 首行=%@", trackId, lines.count, lines.first?.text ?? "-")
+                self.pushActivity(force: true)   // 歌词就绪后立刻推一次当前行
+            }
+        }
+    }
+
     /// 无音源文案（hw `NO_SOURCE_LABEL`）
     static let noSourceLabel = "无音源"
 
@@ -200,6 +234,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             // reason 1 = 播完自动切下一首（hw：advance 走 manualLoad=false）
             if reason == 1 { self.manualLoad = false }
             self.currentIndex = index
+            self.loadLyrics(for: id)   // 换歌即拉歌词（Live Activity 的歌词行靠它）
             self.noSource = false
             // 换歌是元数据变更 → 立刻推 Live Activity（不受 1s 地板限制）
             self.pushActivity(force: true)
@@ -230,6 +265,15 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             if playing {
                 if !wasPlaying { NSLog("[Start] 首次 playing id=\(self.currentTrack?.id ?? "-")") }
                 self.markLoaded()
+            }
+            // 歌词**换行时**才推一次 Live Activity（ActivityKit 有更新预算，逐秒推会被系统降频）
+            let line = self.currentLyricLine
+            if line != self.lastPushedLyric, !line.isEmpty {
+                NSLog("[Lyric] 当前行=%@", line.replacingOccurrences(of: "\n", with: " / "))
+            }
+            if line != self.lastPushedLyric {
+                self.lastPushedLyric = line
+                self.pushActivity(force: true)
             }
         }
     }
@@ -344,7 +388,8 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             durationMs: durationMs,
             playing: playing,
             sourceLabel: sourceLabel,
-            coverJPEG: cached
+            coverJPEG: cached,
+            lyricLine: currentLyricLine
         )
         LiveActivityController.shared.sync(state: state, force: force)
     }

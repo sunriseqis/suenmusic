@@ -28,5 +28,10 @@ struct PlaybackActivityAttributes: ActivityAttributes {
         /// 封面小图（64×64 JPEG，~1–2KB，base64 后随状态传输）。
         /// widget 进程**不能联网取图**，所以必须由主 App 把图塞进来。
         var coverJPEG: Data?
+        /// **当前这一行歌词**（含可选翻译，用换行分隔）。
+        ///
+        /// widget 进程不能联网、也不能自己算时间轴，所以歌词必须由主 App 按播放位置算好后随状态推；
+        /// 只推一行（ContentState 上限 4KB），且只在**换行时**推（ActivityKit 有更新预算）。
+        var lyricLine: String = ""
     }
 }
