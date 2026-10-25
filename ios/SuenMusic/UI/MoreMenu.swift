@@ -1,7 +1,7 @@
 import SwiftUI
 
 /**
- * 更多菜单（hw PlayerPage \`moreSheet\`，web more-menu 同款）：
+ * 更多菜单（hw PlayerPage `moreSheet`，web more-menu 同款）：
  * 音源（只读）/ 歌手 / 专辑 / 修正音源。
  *
  * hw 没有收藏、分享、下载、定时、音质这些项 —— 这里一个都不加。

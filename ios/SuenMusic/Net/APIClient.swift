@@ -118,6 +118,9 @@ final class ServerRouter {
 
     /// 请求遇到网络层失败时调用。返回 true = 已切换到可用路径，调用方应重放一次。
     func failoverIfNeeded() async -> Bool {
+        // 设置页「自动切换服务器」开关（键与 hw 同：auto_failover，默认开）。
+        // 关掉后网络失败只报错、不再探测备用路径 —— 否则用户关了开关却仍在后台换服，行为与设置不一致。
+        if UserDefaults.standard.object(forKey: "auto_failover") as? Bool == false { return false }
         guard candidates.count > 1 else { return false }
         if let running = selecting { return await running.value != nil }
         if Date().timeIntervalSince(lastFailoverAt) < cooldown { return false }

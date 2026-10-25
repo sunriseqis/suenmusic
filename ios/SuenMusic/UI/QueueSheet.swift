@@ -1,9 +1,9 @@
 import SwiftUI
 
 /**
- * 播放队列抽屉 —— **对齐鸿蒙端 \`pages/QueueView.ets\`**。
+ * 播放队列抽屉 —— **对齐鸿蒙端 `pages/QueueView.ets`**。
  *
- * 数据源永远是 \`PlaybackService\` 里镜像的**内核快照**（UI 不持真相）：
+ * 数据源永远是 `PlaybackService` 里镜像的**内核快照**（UI 不持真相）：
  * 删除 / 拖拽 / 跳播都只发意图，由内核改队列并回调下标。
  *
  * 行 = 序号 26 / 曲名 14 / 歌手 11 / 删除键（danger，**与整行点击互不干扰**）；
@@ -17,7 +17,7 @@ struct QueueSheet: View {
     private let bottomInset: CGFloat
     private let onClose: () -> Void
 
-    /// 抽屉高占屏幕比例（hw \`height('70%')\`）
+    /// 抽屉高占屏幕比例（hw `height('70%')`）
     private static let heightRatio: CGFloat = 0.7
 
     /// 正在拖的行 + 当前位移（拖拽排序用）
@@ -97,6 +97,8 @@ struct QueueSheet: View {
             }
         }
         .scrollIndicators(.hidden)
+        // 拖拽排序进行中锁住滚动，手指不再同时拖动列表
+        .scrollDisabled(dragFrom != nil)
     }
 
     private func row(_ index: Int, _ item: Track) -> some View {
@@ -130,7 +132,8 @@ struct QueueSheet: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { player.jumpTo(index) }
-                .gesture(reorder(index))
+                // 与 ScrollView 并存：长按成功后才接管拖动（否则纵向拖动会被滚动吃掉）
+                .simultaneousGesture(reorder(index))
 
                 // 删除键：danger 透明底红字；独立按钮 → 点它不会触发整行跳播
                 WebButton("删除", variant: .danger, size: .sm) {
@@ -151,7 +154,7 @@ struct QueueSheet: View {
         }
     }
 
-    /// 长按后拖动排序（hw \`onItemDragStart/onItemDrop\`）：只把两个下标丢给内核
+    /// 长按后拖动排序（hw `onItemDragStart/onItemDrop`）：只把两个下标丢给内核
     private func reorder(_ index: Int) -> some Gesture {
         LongPressGesture(minimumDuration: Motion.clickGuard)
             .sequenced(before: DragGesture())

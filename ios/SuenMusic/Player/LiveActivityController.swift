@@ -102,6 +102,16 @@ final class LiveActivityController {
     }
 
     /// 播放结束或退出登录时收摊
+    /// 启动时清掉**残留的旧活动**（杀进程/换版本后系统会留着上一次的面板）。
+    /// 不做这一步，锁屏会挂着与当前播放无关的僵尸卡 —— 而 Live Activity 现在是正式形态，
+    /// 系统媒体卡已被它顶掉，一张错的面板等于「锁屏信息全错」。
+    func endAllStale() {
+        for stale in Activity<PlaybackActivityAttributes>.activities {
+            Task { await stale.end(nil, dismissalPolicy: .immediate) }
+        }
+        activity = nil
+    }
+
     func end() {
         guard let activity else { return }
         self.activity = nil

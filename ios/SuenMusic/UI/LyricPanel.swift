@@ -1,11 +1,11 @@
 import SwiftUI
 
 /**
- * 歌词面板 —— **对齐鸿蒙端 \`pages/LyricView.ets\`**（含 PlayerPage 的 lyricSheet 头）。
+ * 歌词面板 —— **对齐鸿蒙端 `pages/LyricView.ets`**（含 PlayerPage 的 lyricSheet 头）。
  *
  * 状态机：idle / loading / ready / empty / error 五态；
  * 行点击 seek；当前行 18 Medium accent、其它 15 text2；
- * 翻译行当前 15、其它 12（译文与原文行按 300ms 容差双指针对齐，见 \`LyricParser.aligned\`）。
+ * 翻译行当前 15、其它 12（译文与原文行按 300ms 容差双指针对齐，见 `LyricParser.aligned`）。
  *
  * 头（第 ⑦ 条，web LyricsPanel 同款）：eyebrow 左对齐撑满 + chevron-down 收起钮靠右，
  * 整条头也吃点击（歌词层盖住 tab 栏时不再只能点小钮）。
@@ -24,6 +24,8 @@ struct LyricPanel: View {
 
     @State private var status: Status = .idle
     @State private var lines: [LyricLine] = []
+    /// 设置页「显示歌词翻译」开关（与 hw 同键，默认开）。关掉后不渲染译文行，行数据仍保留，切换即刻生效。
+    @AppStorage("lyric_translation") private var showTranslation = true
     @State private var trans: [String] = []
     @State private var activeIndex = -1
     @State private var errText = ""
@@ -113,7 +115,7 @@ struct LyricPanel: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(spacing: 0) {
-                    // 上下留白：让第一行 / 最后一行也能滚到中间（hw \`lyricPadTop/Bottom\`）
+                    // 上下留白：让第一行 / 最后一行也能滚到中间（hw `lyricPadTop/Bottom`）
                     Color.clear.frame(height: Dim.lyricPadTop)
                     ForEach(lines.indices, id: \.self) { index in
                         row(index, lines[index])
@@ -144,7 +146,7 @@ struct LyricPanel: View {
                 .foregroundStyle(active ? p.accent : p.text2)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
-            if index < trans.count, !trans[index].isEmpty {
+            if showTranslation, index < trans.count, !trans[index].isEmpty {
                 Text(trans[index])
                     .font(.system(size: active ? Dim.fsTitle : Dim.fsMinor))
                     .foregroundStyle(p.text2)

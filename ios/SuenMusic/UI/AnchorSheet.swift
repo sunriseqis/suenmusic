@@ -1,9 +1,9 @@
 import SwiftUI
 import AVFoundation
 
-// MARK: - 候选检索契约（hw \`core/Models.ets\` 的 BiliCandidate / AnchorTrackMeta 同结构）
+// MARK: - 候选检索契约（hw `core/Models.ets` 的 BiliCandidate / AnchorTrackMeta 同结构）
 //
-// iOS 的 \`Net/Models.swift\` 目前只声明了锚点本身（AnchorInfo），没有候选相关模型，
+// iOS 的 `Net/Models.swift` 目前只声明了锚点本身（AnchorInfo），没有候选相关模型，
 // 而本次改动不能碰 Net/。这里按 server 契约就地解码（类型名加 Anchor 前缀，
 // 避免与将来补进 Models.swift 的同名类型撞车）。
 
@@ -32,7 +32,7 @@ struct AnchorRefMeta: Decodable {
     let albumPic: String?
 }
 
-/// \`GET /api/tracks/:id/bili-candidates\` 的返回
+/// `GET /api/tracks/:id/bili-candidates` 的返回
 struct AnchorCandidatesReply: Decodable {
     let keyword: String?
     let rejected: Bool?
@@ -115,7 +115,7 @@ final class AnchorPreview: ObservableObject {
 }
 
 /**
- * 修正音源 / 手动锚定（hw PlayerPage \`anchorSheet\` + \`candidateRow\`，web AnchorDialog 同款）。
+ * 修正音源 / 手动锚定（hw PlayerPage `anchorSheet` + `candidateRow`，web AnchorDialog 同款）。
  *
  * 候选搜索（默认词 = 歌名 + 主歌手，打开即搜）→ 点行试听（先暂停主播放，结束/失败恢复）
  * → 行内图钉键锚定（成功后清该曲离线缓存 → 强制重装当前曲并起播 → toast「已锚定，开始播放」）。
@@ -139,7 +139,7 @@ struct AnchorSheet: View {
     @State private var anchoringBvid = ""
     @State private var removing = false
 
-    /// 卡片宽 / 最大高占屏幕比例（hw \`width('92%')\` + \`maxHeight('80%')\`）
+    /// 卡片宽 / 最大高占屏幕比例（hw `width('92%')` + `maxHeight('80%')`）
     private static let cardRatio: CGFloat = 0.92
     private static let cardMaxRatio: CGFloat = 0.80
     /// 时长差异告警阈值（秒）：差得多 → 大概率不是同一录音（hw / web 同值 20 秒）

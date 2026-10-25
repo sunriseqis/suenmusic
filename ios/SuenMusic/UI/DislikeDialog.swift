@@ -1,7 +1,7 @@
 import SwiftUI
 
 /**
- * 「不喜欢」两选弹窗（**自绘哑光风格**，hw \`common/DislikeDialog.ets\` 同款）。
+ * 「不喜欢」两选弹窗（**自绘哑光风格**，hw `common/DislikeDialog.ets` 同款）。
  *
  * 结构与页面其余浮层同体系：scrim 背板 + panel 卡片 + 发丝线描边；
  * 两个选项各带说明副行，无歌手信息时「这位歌手」置灰。
@@ -17,8 +17,10 @@ struct DislikeDialog: View {
     private let onArtist: () -> Void
     private let onCancel: () -> Void
 
-    /// 卡片宽占屏幕比例（hw \`width('86%')\`）
+    /// 卡片宽占屏幕比例（hw `width('86%')`）
     private static let cardRatio: CGFloat = 0.86
+    /// 无歌手信息时「这位歌手」的置灰透明度（hw `.opacity(0.5)`）
+    private static let disabledOpacity: Double = 0.5
 
     private var p: Palette { Palette(scheme) }
 
@@ -116,7 +118,7 @@ struct DislikeDialog: View {
             RoundedRectangle(cornerRadius: Dim.radiusSm, style: .continuous)
                 .stroke(p.line, lineWidth: Dim.hairline)
         )
-        .opacity(enabled ? 1 : 0.5)
+        .opacity(enabled ? 1 : Self.disabledOpacity)
         .contentShape(Rectangle())
         .onTapGesture {
             if enabled { action() }

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 播放页内部浮层层键（hw \`K_PLAYER_SHEET\`）：同一时刻只允许一个。
+/// 播放页内部浮层层键（hw `K_PLAYER_SHEET`）：同一时刻只允许一个。
 /// 视觉层级从顶到底：dislike > more > queue > lyrics > 播放页本身。
 enum PlayerSheet: Equatable {
     case none, lyrics, queue, more, anchor, dislike
@@ -8,7 +8,7 @@ enum PlayerSheet: Equatable {
 
 /// 可指定字形色的图标键。
 ///
-/// \`WebIconButton\` 的字形色由 style 定死（plain = text1），而播放页有多处
+/// `WebIconButton` 的字形色由 style 定死（plain = text1），而播放页有多处
 /// 「透明底 + 特定字形色」的键（模式 / 红心 / 不喜欢 / 图钉 / 搜索）。
 /// 做法与 TrackRow 等页面既有写法一致：WebIcon + foregroundStyle，盒尺沿用同一张表。
 struct GlyphKey: View {
@@ -60,7 +60,7 @@ private struct GlyphKeyStyle: ButtonStyle {
 private enum PlayerSpec {
     /// 播放键盒尺：hw 播放页内联 60（Dim.btnPlayCircle = 64，本页不用它）
     static let playKey: CGFloat = 60
-    /// eyebrow 最大宽占页面比例（hw \`constraintSize({ maxWidth: '60%' })\`）
+    /// eyebrow 最大宽占页面比例（hw `constraintSize({ maxWidth: '60%' })`）
     static let eyebrowRatio: CGFloat = 0.6
     /// 进度条步长（hw `Slider({ step: 1000 })`，毫秒）
     static let seekStep: Double = 1000
@@ -71,7 +71,7 @@ private enum PlayerSpec {
 }
 
 /**
- * 全屏播放页 —— **逐条对齐鸿蒙端 \`pages/PlayerPage.ets\`**。
+ * 全屏播放页 —— **逐条对齐鸿蒙端 `pages/PlayerPage.ets`**。
  *
  * 结构：环境光晕 → 顶栏三件（收起 / eyebrow / 更多）→ 封面 + 曲名行 + 推荐理由卡
  *      → 进度条 + 时间 → 五键排（模式 / 上一首 / 播放 / 下一首 / 队列）→ 歌词 peek。
@@ -92,7 +92,7 @@ struct PlayerView: View {
 
     /// 当前浮层层键（唯一写入方）
     @State private var sheet: PlayerSheet = .none
-    /// 拖动进度条期间不能用播放位置驱动滑块（松手才 seek，对齐 hw \`dragging\`/\`dragPos\`）
+    /// 拖动进度条期间不能用播放位置驱动滑块（松手才 seek，对齐 hw `dragging`/`dragPos`）
     @State private var dragging = false
     @State private var slide: Double = 0
     /// 歌词 peek（当前行 ±1）
@@ -149,7 +149,7 @@ struct PlayerView: View {
         min(player.positionMs, max(player.durationMs, 1))
     }
 
-    /// 副行：歌手 · 专辑（hw \`subLine\` 同口径）
+    /// 副行：歌手 · 专辑（hw `subLine` 同口径）
     private var subLine: String {
         let artist = track?.artistLine ?? ""
         let album = track?.al.name ?? ""
@@ -161,7 +161,7 @@ struct PlayerView: View {
         return first.name
     }
 
-    /// 「音源」行文案（hw \`sourceLabel\`）：bilibili / 网易云 / 未匹配；
+    /// 「音源」行文案（hw `sourceLabel`）：bilibili / 网易云 / 未匹配；
     /// 解析还没回来但已手动锚定时兜底成 bilibili（锚点必然是 B 站）
     private var sourceText: String {
         let label = player.sourceLabel
@@ -169,7 +169,7 @@ struct PlayerView: View {
         return label
     }
 
-    /// 播放模式图标（hw \`modeIconName\` 的 iOS 子集）
+    /// 播放模式图标（hw `modeIconName` 的 iOS 子集）
     private var modeIcon: WebIconName {
         switch player.playMode {
         case "all": return .modeLoop
@@ -193,7 +193,7 @@ struct PlayerView: View {
         .padding(.bottom, bottomInset + Dim.s4)
     }
 
-    /// 环境光晕（web \`.ambient\`）：封面铺满 + 模糊 + 0.15 透明度，主层浮在其上
+    /// 环境光晕（web `.ambient`）：封面铺满 + 模糊 + 0.15 透明度，主层浮在其上
     @ViewBuilder
     private var ambient: some View {
         if let url = coverURL {
@@ -257,7 +257,7 @@ struct PlayerView: View {
     }
 
     private var coverImage: some View {
-        // 有推荐理由时封面收缩让位（hw \`has-reco\`）
+        // 有推荐理由时封面收缩让位（hw `has-reco`）
         let side = (player.currentRecoReason?.isEmpty == false) ? Dim.coverReco : Dim.coverXl
         return AsyncImage(url: coverURL) { phase in
             if let image = phase.image {
@@ -295,7 +295,7 @@ struct PlayerView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 专属推荐理由卡（web \`m-info-card\`）：标签 + 不喜欢入口 + 理由正文。
+    /// 专属推荐理由卡（web `m-info-card`）：标签 + 不喜欢入口 + 理由正文。
     /// 不喜欢键留在标题行里（36 键壳把行撑到 36，文字垂直居中天然带出上留白），
     /// 卡片 top padding 取 0 —— 否则顶部空隙会比底部大一截（hw 用户反馈原话）。
     private func recoCard(_ text: String) -> some View {
@@ -388,7 +388,7 @@ struct PlayerView: View {
         }
     }
 
-    /// 歌词 peek（web \`lyric-wrap\`）：当前行 ±1，整块可点开歌词面板
+    /// 歌词 peek（web `lyric-wrap`）：当前行 ±1，整块可点开歌词面板
     private var peek: some View {
         VStack(spacing: Dim.s1) {
             ForEach(peekLines.indices, id: \.self) { index in
