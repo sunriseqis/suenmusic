@@ -22,7 +22,12 @@ import { WebButton, NeuBtnSize } from '../common/WebButtons';
 const TAG = 'SuenMusic_Search';
 const PREF_NAME = 'suenmusic';
 const KEY_RECENT = 'recent_search';
-const PAGE_LIMIT = 30;
+/**
+ * /api/search 每页条数。30 → 50：服务端 `limit` 上限就是 50，**仍是一次上游请求**
+ * （qq search 无缓存，多拉几页就是多打几次 QQ）。搜索结果即队列，这决定点歌后队列长度。
+ * 与 iOS `SearchView.pageLimit` 保持一致。
+ */
+const PAGE_LIMIT = 50;
 const RECENT_MAX = 10;
 /** 分片：type 用服务端命名（artist 分片在响应里叫 artists/hasMore.artist） */
 const SLICE_TYPES: string[] = ['song', 'album', 'artist', 'playlist'];
