@@ -67,18 +67,19 @@ struct PlaybackLockScreenView: View {
         }
     }
 
+    /// ⚠️ Live Activity 扩展**不能联网取图**（AsyncImage 在渲染进程不解析），
+    /// 所以封面由主 App 下好、缩成 64×64 JPEG 塞进 ContentState（base64 随状态传过来）。
     private func cover(size: CGFloat) -> some View {
-        Group {
-            if let url = URL(string: state.coverUrl), !state.coverUrl.isEmpty {
-                AsyncImage(url: url) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        p.panel2
-                    }
-                }
+        ZStack {
+            p.panel2
+            if let data = state.coverJPEG, let image = UIImage(data: data) {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
             } else {
-                p.panel2
+                Image(systemName: "music.note")
+                    .font(.system(size: size * 0.42))
+                    .foregroundStyle(p.text2)
             }
         }
         .frame(width: size, height: size)
@@ -99,7 +100,7 @@ struct PlaybackLiveActivityWidget: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    PlaybackIslandCover(url: context.state.coverUrl)
+                    PlaybackIslandCover(jpeg: context.state.coverJPEG)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -120,34 +121,41 @@ struct PlaybackLiveActivityWidget: Widget {
                         .tint(DesignTokens.accent)
                 }
             } compactLeading: {
-                PlaybackIslandCover(url: context.state.coverUrl)
+                PlaybackIslandCover(jpeg: context.state.coverJPEG)
             } compactTrailing: {
                 Image(systemName: context.state.playing ? "pause.fill" : "play.fill")
                     .font(.system(size: Dim.icon12))
                     .foregroundStyle(DesignTokens.accent)
             } minimal: {
-                PlaybackIslandCover(url: context.state.coverUrl)
+                PlaybackIslandCover(jpeg: context.state.coverJPEG)
             }
             .keylineTint(DesignTokens.accent)
         }
     }
 }
 
+
+/// widget target 的入口（@main 只能有一个；主 App 是 SuenMusicApp，这里是 WidgetBundle）
+@main
+struct SuenWidgetsBundle: WidgetBundle {
+    var body: some Widget {
+        PlaybackLiveActivityWidget()
+    }
+}
+/// 灵动岛封面：同样不联网，静态占位（见 PlaybackLockScreenView.cover 的说明）
 private struct PlaybackIslandCover: View {
-    let url: String
+    /// 主 App 塞进状态的 64×64 封面小图
+    let jpeg: Data?
 
     var body: some View {
-        Group {
-            if let target = URL(string: url), !url.isEmpty {
-                AsyncImage(url: target) { phase in
-                    if let image = phase.image {
-                        image.resizable().scaledToFill()
-                    } else {
-                        DesignTokens.panel2
-                    }
-                }
+        ZStack {
+            DesignTokens.panel2
+            if let jpeg, let image = UIImage(data: jpeg) {
+                Image(uiImage: image).resizable().scaledToFill()
             } else {
-                DesignTokens.panel2
+                Image(systemName: "music.note")
+                    .font(.system(size: Dim.icon12))
+                    .foregroundStyle(DesignTokens.text2)
             }
         }
         .frame(width: Dim.iconXl, height: Dim.iconXl)

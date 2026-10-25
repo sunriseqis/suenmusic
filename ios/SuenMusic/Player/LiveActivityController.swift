@@ -1,5 +1,6 @@
 import Foundation
 import ActivityKit
+import UIKit
 
 /**
  * Live Activity 生命周期（主 target 侧）。
@@ -18,6 +19,46 @@ final class LiveActivityController {
 
     private var activity: Activity<PlaybackActivityAttributes>?
     private var lastPushAt: Date = .distantPast
+
+    // MARK: 封面小图（widget 不能联网 → 主 App 下好、缩到 64×64 JPEG 塞进状态）
+
+    private var coverCache: [String: Data] = [:]
+    private var coverTask: Task<Void, Never>?
+
+    /// 取某首歌的封面小图；没缓存就异步下（下完回调一次，触发 force 推送）
+    func coverJPEG(for urlString: String, completion: @escaping (Data?) -> Void) -> Data? {
+        if urlString.isEmpty { return nil }
+        if let hit = coverCache[urlString] { return hit }
+        coverTask?.cancel()
+        coverTask = Task { [weak self] in
+            guard let target = URL(string: urlString) else { return }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: target)
+                guard let small = Self.downscaleJPEG(data, side: 64) else { return }
+                await MainActor.run {
+                    self?.coverCache[urlString] = small
+                    completion(small)
+                }
+            } catch {
+                // 封面拿不到不影响主流程
+            }
+        }
+        return nil
+    }
+
+    private static func downscaleJPEG(_ data: Data, side: CGFloat) -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: side, height: side), format: format)
+        let thumb = renderer.image { _ in
+            let scale = max(side / image.size.width, side / image.size.height)
+            let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+            image.draw(in: CGRect(x: (side - size.width) / 2, y: (side - size.height) / 2,
+                                  width: size.width, height: size.height))
+        }
+        return thumb.jpegData(compressionQuality: 0.5)
+    }
 
     private init() {}
 
@@ -41,9 +82,11 @@ final class LiveActivityController {
                 content: content,
                 pushType: nil
             )
+            NSLog("[LiveActivity] 已请求 activity id=\(activity?.id ?? "-") title=\(state.title)")
         } catch {
             // 权限被拒 / 系统限制：静默降级
             activity = nil
+            NSLog("[LiveActivity] 请求失败（静默降级）：\(error.localizedDescription)")
         }
     }
 

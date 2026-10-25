@@ -1070,8 +1070,8 @@ final class ProxyConnection {
     /// 等一个新字节的最长时间。超过它说明下载真的卡住了（下载器自己会重试），
     /// 此时干净收尾让播放器重发请求，好过挂死在这里。
     private static let waitTimeout: TimeInterval = 25
-    /// 等上游响应头的最长时间
-    private static let metadataTimeout: TimeInterval = 12
+    /// 等上游响应头的最长时间（原 12s：起播被它串行拖慢；直连路径已接管首播，这里只服务<b>缓存命中</b>场景）
+    private static let metadataTimeout: TimeInterval = 1.5
 
     private let connection: NWConnection
     private weak var proxy: LocalStreamProxy?
@@ -1189,7 +1189,7 @@ final class ProxyConnection {
         var head = Data()
         if let first = target.read(offset: 0, length: 16) {
             head = first
-        } else if target.waitForBytes(offset: 0, length: 1, timeout: 3),
+        } else if target.waitForBytes(offset: 0, length: 1, timeout: 0.3),
                   let first = target.read(offset: 0, length: 16) {
             head = first
         }

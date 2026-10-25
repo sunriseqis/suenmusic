@@ -104,7 +104,9 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         currentIndex = index
         armLoadWatchdog()
 
+        NSLog("[Start] play() 进入 id=\(tracks[index].id) origin=\(origin)")
         let token = await validToken()
+        NSLog("[Start] 令牌就绪（\(Int(Date().timeIntervalSince1970))）")
         let mapped = tracks.map(Self.toNative)
         do {
             try engine.setQueue(
@@ -196,9 +198,13 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             if self.currentIndex != index { self.currentIndex = index }
             self.positionMs = positionMs
             if durationMs > 0 { self.durationMs = durationMs }
+            let wasPlaying = self.playing
             self.playing = playing
             self.loading = false
-            if playing { self.markLoaded() }
+            if playing {
+                if !wasPlaying { NSLog("[Start] 首次 playing id=\(self.currentTrack?.id ?? "-")") }
+                self.markLoaded()
+            }
         }
     }
 
@@ -295,15 +301,21 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// force = true 时用于换歌/播放暂停等必须即时的变更；进度类走控制器内部 1s 地板（与 hw 卡片同值）。
     private func pushActivity(force: Bool) {
         let track = currentTrack
+        let coverUrl = track?.al.picUrl ?? ""
+        // 封面小图：命中内存缓存就拿，没有则异步下（下完回调里再 force 推一次）
+        let cached = LiveActivityController.shared.coverJPEG(for: coverUrl) { [weak self] _ in
+            self?.pushActivity(force: true)
+        }
         let state = PlaybackActivityAttributes.ContentState(
             title: track?.name ?? "",
             artist: track?.artistLine ?? "",
             album: track?.al.name ?? "",
-            coverUrl: track?.al.picUrl ?? "",
+            coverUrl: coverUrl,
             positionMs: positionMs,
             durationMs: durationMs,
             playing: playing,
-            sourceLabel: sourceLabel
+            sourceLabel: sourceLabel,
+            coverJPEG: cached
         )
         LiveActivityController.shared.sync(state: state, force: force)
     }

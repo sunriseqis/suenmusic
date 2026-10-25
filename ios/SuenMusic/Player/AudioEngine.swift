@@ -680,9 +680,17 @@ final class AudioEngine: NSObject {
 
     /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
     private func streamUrl(_ track: SuenTrack) -> String {
-        if let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
+        // 起播优先（2026-10-25 修「像缓存完才起播」）：**整首已在磁盘**时才走本地代理；
+        // 否则直连服务端 —— 实测服务端首字节 ~0.34s，而代理要先等上游响应头（旧值 12s）+ 嗅探首字节（3s），
+        // 那条串行链把起播拖成了"等缓存"。
+        if AudioCacheStore.shared.isComplete(track.id),
+           let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
+            NSLog("[Start] %@ 命中本地缓存 → 走代理", track.id)
             return local
         }
+        // 直连的同时后台预热缓存（不阻塞起播；下次播放/断网就靠这份）
+        _ = LocalStreamProxy.shared.entry(trackId: track.id)
+        NSLog("[Start] %@ 直连服务端（后台预热缓存）", track.id)
         return directStreamUrl(track.id)
     }
 

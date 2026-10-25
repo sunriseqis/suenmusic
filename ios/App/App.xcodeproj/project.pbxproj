@@ -31,8 +31,38 @@
 		361F98B71E8C983A6BFFF648 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E162C675C8DD23CC5669487 /* SettingsView.swift */; };
 		A693E0F4B1952EA1D227FCA9 /* SkeletonList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 799441B953B7EEBAD4A157A6 /* SkeletonList.swift */; };
 		82B3A16A629F6329B595DDFA /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE040F4F7A3752C1E9CC220 /* Theme.swift */; };
+		0C3BDBE30605A3B1E9DB2503 /* PlaybackLiveActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77CB6BE71CFC3823E2142A24 /* PlaybackLiveActivity.swift */; };
+		7CD01AA097DB15FEE69D1CF3 /* PlaybackActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42AF95A7A2C91B4A0BC58B8D /* PlaybackActivity.swift */; };
+		75B54E1AE31EC2191C812192 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */; };
+		4242C40B4DF7F19289553178 /* Dimension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D08E3CBA663948F14CF5F /* Dimension.swift */; };
+		08E696FF30509547F0606950 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FE040F4F7A3752C1E9CC220 /* Theme.swift */; };
 		DB249DB9D0FF833647E29581 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6F9973165E2B0FD4A3AAC566 /* Assets.xcassets */; };
+		83F41F457C2B9816CBEEBDAD /* SuenWidgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 271539DA6801A2CAF366124D /* SuenWidgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		99E6A51DA0B86FE48AEB34ED /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 792A23021CA546B4A394E8D2;
+			remoteInfo = SuenWidgets;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		BAE1492BDE49D13FF7E211EB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				83F41F457C2B9816CBEEBDAD /* SuenWidgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1CB4B9CDA13A6DAD3E61A410 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
@@ -59,13 +89,23 @@
 		7E162C675C8DD23CC5669487 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		799441B953B7EEBAD4A157A6 /* SkeletonList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkeletonList.swift; sourceTree = "<group>"; };
 		7FE040F4F7A3752C1E9CC220 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		77CB6BE71CFC3823E2142A24 /* PlaybackLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackLiveActivity.swift; sourceTree = "<group>"; };
 		6F9973165E2B0FD4A3AAC566 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		13EBF53C97796A7B6D8673EB /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		B866A2E1C6C2589F9C8EBED6 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		2029A639DD8022543C17416B /* App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = App.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		271539DA6801A2CAF366124D /* SuenWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SuenWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		424153ED3CD079DB4DB459AF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B60942AFBADB96C47BCD2DAF /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -79,6 +119,7 @@
 			isa = PBXGroup;
 			children = (
 				CB9250D44C4854204C2DF142 /* SuenMusic */,
+				EC21069A65F2CA977FE14A64 /* SuenWidgets */,
 				1DFD47BBF470539BB3831D68 /* Assets */,
 				547D009064F7C3F13BEF3460 /* Products */,
 			);
@@ -149,6 +190,16 @@
 			path = UI;
 			sourceTree = "<group>";
 		};
+		EC21069A65F2CA977FE14A64 /* SuenWidgets */ = {
+			isa = PBXGroup;
+			children = (
+				77CB6BE71CFC3823E2142A24 /* PlaybackLiveActivity.swift */,
+				B866A2E1C6C2589F9C8EBED6 /* Info.plist */,
+			);
+			name = SuenWidgets;
+			path = ../SuenWidgets;
+			sourceTree = "<group>";
+		};
 		1DFD47BBF470539BB3831D68 /* Assets */ = {
 			isa = PBXGroup;
 			children = (
@@ -162,6 +213,7 @@
 			isa = PBXGroup;
 			children = (
 				2029A639DD8022543C17416B /* App.app */,
+				271539DA6801A2CAF366124D /* SuenWidgets.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -176,15 +228,34 @@
 				7A70D71C385290AF96BF1031 /* Sources */,
 				424153ED3CD079DB4DB459AF /* Frameworks */,
 				285BB1C1430063331E9F5DD0 /* Resources */,
+				BAE1492BDE49D13FF7E211EB /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				EE1DEC3FECAFB049B3EB4C70 /* PBXTargetDependency */,
 			);
 			name = App;
 			productName = App;
 			productReference = 2029A639DD8022543C17416B /* App.app */;
 			productType = "com.apple.product-type.application";
+		};
+		792A23021CA546B4A394E8D2 /* SuenWidgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7DE074DBDE72A09AC57059C0;
+			buildPhases = (
+				539E3B7B2E5CD36C9C66126E /* Sources */,
+				B60942AFBADB96C47BCD2DAF /* Frameworks */,
+				56455528B567E2CC9267D818 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = SuenWidgets;
+			productName = SuenWidgets;
+			productReference = 271539DA6801A2CAF366124D /* SuenWidgets.appex */;
+			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -196,6 +267,9 @@
 				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					42AEFBAE01D2DFD981F7DA7D = {
+						ProvisioningStyle = Automatic;
+					};
+					792A23021CA546B4A394E8D2 = {
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -215,6 +289,7 @@
 			projectRoot = "";
 			targets = (
 				42AEFBAE01D2DFD981F7DA7D /* App */,
+				792A23021CA546B4A394E8D2 /* SuenWidgets */,
 			);
 		};
 /* End PBXProject section */
@@ -225,6 +300,13 @@
 			buildActionMask = 2147483647;
 			files = (
 				DB249DB9D0FF833647E29581 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		56455528B567E2CC9267D818 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -262,7 +344,27 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		539E3B7B2E5CD36C9C66126E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0C3BDBE30605A3B1E9DB2503 /* PlaybackLiveActivity.swift in Sources */,
+				7CD01AA097DB15FEE69D1CF3 /* PlaybackActivity.swift in Sources */,
+				75B54E1AE31EC2191C812192 /* DesignTokens.swift in Sources */,
+				4242C40B4DF7F19289553178 /* Dimension.swift in Sources */,
+				08E696FF30509547F0606950 /* Theme.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EE1DEC3FECAFB049B3EB4C70 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 792A23021CA546B4A394E8D2 /* SuenWidgets */;
+			targetProxy = 99E6A51DA0B86FE48AEB34ED /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		DCFB30EAE59D6917CE906371 /* Debug */ = {
@@ -293,7 +395,6 @@
 				ENABLE_TESTABILITY = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				ONLY_ACTIVE_ARCH = YES;
 			};
 			name = Debug;
 		};
@@ -378,10 +479,58 @@
 			};
 			name = Release;
 		};
+		6CC7F0B8204F59270BEBA219 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2000000;
+				DEVELOPMENT_TEAM = VV9F66AH8U;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "../SuenWidgets/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.suenmusic.app.SuenWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4D2C3EF0272985CB38D8F0A2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2000000;
+				DEVELOPMENT_TEAM = VV9F66AH8U;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "../SuenWidgets/Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 2.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.suenmusic.app.SuenWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		7C58EB60E8206789E14CE8D3 /* Project */ = {
+		7C58EB60E8206789E14CE8D3 = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				DCFB30EAE59D6917CE906371 /* Debug */,
@@ -390,11 +539,20 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		718C2BE3EB71AE2640FA13F3 /* Target */ = {
+		718C2BE3EB71AE2640FA13F3 = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				ADF9B2668011E455D3D7F21A /* Debug */,
 				BA0348D54C7CF6D7F19BE835 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7DE074DBDE72A09AC57059C0 = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6CC7F0B8204F59270BEBA219 /* Debug */,
+				4D2C3EF0272985CB38D8F0A2 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

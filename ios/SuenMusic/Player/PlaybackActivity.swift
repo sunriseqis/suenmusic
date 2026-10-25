@@ -25,5 +25,8 @@ struct PlaybackActivityAttributes: ActivityAttributes {
         var playing: Bool
         /// bilibili / 网易云 / 未匹配 —— 与 hw 音源行同口径
         var sourceLabel: String
+        /// 封面小图（64×64 JPEG，~1–2KB，base64 后随状态传输）。
+        /// widget 进程**不能联网取图**，所以必须由主 App 把图塞进来。
+        var coverJPEG: Data?
     }
 }

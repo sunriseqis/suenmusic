@@ -38,7 +38,16 @@ struct DailyView: View {
             }
         }
         .background(p.bg)
-        .task { if data == nil { await load() } }
+        .task {
+            if data == nil { await load() }
+            #if DEBUG
+            // 无触摸环境验 Live Activity / 播放页：SUEN_AUTOPLAY=1 进「专属」后自动播第一首
+            if ProcessInfo.processInfo.environment["SUEN_AUTOPLAY"] == "1",
+               let tracks = data?.tracks, !tracks.isEmpty {
+                await player.play(tracks: tracks, startingAt: 0, origin: "每日推荐")
+            }
+            #endif
+        }
     }
 
     private func content(_ data: DailyRecommend) -> some View {
