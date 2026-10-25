@@ -8,31 +8,24 @@ struct RootView: View {
     @State private var tab: Int = RootView.initialTab()
 
     var body: some View {
+        // **播放页就是根视图**（不是盖在别人身上、也不是模态）：
+        //   试过 .sheet（被 detent 裁切）、.fullScreenCover（卡片化模态）、.overlay（里面的 NavigationStack
+        //   按内容尺寸收缩 → 上下巨大空白），三种都被系统尺寸规则牵着走。
+        //   直接把根换掉：尺寸天然等于窗口，没有任何容器参与测量。
+        //   入场仍是 hw 的 translate(y:100%)→0：用 .transition(.move(edge: .bottom)) + 200ms easeOut。
         Group {
-            if app.isLoggedIn {
-                mainTabs
-            } else {
+            if !app.isLoggedIn {
                 LoginView()
+            } else if showPlayer {
+                PlayerView(onClose: {
+                    withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false }
+                })
+                .transition(.move(edge: .bottom))
+            } else {
+                mainTabs
             }
         }
-        // 播放页必须全屏呈现：sheet 自带顶部留白 + 圆角，会按「sheet 高度」裁掉页面的一部分，
-        // 而 PlayerView 是照 hw 全屏浮层设计的（沉浸底 + 封面 280 + 四个内部浮层）。
-        // hw 的入场是 translate(y:100%)→0 的 200ms EaseOut —— fullScreenCover 自带的底部滑入
-        // 正是同一动作，尺寸不再由系统 detent 决定。
-        // 播放页是 hw 那种**全屏浮层**（盖住底栏、整体从底部上滑），不是 fullScreenCover 的卡片式模态
-        // （后者自带圆角 + 顶部露背景，用户实测「你这个属于浮窗了吧」）。
-        // ⚠️ 播放页必须是**铺满屏幕的浮层**：用 .overlay 挂在 Group 上时，
-        // 里面的 NavigationStack 会按内容尺寸收缩（用户实测「页面还是小、上下巨大空白」）。
-        // 所以放到最外层 ZStack 并显式给满屏 frame + ignoresSafeArea。
-        .overlay {
-            if showPlayer {
-                PlayerView(onClose: { withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false } })
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .transition(.move(edge: .bottom))
-                    .zIndex(10)
-            }
-        }
+        // 播放页已在上面作为根视图参与分支，这里不再需要 overlay。
         .animation(.easeOut(duration: Motion.standard), value: showPlayer)
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
