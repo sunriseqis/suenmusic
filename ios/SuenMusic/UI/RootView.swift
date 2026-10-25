@@ -3,6 +3,9 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var player: PlaybackService
+    /// 系统外观（「跟随系统」模式下它会变）：变化时要把 Live Activity 重推一次，
+    /// 否则锁屏卡/灵动岛会一直是旧深浅色（用户实测「不跟随主题」）。
+    @Environment(\.colorScheme) private var systemScheme
     @State private var showPlayer = false
     /// 当前 tab（0 首页 / 1 专属 / 2 收藏 / 3 搜索 / 4 我的）
     @State private var tab: Int = RootView.initialTab()
@@ -39,6 +42,9 @@ struct RootView: View {
         // 时长用 160ms 而不是 hw 的 200ms：hw 那 200ms 是按它自己的渲染节奏定的，
         // iOS 上 200ms 叠加首帧布局，观感就是「点完等一下才动」（用户实测“展开还有点延迟”）。
         .animation(.easeOut(duration: Motion.sheet), value: showPlayer)
+        .onChange(of: systemScheme) { _, _ in
+            player.refreshActivityForTheme()
+        }
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
             player.prewarm()

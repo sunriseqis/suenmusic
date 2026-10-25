@@ -160,7 +160,14 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         case .light: return false
         case .dark: return true
         case .system:
-            return UITraitCollection.current.userInterfaceStyle == .dark
+            // 不用 UITraitCollection.current：它在后台/非主线程上下文里读到的可能不是窗口真实外观。
+            // 取前台窗口场景的 trait 才是「系统现在是不是深色」。
+            let style = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first { $0.activationState == .foregroundActive }?
+                .traitCollection.userInterfaceStyle
+                ?? UITraitCollection.current.userInterfaceStyle
+            return style == .dark
         }
     }
 
