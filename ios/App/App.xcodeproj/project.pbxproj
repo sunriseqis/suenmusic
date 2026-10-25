@@ -27,7 +27,6 @@
 		13C0EE7106F2945215C6CBB6 /* ConfirmDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */; };
 		EBD68E852507BBC2FF2A0EA8 /* Copy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 895CDD7C9392AF7810F8C645 /* Copy.swift */; };
 		654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DF95D12E5B52161C828D837 /* DailyView.swift */; };
-		542F7483066B836536CAEF2E /* DebugFrameLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */; };
 		40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */; };
 		8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 080D08E3CBA663948F14CF5F /* Dimension.swift */; };
 		744D54399E658E190C59A4A0 /* DislikeDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */; };
@@ -109,7 +108,6 @@
 		08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmDialog.swift; sourceTree = "<group>"; };
 		895CDD7C9392AF7810F8C645 /* Copy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Copy.swift; sourceTree = "<group>"; };
 		8DF95D12E5B52161C828D837 /* DailyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyView.swift; sourceTree = "<group>"; };
-		F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugFrameLog.swift; sourceTree = "<group>"; };
 		5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		080D08E3CBA663948F14CF5F /* Dimension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dimension.swift; sourceTree = "<group>"; };
 		6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DislikeDialog.swift; sourceTree = "<group>"; };
@@ -229,7 +227,6 @@
 				08D98F7699E91273AA047EA7 /* ConfirmDialog.swift */,
 				895CDD7C9392AF7810F8C645 /* Copy.swift */,
 				8DF95D12E5B52161C828D837 /* DailyView.swift */,
-				F620221DC63EAB71C443AF57 /* DebugFrameLog.swift */,
 				5F24DCC393B7196D9FBA6BD5 /* DesignTokens.swift */,
 				080D08E3CBA663948F14CF5F /* Dimension.swift */,
 				6DF51F93EB82F186EF408AF2 /* DislikeDialog.swift */,
@@ -407,7 +404,6 @@
 				13C0EE7106F2945215C6CBB6 /* ConfirmDialog.swift in Sources */,
 				EBD68E852507BBC2FF2A0EA8 /* Copy.swift in Sources */,
 				654D68EDA054CD2791F59F42 /* DailyView.swift in Sources */,
-				542F7483066B836536CAEF2E /* DebugFrameLog.swift in Sources */,
 				40F8236C930A3CAAEA312EF7 /* DesignTokens.swift in Sources */,
 				8A171013B1EB60EF15ED9520 /* Dimension.swift in Sources */,
 				744D54399E658E190C59A4A0 /* DislikeDialog.swift in Sources */,

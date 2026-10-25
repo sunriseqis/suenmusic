@@ -127,10 +127,9 @@ struct PlayerView: View {
                 ambient
                 GeometryReader { proxy in
                     ZStack {
-                        page(width: proxy.size.width, height: proxy.size.height)
+                        page(width: proxy.size.width)
                         layers
                     }
-                    .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             }
             .toolbar(.hidden, for: .navigationBar)
@@ -216,40 +215,38 @@ struct PlayerView: View {
     /// 取第一个能完整放进可视高度的版本。候选列里没有可无限拉伸的元素（不存在
     /// maxHeight: .infinity），所以「放得下」= 真的放得下，不会出现内容被裁掉一半；
     /// 横向左右各留 Dim.s5，封面宽度也计入了这个上限。
-    private func page(width: CGFloat, height: CGFloat) -> some View {
+    private func page(width: CGFloat) -> some View {
         let cap = min(width - Dim.s5 * 2, hasReco ? Dim.coverReco : Dim.coverXl)
         return ViewThatFits(in: .vertical) {
-            column(side: cap * PlayerSpec.coverShrink[0])
-            column(side: cap * PlayerSpec.coverShrink[1])
-            column(side: cap * PlayerSpec.coverShrink[2])
-            column(side: cap * PlayerSpec.coverShrink[3])
-            column(side: cap * PlayerSpec.coverShrink[4])
-            column(side: cap * PlayerSpec.coverShrink[5])
-            column(side: cap * PlayerSpec.coverShrink[6])
+            column(side: cap * PlayerSpec.coverShrink[0], width: width)
+            column(side: cap * PlayerSpec.coverShrink[1], width: width)
+            column(side: cap * PlayerSpec.coverShrink[2], width: width)
+            column(side: cap * PlayerSpec.coverShrink[3], width: width)
+            column(side: cap * PlayerSpec.coverShrink[4], width: width)
+            column(side: cap * PlayerSpec.coverShrink[5], width: width)
+            column(side: cap * PlayerSpec.coverShrink[6], width: width)
         }
         .padding(.horizontal, Dim.s5)
         .padding(.vertical, Dim.s3)
-        .frame(width: width, height: height, alignment: .center)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         .opacity(entered ? 1 : 0)
-        .frameLog("page")
     }
 
     /// 单个「封面尺寸」版本的主列（ViewThatFits 的候选）
-    private func column(side: CGFloat) -> some View {
+    private func column(side: CGFloat, width: CGFloat) -> some View {
         VStack(spacing: 0) {
-            header.frameLog("header")
+            header(eyebrowWidth: width * PlayerSpec.eyebrowRatio)
             VStack(spacing: Dim.s4) {
-                coverImage(side: side).frameLog("cover")
-                titleRow.frameLog("title")
+                coverImage(side: side)
+                titleRow
                 if let reco = player.currentRecoReason, !reco.isEmpty {
-                    recoCard(reco).frameLog("reco")
+                    recoCard(reco)
                 }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, Dim.s4)
-            foot.frameLog("foot")
+            foot
         }
-        .frameLog("column")
     }
 
     /// 有推荐理由卡时封面让位（hw has-reco：280 → 194）
@@ -258,23 +255,27 @@ struct PlayerView: View {
     }
 
     /// 环境光晕（web `.ambient`）：封面铺满 + 模糊 + 0.15 透明度，主层浮在其上
-    @ViewBuilder
     private var ambient: some View {
-        if let url = coverURL {
-            AsyncImage(url: url) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    Color.clear
+        // 尺寸由 Color.clear 决定（= 安全区可用尺寸），封面只放在 overlay 里铺满：
+        // 直接给 AsyncImage 加 frame + scaledToFill 时，它按「填满高度」报出 778×778 的理想尺寸，
+        // 会把整页（ZStack → GeometryReader → 浮层）一起撑成正方形，右侧内容被挤到屏幕外。
+        Color.clear
+            .overlay {
+                if let url = coverURL {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Color.clear
+                        }
+                    }
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .blur(radius: Dim.glowBlur)
             .opacity(PlayerSpec.glowOpacity)
             .clipped()
             .ignoresSafeArea()
             .allowsHitTesting(false)
-        }
     }
 
     private var coverURL: URL? {
@@ -284,7 +285,10 @@ struct PlayerView: View {
 
     // MARK: - 顶栏（收起 / eyebrow / 更多）
 
-    private var header: some View {
+    /// eyebrow 最大宽 = 页面宽 × 0.6（hw constraintSize maxWidth 60%）。
+    /// 宽度由调用方按实测页面宽度传入，不用 containerRelativeFrame —— 后者要在布局时
+    /// 回问容器尺寸，和「容器尺寸由子视图决定」容易形成回路。
+    private func header(eyebrowWidth: CGFloat) -> some View {
         ZStack {
             HStack(spacing: 0) {
                 WebIconButton(.chevronDown, box: Dim.touchMin, style: .plain) { dismiss() }
@@ -298,9 +302,7 @@ struct PlayerView: View {
                 .foregroundStyle(player.noSource ? p.danger : p.text2)
                 .lineLimit(1)
                 .truncationMode(.tail)
-                .containerRelativeFrame(.horizontal, alignment: .center) { length, _ in
-                    length * PlayerSpec.eyebrowRatio
-                }
+                .frame(maxWidth: eyebrowWidth)
                 .accessibilityLabel(player.eyebrowText)
         }
         .padding(.top, Dim.s1)
@@ -488,7 +490,6 @@ struct PlayerView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: Dim.peekH)
-        .frameLog("peek")
         .contentShape(Rectangle())
         .onTapGesture { openSheet(.lyrics) }
         .accessibilityLabel("展开歌词")

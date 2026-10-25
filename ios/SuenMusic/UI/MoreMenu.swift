@@ -38,22 +38,18 @@ struct MoreMenu: View {
     }
 
     var body: some View {
-        // 右上锚定：父容器已扣掉顶部安全区，这里再让出顶栏高度（Dim.touchMin），
-        // 卡片高度按可用高度上限收口 —— 小屏上也不会被底边切掉。
-        GeometryReader { proxy in
-            ZStack(alignment: .topTrailing) {
-                p.scrim
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture(perform: onClose)
+        // 右上锚定：父容器已扣掉顶部安全区，这里让出顶栏高度（Dim.touchMin）+ 右 12。
+        // 卡片只有四行固定高度（约 165），从安全区顶部往下排必然放得下，不再套 maxHeight
+        // —— 那会把卡片撑成整屏高、内容垂直居中，菜单位置跟着跑偏。
+        ZStack(alignment: .topTrailing) {
+            p.scrim
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onClose)
 
-                card
-                    .frame(maxHeight: max(0, proxy.size.height - Dim.touchMin - Dim.s3))
-                    .frameLog("more-card")
-                    .padding(.top, Dim.touchMin)
-                    .padding(.trailing, Dim.s3)
-            }
-            .frame(width: proxy.size.width, height: proxy.size.height)
+            card
+                .padding(.top, Dim.touchMin)
+                .padding(.trailing, Dim.s3)
         }
     }
 

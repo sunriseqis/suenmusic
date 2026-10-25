@@ -173,7 +173,6 @@ struct AnchorSheet: View {
                 // 候选列表自己滚，卡片本体不会顶到屏幕外。
                 .frame(width: proxy.size.width * Self.cardRatio)
                 .frame(maxHeight: proxy.size.height * Self.cardMaxRatio)
-                .frameLog("anchor-card")
                 .background(
                     RoundedRectangle(cornerRadius: Dim.radiusLg, style: .continuous).fill(p.bg)
                 )

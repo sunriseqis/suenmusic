@@ -26,9 +26,12 @@ struct RootView: View {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
             player.prewarm()
             #if DEBUG
-            // 自动化验收：SUEN_PLAYER=1 启动后直接展开播放页（绕开 deep link 的系统确认弹框）
+            // 自动化验收：SUEN_PLAYER=1 启动后直接展开播放页（绕开 deep link 的系统确认弹框）。
+            // 展开时机可用 SUEN_PLAYER_DELAY（秒，默认 3）推后 —— 自动播放要几十秒才起播，
+            // 浮层验收时把延迟调大，播放页才能拿到真实曲目/歌词/候选内容。
             if DebugHooks.string("SUEN_PLAYER") == "1" {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                let delay = DebugHooks.int("SUEN_PLAYER_DELAY") ?? 3
+                try? await Task.sleep(nanoseconds: UInt64(max(0, delay)) * 1_000_000_000)
                 showPlayer = true
             }
             #endif

@@ -44,7 +44,6 @@ struct DislikeDialog: View {
                     .contentShape(Rectangle())
                     .onTapGesture(perform: onCancel)
                 card.frame(width: proxy.size.width * Self.cardRatio)
-                    .frameLog("dislike-card")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

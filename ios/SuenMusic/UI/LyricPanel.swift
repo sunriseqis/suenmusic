@@ -50,7 +50,6 @@ struct LyricPanel: View {
         .padding(.bottom, Dim.s4)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(p.bg)
-        .frameLog("lyrics")
         .task(id: player.currentTrack?.id) { await load() }
         .onChange(of: player.positionMs) { _, _ in syncActive() }
     }

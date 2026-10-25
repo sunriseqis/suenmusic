@@ -39,7 +39,6 @@ struct QueueSheet: View {
 
                 drawer
                     .frame(height: proxy.size.height * Self.heightRatio)
-                    .frameLog("queue-drawer")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
