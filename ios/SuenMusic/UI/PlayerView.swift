@@ -164,7 +164,6 @@ struct PlayerView: View {
         }
         .onAppear {
             slide = Double(clampedPosition)
-            withAnimation(Motion.curve) { entered = true }
             #if DEBUG
             // 自动化验收钩子：SUEN_SHEET=lyrics|queue|more|anchor|dislike 时直接打开对应浮层，
             // 供 OCR 截图核对（模拟器无法脚本化点击）。默认不生效。
@@ -250,7 +249,8 @@ struct PlayerView: View {
         .padding(.vertical, Dim.s3)
         // 贴满可用高度：顶栏夹在上、底部区压在下，中间封面块吸收剩余空间（不再整列居中留白）
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .opacity(entered ? 1 : 0)
+        // 不再叠一层淡入：位移由 RootView 的 .transition(.move) 负责，
+        // 两层动画叠起来就是用户说的「弹出慢半拍、不跟手」。
     }
 
     /// 单个「封面尺寸」版本的主列（ViewThatFits 的候选）

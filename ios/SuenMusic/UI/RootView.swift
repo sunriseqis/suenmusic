@@ -13,20 +13,28 @@ struct RootView: View {
         //   按内容尺寸收缩 → 上下巨大空白），三种都被系统尺寸规则牵着走。
         //   直接把根换掉：尺寸天然等于窗口，没有任何容器参与测量。
         //   入场仍是 hw 的 translate(y:100%)→0：用 .transition(.move(edge: .bottom)) + 200ms easeOut。
-        Group {
+        ZStack {
             if !app.isLoggedIn {
                 LoginView()
-            } else if showPlayer {
+            } else {
+                mainTabs
+            }
+            // 播放页与列表**共存**：列表保持挂载（不销毁 → 收起时不用重建/重新拉数据），
+            // 播放页盖在上面、整块从底部上滑。之前「根视图换人」的写法每开每关都重建整个列表，
+            // 观感就是「点完要等一小会」（用户实测不跟手）。
+            if app.isLoggedIn, showPlayer {
                 PlayerView(onClose: {
                     withAnimation(.easeOut(duration: Motion.standard)) { showPlayer = false }
                 })
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
                 .transition(.move(edge: .bottom))
-            } else {
-                mainTabs
+                .zIndex(1)
             }
         }
         // 播放页已在上面作为根视图参与分支，这里不再需要 overlay。
+        // 只留这一条：200ms easeOut 驱动「根视图换人」的滑动。
+        // 之前播放页内部还有一层 opacity 动画，两层叠加 = 点完等一小会才动。
         .animation(.easeOut(duration: Motion.standard), value: showPlayer)
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段

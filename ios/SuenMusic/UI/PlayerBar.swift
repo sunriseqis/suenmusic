@@ -49,7 +49,9 @@ struct PlayerBar: View {
             .offset(x: dragX)
             .contentShape(Rectangle())
             .onTapGesture(perform: expand)
-            .gesture(swipe)
+            // 用 simultaneous 而不是 .gesture：后者会让点击**等拖拽识别失败**后才触发，
+            // 观感就是「点完要等一小下才展开」（用户实测“不跟手”）。
+            .simultaneousGesture(swipe)
             .task(id: track.id) { await refreshFav(track.id) }
             .padding(.horizontal, Dim.s3)
             .padding(.top, Dim.s2)
