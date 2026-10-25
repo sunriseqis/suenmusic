@@ -134,4 +134,6 @@ enum Motion {
     static let barsDelayShort: Double = 0.32
     /// 手势结束后吞掉合成点击的时间窗（hw CLICK_GUARD_MS）
     static let clickGuard: Double = 0.35
+    /// 播放页进出场时长：160ms（hw 的 200ms 是按它的渲染节奏定的，iOS 上 200ms 显慢）
+    static let sheet: Double = 0.16
 }

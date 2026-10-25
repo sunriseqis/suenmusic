@@ -35,7 +35,10 @@ struct RootView: View {
         // 播放页已在上面作为根视图参与分支，这里不再需要 overlay。
         // 只留这一条：200ms easeOut 驱动「根视图换人」的滑动。
         // 之前播放页内部还有一层 opacity 动画，两层叠加 = 点完等一小会才动。
-        .animation(.easeOut(duration: Motion.standard), value: showPlayer)
+        // 只留这一条驱动「列表 ↔ 播放页」的滑动。
+        // 时长用 160ms 而不是 hw 的 200ms：hw 那 200ms 是按它自己的渲染节奏定的，
+        // iOS 上 200ms 叠加首帧布局，观感就是「点完等一下才动」（用户实测“展开还有点延迟”）。
+        .animation(.easeOut(duration: Motion.sheet), value: showPlayer)
         .task {
             // 预热播放链路（引擎 + 流令牌），把起播延迟前移到启动阶段
             player.prewarm()

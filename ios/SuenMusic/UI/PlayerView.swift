@@ -236,15 +236,12 @@ struct PlayerView: View {
         let hCap = height * PlayerSpec.coverHeightRatio
         let cap = hasReco ? min(width - Dim.s5 * 2, Dim.coverReco)
                           : min(width - Dim.s5 * 2, hCap)
-        return ViewThatFits(in: .vertical) {
-            column(side: cap * PlayerSpec.coverShrink[0], width: width)
-            column(side: cap * PlayerSpec.coverShrink[1], width: width)
-            column(side: cap * PlayerSpec.coverShrink[2], width: width)
-            column(side: cap * PlayerSpec.coverShrink[3], width: width)
-            column(side: cap * PlayerSpec.coverShrink[4], width: width)
-            column(side: cap * PlayerSpec.coverShrink[5], width: width)
-            column(side: cap * PlayerSpec.coverShrink[6], width: width)
-        }
+        // ⚠️ 这里原本是 `ViewThatFits` 里放 **7 个候选列**（封面逐级收缩 1.0→0.20）。
+        // 每列都是完整的「顶栏 + 封面 + 曲名 + 底部区」，SwiftUI 首帧要把 7 个全部测一遍才决定用哪个 ——
+        // 用户实测「展开还是有点延迟」，这就是那笔一次性布局成本。
+        // 现在封面尺寸已经由可用空间直接算出（cap 同时受宽/高约束），阶梯不再需要：
+        // 只渲染一列，首帧成本降到 1/7；小屏安全性由「cap 的高度比例 + 底部区自适应」保证。
+        return column(side: cap, width: width)
         .padding(.horizontal, Dim.s5)
         .padding(.vertical, Dim.s3)
         // 贴满可用高度：顶栏夹在上、底部区压在下，中间封面块吸收剩余空间（不再整列居中留白）
