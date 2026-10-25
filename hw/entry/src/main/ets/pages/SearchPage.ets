@@ -28,6 +28,7 @@ const KEY_RECENT = 'recent_search';
  * 与 iOS `SearchView.pageLimit` 保持一致。
  */
 const PAGE_LIMIT = 50;
+
 const RECENT_MAX = 10;
 /** 分片：type 用服务端命名（artist 分片在响应里叫 artists/hasMore.artist） */
 const SLICE_TYPES: string[] = ['song', 'album', 'artist', 'playlist'];
@@ -79,6 +80,8 @@ export struct SearchPage {
   private songRows: TrackRowSource = new TrackRowSource();
 
   lastQuery: string = '';
+  /** 当前播放队列对应的搜索关键词（翻页续接时校验，避免串改别的搜索队列） */
+  private queueQuery: string = '';
   /** 请求序号：切分片/重新搜索后，丢弃还在途的过期响应 */
   private reqSeq: number = 0;
   /** 客户端节流：冷却截止时刻（epoch ms，来自 degraded.retryAfterMs）。期间不发请求 */
@@ -228,6 +231,10 @@ export struct SearchPage {
         this.artists = first ? res.artists : this.mergeArtists(this.artists, res.artists);
       } else {
         this.playlists = first ? res.playlists : this.mergePlaylists(this.playlists, res.playlists);
+      }
+      // 翻页续接队列：只有当「当前队列就是这个关键词搜出来的」才续
+      if (slice === 0 && !first && this.queueQuery === this.normalizeQuery(q)) {
+        MediaPlayerCore.shared().appendToQueue(res.songs, '搜索');
       }
       this.hasMore = [res.hasMore.song, res.hasMore.album, res.hasMore.artist, res.hasMore.playlist];
       this.page = res.page;
@@ -476,6 +483,8 @@ export struct SearchPage {
       hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
     }
     try {
+      // 记下这次队列对应的关键词：翻页续接时用它判断能不能续（否则会串改别的搜索队列）
+      this.queueQuery = this.normalizeQuery(this.lastQuery);
       await MediaPlayerCore.shared().setQueue(this.songs, index, token, '搜索');
     } catch (e) {
       this.err = Copy.describeError(e);
@@ -484,6 +493,11 @@ export struct SearchPage {
   }
 
   /** 播放全部（web Search playAll：把当前单曲分片整页入队） */
+  /** 关键词归一化（去首尾空白 + 小写）：比较「这条队列是不是同一个搜索」用 */
+  private normalizeQuery(raw: string): string {
+    return raw.trim().toLowerCase();
+  }
+
   private async playAllSongs(): Promise<void> {
     if (this.songs.length === 0) { return; }
     let token = '';
@@ -493,6 +507,7 @@ export struct SearchPage {
       hilog.warn(0x0000, TAG, '取流令牌失败（可能离线），缓存曲走离线播放: %{public}s', JSON.stringify(e));
     }
     try {
+      this.queueQuery = this.normalizeQuery(this.lastQuery);
       await MediaPlayerCore.shared().setQueue(this.songs, 0, token, '搜索');
     } catch (e) {
       this.err = Copy.describeError(e);

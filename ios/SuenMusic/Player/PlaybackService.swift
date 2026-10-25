@@ -411,6 +411,19 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
+    /// 往队列尾部追加（搜索结果翻页续接）。
+    ///
+    /// 只在「当前队列就是这个来源」时生效 —— 否则用户在搜索页翻页会把别的来源的队列改掉。
+    func appendToQueue(_ tracks: [Track], origin: String) {
+        guard !tracks.isEmpty, !queue.isEmpty, self.origin == origin else { return }
+        let known = Set(queue.map(\.id))
+        let fresh = tracks.filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        queue.append(contentsOf: fresh)
+        engine?.appendToQueue(fresh.map(Self.toNative))
+        NSLog("[Queue] 续接 %d 首 → 共 %d 首（origin=%@）", fresh.count, queue.count, origin)
+    }
+
     // MARK: 专属推荐理由（hw `Track.recommendReason`）
 
     /// 当前曲的专属推荐理由；nil = 不是每日推荐里的曲目（播放页不显示推荐卡）

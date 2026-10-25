@@ -386,6 +386,42 @@ export class MediaPlayerCore {
     await this.loadCurrent(true);
   }
 
+  /**
+   * 往队列尾部追加曲目（搜索结果翻页续接）。**不打断当前播放**：只改队列与持久层。
+   * 随机模式下把新曲目洗牌后接在尾部（保持已在播顺序不变）。
+   */
+  appendToQueue(tracks: Track[], origin: string): void {
+    if (tracks.length === 0) { return; }
+    if (this.queue.length === 0) { return; }
+    if (AppStorage.get<string>(K_ORIGIN) !== origin) { return; }
+    const known = new Set<string>();
+    for (let i = 0; i < this.queue.length; i++) { known.add(this.queue[i].id); }
+    const fresh: Track[] = [];
+    for (let i = 0; i < tracks.length; i++) {
+      if (!known.has(tracks[i].id)) {
+        known.add(tracks[i].id);
+        fresh.push(tracks[i]);
+      }
+    }
+    if (fresh.length === 0) { return; }
+    const tail = isShuffleMode(this.playMode) ? this.shuffleArrayCopy(fresh) : fresh;
+    this.queue = this.queue.concat(tail);
+    for (let i = 0; i < tail.length; i++) { this.sourceOrderIds.push(tail[i].id); }
+    this.bumpQueue();
+    hilog.info(0x0000, TAG, '队列续接 %{public}d 首 → 共 %{public}d 首（origin=%{public}s）',
+      fresh.length, this.queue.length, origin);
+  }
+
+  /** 洗牌副本（不动入参） */
+  private shuffleArrayCopy(list: Track[]): Track[] {
+    const out = list.slice();
+    for (let i = out.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = out[i]; out[i] = out[j]; out[j] = t;
+    }
+    return out;
+  }
+
   async play(): Promise<void> {
     // 冷启动续播：进程被系统收走后队列全丢，先恢复上次会话再起播
     if (this.queue.length === 0) {

@@ -822,6 +822,19 @@ final class AudioEngine: NSObject {
         handlePlaybackFailure()
     }
 
+    /// 往队列尾部追加曲目（搜索结果翻页续接）。**不打断当前播放**：
+    /// 只改 `tracks` 与顺序表，条目仍按 lookahead 懒插入。
+    func appendToQueue(_ newTracks: [SuenTrack]) {
+        guard !newTracks.isEmpty else { return }
+        if playOrder.isEmpty && !tracks.isEmpty { playOrder = Array(tracks.indices) }
+        let old = tracks.count
+        tracks.append(contentsOf: newTracks)
+        let added = Array(old..<tracks.count)
+        playOrder.append(contentsOf: repeatMode.isShuffle ? added.shuffled() : added)
+        NSLog("[Queue] 追加 %d 首 → %d 首（源=%@）", newTracks.count, tracks.count, repeatMode.rawValue)
+        ensureLookahead()
+    }
+
     // MARK: 播放顺序（随机 / 随机不重复）
 
     /// 重建播放顺序：非随机 = 原序；随机 = 当前曲打头 + 其余洗牌。

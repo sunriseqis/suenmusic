@@ -49,6 +49,8 @@ struct SearchView: View {
     /// 从 30 提到 50：服务端 `limit` 上限就是 50，**仍是一次上游请求**（qq search 无缓存，
     /// 多拉几页就是多打几次 QQ）。搜索结果即队列，所以这直接决定「点歌后队列有多长」。
     private let pageLimit = 50
+    /// 当前播放队列对应的搜索关键词（翻页续接时校验，避免串改别的来源队列）
+    @State private var queueQuery: String = ""
     /// 冷却期内复用的提示（hw SearchPage.ets:197 同文案，N = 剩余秒数向上取整）
     private static let rateLimitedFmt = "QQ 音乐搜索被限流，请在 %d 秒后重试"
     /// 服务端没给 message 时的兜底（hw SearchPage.ets:236）
@@ -488,6 +490,11 @@ struct SearchView: View {
                 albums += reply.albums
                 artists += reply.artists
                 playlists += reply.playlists
+                // 翻页续接队列（0 额外上游请求：这一页本来就要拉）。
+                // 只有当「正在播放的队列就是这个关键词搜出来的」才续，否则会串改别的来源队列。
+                if slice == 0, player.origin == "搜索", queueQuery == normalizedQuery(q) {
+                    player.appendToQueue(reply.songs, origin: "搜索")
+                }
             }
             hasMore = [reply.hasMore.song, reply.hasMore.album, reply.hasMore.artist, reply.hasMore.playlist]
             page = reply.page
@@ -535,8 +542,15 @@ struct SearchView: View {
         return true
     }
 
+    /// 关键词归一化（去首尾空白 + 小写）：比较「这条队列是不是同一个搜索」用
+    private func normalizedQuery(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
     private func playSong(at index: Int) async {
         guard songs.indices.contains(index) else { return }
+        // 记下这次队列对应的关键词，翻页时用它判断能不能续接
+        queueQuery = normalizedQuery(keyword)
         await player.play(tracks: songs, startingAt: index, origin: "搜索")
     }
 
