@@ -67,3 +67,9 @@ payload/配色/歌词 3 行窗口/按钮指令(play/pause/next/prev/favorite)/�
 1. `PlaybackService.emitTrackChange` 在自动播放路径上未触发（歌词加载挂在这里，已休眠）。代码路径检查无误，
    需在干净构建上用无格式化符日志再验一轮（见 MEMORY 中 2026-10-25 §二十一）。
 2. 服务端是否已发布 `platform=ios` 的更新产物（T13 里核）。
+
+## 六、收尾状态（2026-10-25 晚）
+- **iOS 端完工**：真机（iPad 8th）已安装、模拟器全链路验收通过。详见 `docs/memory/2026-10-25-iOS端完工.md`。
+- 上一节「遗留待查」两条均已闭环：① `emitTrackChange` 已确认正常（歌词首播改由 `play()` 显式调用 `ensureLyrics/ensureRecoReasons`）；
+  ② 服务端 `platform=ios` 产物留待 T13 发布链一并核。
+- 明确不做：桌面 widget、曲目行歌手名下钻、队列拖动排序。
