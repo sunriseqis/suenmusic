@@ -565,9 +565,11 @@ final class AudioEngine: NSObject {
             guard let idx = self.itemIndex[ObjectIdentifier(item)] else { return }
 
             if self.repeatMode == .repeatOne {
-                // 原地重播：不是切歌，不发 trackChange；但"仍在播放"要报给 Web
-                self.player.seek(to: .zero)
-                self.startPlayback()
+                // 单曲循环：**重建条目**而不是 seek(0)。
+                // seek 会留下两个问题（用户实测）：① 时间基已到末尾，周期观察者不再回调 → 进度条卡在结尾；
+                // ② 音源长度与元数据不一致时，条目仍报旧时长。
+                // 重建 = 新条目 + seek 0 + 起播，时间轴和时长都会重新解析。
+                self.rebuildQueue(from: idx, positionMs: 0, autoplay: true, reason: 2)
                 return
             }
 

@@ -94,8 +94,7 @@ struct QueueSheet: View {
             }
         }
         .scrollIndicators(.hidden)
-        // 拖拽排序进行中锁住滚动，手指不再同时拖动列表
-        .scrollDisabled(dragFrom != nil)
+        // 不再锁滚动：拖动排序已暂时摘除，滚动优先。
     }
 
     private func row(_ index: Int, _ item: Track) -> some View {
@@ -129,8 +128,9 @@ struct QueueSheet: View {
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { player.jumpTo(index) }
-                // 与 ScrollView 并存：长按成功后才接管拖动（否则纵向拖动会被滚动吃掉）
-                .simultaneousGesture(reorder(index))
+                // ⚠️ 拖动排序暂时摘掉（用户实测「播放列表页上下滑动无效」）：
+                //    `LongPressGesture.sequenced(before: DragGesture())` 挂在行上仍会与 ScrollView 抢手势；
+                //    先保证滚动可用，排序用「拖动把手」的方式重做（见待办）。
 
                 // 删除键：danger 透明底红字；独立按钮 → 点它不会触发整行跳播
                 WebButton("删除", variant: .danger, size: .sm) {
