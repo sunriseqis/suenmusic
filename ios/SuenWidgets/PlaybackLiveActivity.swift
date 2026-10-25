@@ -95,8 +95,11 @@ struct PlaybackLockScreenView: View {
 /// 灵动岛 + 锁屏的 Widget 声明（widget target 的 @main 由 Package/WidgetBundle 提供）
 struct PlaybackLiveActivityWidget: Widget {
     var body: some WidgetConfiguration {
-        ActivityConfiguration(for: PlaybackActivityAttributes.self) { context in
-            PlaybackLockScreenView(state: context.state)
+        ActivityConfiguration(for: PlaybackActivityAttributes.self) { _ in
+            // 锁屏呈现**故意留空**（2026-10-25 用户裁定）：
+            //   锁屏已经有系统媒体卡（MPNowPlayingInfoCenter，关不掉），再放一张我们的卡就是重复信息。
+            //   只保留灵动岛三态（compact/minimal/expanded）——那才是系统卡给不了的。
+            EmptyView()
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
