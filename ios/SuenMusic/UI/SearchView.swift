@@ -44,8 +44,11 @@ struct SearchView: View {
     /// 与 hw `RECENT_MAX` 同值
     private let recentMax = 10
     private let recentKey = "recent_search"
-    /// /api/search 每页条数（与 APIClient.search 的默认 limit 同值）
-    private let pageLimit = 30
+    /// /api/search 每页条数。
+    ///
+    /// 从 30 提到 50：服务端 `limit` 上限就是 50，**仍是一次上游请求**（qq search 无缓存，
+    /// 多拉几页就是多打几次 QQ）。搜索结果即队列，所以这直接决定「点歌后队列有多长」。
+    private let pageLimit = 50
     /// 冷却期内复用的提示（hw SearchPage.ets:197 同文案，N = 剩余秒数向上取整）
     private static let rateLimitedFmt = "QQ 音乐搜索被限流，请在 %d 秒后重试"
     /// 服务端没给 message 时的兜底（hw SearchPage.ets:236）
