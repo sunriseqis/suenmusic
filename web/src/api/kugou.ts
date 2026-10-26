@@ -12,8 +12,12 @@
 import { http } from './client.ts';
 import type { KugouQrSession, KugouQrPoll, KugouStatus } from './types.ts';
 
+/**
+ * 酷狗登录态（四态：未登录 / 登录已失效 / 会员到期 / 正常）。
+ * 文案由服务端下发 —— 会员到期与 token 失效是两种不同故障，两端不要再各自拼。
+ */
 export function fetchKugouStatus(signal?: AbortSignal): Promise<KugouStatus> {
-  return http.get<KugouStatus>('/api/admin/kugou/credentials', { signal });
+  return http.get<KugouStatus>('/api/admin/kugou/status', { signal });
 }
 
 export function startKugouQr(): Promise<KugouQrSession> {

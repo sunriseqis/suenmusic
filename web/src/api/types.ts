@@ -460,13 +460,19 @@ export interface BilibiliQrPoll {
 
 export type KugouQrState = 'waiting' | 'confirmed' | 'expired' | 'failed';
 
+export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok';
+
 export interface KugouStatus {
-  present: boolean;
-  savedAt?: number;
-  userid?: string;
-  /** 非空 = token 已失效，需重新扫码 */
-  invalidAt?: number;
-  invalidReason?: string;
+  ok: boolean;
+  state: KugouState;
+  /** 服务端给的中文（未登录 / 登录已失效，请重新授权 / 已登录 · 会员已到期 / 已登录 · 会员有效） */
+  label: string;
+  userid: string;
+  nickname: string;
+  vipEndTime: string;
+  vipRemainingMs: number | null;
+  savedAt: number;
+  invalidReason: string;
 }
 
 export interface KugouQrSession {

@@ -24,7 +24,7 @@ import {
   K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
-import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, BiliTop, AvailabilityItem, AvailabilityResponse } from '../core/Models';
+import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, ResolveResponse } from '../core/Models';
 import { OfflineCache } from '../core/OfflineCache';
 import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
@@ -267,12 +267,25 @@ export struct PlayerPage {
     op.then(() => {
       this.pinnedSource = isPinned ? '' : source;
       AppToast.show(isPinned ? '已恢复自动匹配' : '已指定只用该源');
+      // 钉完立刻回读解析来源，音源标签当场变（否则要等下一次解析，用户会以为没生效）
+      this.refreshSourceNow(trackId);
     }).catch(() => {
       AppToast.show('操作失败，请稍后重试');
     }).finally(() => {
       this.pinBusy = false;
       if (this.trackId !== '') { this.loadAvailability(this.trackId); }
     });
+  }
+
+  /** 重新解析并当场刷新「音源」标签（钉源/解钉后调用） */
+  private refreshSourceNow(trackId: string): void {
+    if (trackId === '') { return; }
+    APIClient.shared().resolve(trackId)
+      .then((r: ResolveResponse) => {
+        if (this.trackId !== trackId) { return; }
+        AppStorage.setOrCreate<string>(K_SOURCE, r.ok ? r.source : '');
+      })
+      .catch(() => {});
   }
 
   /** 可用性文案（查询中 / 无音源 / 音源可用） */

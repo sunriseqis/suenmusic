@@ -154,6 +154,21 @@ export function resolveTrack(
     });
   }
 
+  /**
+   * 用户源钉（锚定页「只用某源」）。
+   *
+   * 语义：**最近一次用户选择生效** —— 钉了酷狗就必须走酷狗，
+   * 不能被历史 B 站锚点（哪怕是手动 pinned 的）压住。
+   * 反过来，用户之后手动锚定 B 站时会把钉清掉（见 POST /api/tracks/:id/anchor）。
+   *
+   * 有钉时同时跳过缓存：缓存里存的是上游源（bilibili），继续命中就白钉了。
+   */
+  const pin = getPin(key);
+  if (pin) {
+    memoryDelete(key);
+    deleteSource(key);
+  }
+
   if (options.force) {
     memoryDelete(key);
     deleteSource(key);
@@ -174,9 +189,9 @@ export function resolveTrack(
       if (failedRow && !failedRow.ok) deleteSource(key);
     }
 
-    // 优先检查用户手动锚定：手动固定的锚点具有最高权威
+    // 优先检查用户手动锚定：手动固定的锚点具有最高权威（**但源钉优先**，见函数开头）
     const anchor = getAnchor(key);
-    if (anchor?.pinned) {
+    if (anchor?.pinned && !pin) {
       const cached = memoryGet(key);
       if (cached && cached.bvid === anchor.bvid && cached.ok) {
         stats.memoryHits++;
@@ -226,12 +241,12 @@ export function resolveTrack(
 
   // ---- 锚定映射（自动沉淀，永不过期）----
   const anchor = getAnchor(key);
-  if (anchor) {
+  if (anchor && !pin) {
     return resolveFromAnchor(key, anchor, input, started);
   }
 
-  // 冷却窗口内不再打上游：越打窗口越长
-  if (biliCooldown.active()) {
+  // 冷却窗口内不再打上游：越打窗口越长（钉了非 B 站源时不受 B 站冷却影响）
+  if (!pin && biliCooldown.active()) {
     stats.cooldownRejections++;
     const snap = biliCooldown.snapshot();
     log.warn(
@@ -254,10 +269,8 @@ export function resolveTrack(
   stats.upstreamCalls++;
   const ts = Date.now();
 
-  // 用户源钉（锚定页「只用某源」）：**优先于默认链**。钉 kugou/netease 时只走该源；
-  // 钉外的源（含 B 站兜底）全部跳过。pin 无效（该源失败）时按失败处理，
-  // 不自动落回别的源 —— 用户的指令就是「只用它」，落回等于悄悄违背。
-  const pin = getPin(key);
+  // 钉外的源（含 B 站兜底）全部跳过；钉的源失败就按失败处理，不落回别的源
+  // —— 用户的指令就是「只用它」，落回等于悄悄违背。
   const baseChain: Promise<ResolveResult> = pin
     ? (async (): Promise<ResolveResult> => {
         log.info(`源钉 ${key} → 只走 ${pin.source}`);

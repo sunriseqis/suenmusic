@@ -55,7 +55,7 @@ import {
   pollNeteaseQr,
   startNeteaseQr,
 } from '@/api/netease.ts';
-import type { PersonaDetail } from '@/api/types.ts';
+import type { PersonaDetail, KugouState } from '@/api/types.ts';
 
 const ui = useUiStore();
 const session = useSessionStore();
@@ -330,8 +330,10 @@ const biliOn = ref(false);
 const neteaseOn = ref(false);
 const kugouOn = ref(false);
 const kugouName = ref('');
-/** token 失效（服务端 20018 打标）：显示「需重新授权」并允许重新授权 */
-const kugouInvalid = ref(false);
+/** 酷狗登录态（服务端统一给 label：未登录 / 已失效 / 会员到期 / 正常） */
+const kugouState = ref<KugouState>('logged_out');
+const kugouLabel = ref('未登录');
+const kugouInvalid = computed(() => kugouState.value === 'invalid');
 
 // ---------------------------------------------------------------- 音源授权
 type SourceKind = 'bilibili' | 'netease' | 'kugou';
@@ -450,12 +452,14 @@ async function loadSources(): Promise<void> {
   }
   try {
     const st = await fetchKugouStatus();
-    kugouOn.value = !!st.present;
-    kugouInvalid.value = !!st.invalidAt;
+    kugouState.value = st.state;
+    kugouLabel.value = st.label;
+    kugouOn.value = st.state !== 'logged_out';
     kugouName.value = st.userid ? ('uid ' + st.userid) : '';
   } catch {
     kugouOn.value = false;
-    kugouInvalid.value = false;
+    kugouState.value = 'logged_out';
+    kugouLabel.value = '未登录';
   }
 }
 
@@ -663,9 +667,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="row">
             <span class="row-name">酷狗（概念版）</span>
-            <span class="row-val">{{
-              kugouInvalid ? '授权已过期，请重新授权' : (kugouOn ? kugouName || '已授权' : '未授权')
-            }}</span>
+            <span class="row-val">{{ kugouLabel }}</span>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
               <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>
               <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('kugou')">退出</NeuButton>

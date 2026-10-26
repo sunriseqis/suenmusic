@@ -392,6 +392,9 @@ export function registerResolveRoutes(app: FastifyInstance): void {
       },
       true
     );
+    // 手动锚定 B 站 = 用户最新的一次选择 → 清掉之前的源钉，
+    // 否则钉会继续压住锚点（resolver 里钉优先），用户会觉得「锚了没反应」。
+    deletePin(parsed.raw);
     // 清掉解析缓存，下一次解析立即走锚点（否则短 TTL 的旧失败结果还在）
     invalidateTrack(parsed.raw);
     log.info(`曲目已锚定 ${parsed.raw} → ${bvid}`);

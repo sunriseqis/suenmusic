@@ -20,6 +20,7 @@ import {
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { readAiHealthView } from '../services/ai-health.ts';
 import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
+import { readKugouLoginState } from '../services/kugou-status.ts';
 
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
@@ -438,6 +439,14 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   app.get('/api/admin/kugou/credentials', async () => {
     return { ok: true, ...readKugouCredentialStatus() };
+  });
+
+  /**
+   * 酷狗登录态（四态：未登录 / 失效 / 会员到期 / 正常）。
+   * 两端设置页都读这一个接口，文案由服务端给，避免两端各自拼出不同说法。
+   */
+  app.get('/api/admin/kugou/status', async () => {
+    return { ok: true, ...(await readKugouLoginState()) };
   });
 
 
