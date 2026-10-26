@@ -85,13 +85,43 @@ function readStoredAccount(): NeteaseAccount | null {
   }
 }
 
+let accountBackfillRunning: Promise<void> | null = null;
+
+/**
+ * cookie 有效但 account 缓存缺失时**回填**（2026-10-26 bug 的善后）。
+ *
+ * 根因：扫码登录时 verifyAccount 因「body.code!==200」（实测该响应只有 data 键，
+ * code 缺失）判定失败 → 走了 deleteSetting(KEY_ACCOUNT) 分支。cookie 本身有效，
+ * 但从此设置页永远「未授权/凭证失效」。verify 修好后，这里把存量账号补回来。
+ */
+function backfillAccountIfNeeded(): void {
+  const fromDb = getSetting(KEY_COOKIE);
+  if (!fromDb || readStoredAccount()) return;
+  if (accountBackfillRunning) return;
+  accountBackfillRunning = (async () => {
+    try {
+      const account = await verifyAccount(fromDb);
+      if (account) {
+        setSetting(KEY_ACCOUNT, JSON.stringify(account));
+        log.info(`网易云账号已回填：${account.name}（id=${account.userId}）——此前因 code 判定过严被清`);
+      } else {
+        log.warn(`网易云回填失败：${lastVerifyUpstreamMsg || 'verify 返回 null'}`);
+      }
+    } finally {
+      accountBackfillRunning = null;
+    }
+  })();
+}
+
 export function getNeteaseStatus(): NeteaseStatus {
   const fromDb = getSetting(KEY_COOKIE);
   const cookie = config.neteaseCookie;
+  const account = fromDb ? readStoredAccount() : null;
+  if (fromDb && !account) backfillAccountIfNeeded();   // 缺账号 → 异步补（不阻塞请求）
   return {
     configured: Boolean(cookie),
     source: fromDb ? 'database' : cookie ? 'env' : 'none',
-    account: fromDb ? readStoredAccount() : null,
+    account,
     canLogout: Boolean(fromDb),
   };
 }
@@ -177,7 +207,11 @@ async function verifyAccount(cookie: string): Promise<NeteaseAccount | null> {
     const account = body?.data?.account;
     const profile = body?.data?.profile;
 
-    if (body?.code === 200 && account?.id && profile?.nickname) {
+    // ⚠️ 不能要求 body.code === 200：实测（2026-10-26）loginStatus 的返回体**只有 data 一个键**，
+    // code 字段缺失（undefined）。cookie 明明有效（account.id/profile.nickname 都在），
+    // 却被这条判死 → 永远 account:null → 三端显示「未授权/凭证失效」。
+    // 判定改为：**拿到 account.id + profile.nickname 即有效**（这就是登录成功的定义）。
+    if (account?.id && profile?.nickname) {
       return {
         userId: Number(account.id),
         name: String(profile.nickname ?? ''),
