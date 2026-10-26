@@ -20,7 +20,8 @@ import {
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { readAiHealthView } from '../services/ai-health.ts';
 import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
-import { readKugouLoginState } from '../services/kugou-status.ts';
+import { invalidateKugouStatusCache, readKugouLoginState } from '../services/kugou-status.ts';
+import { readKugouCheckinState, runKugouCheckin } from '../services/kugou-checkin.ts';
 
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
@@ -482,7 +483,11 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       })
     );
     deleteSetting('kugou.credentialsInvalidAt');
+    invalidateKugouStatusCache();
     log.info(`酷狗凭据已导入：userid=${userid} vip_token=${body.vipToken ? '有' : '无'}`);
+    await runKugouCheckin(true).catch(err =>
+      log.warn(`导入凭据后自动签到失败：${(err as Error)?.message ?? String(err)}`),
+    );
     return { ok: true, ...(await readKugouLoginState()) };
   });
 
@@ -498,10 +503,25 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     return { ok: true, ...(await readKugouLoginState()) };
   });
 
+  /** 查询酷狗今日签到与概念 SVIP 升级状态 */
+  app.get('/api/admin/kugou/checkin', async () => {
+    return { ok: true, ...readKugouCheckinState() };
+  });
+
+  /** 手动触发酷狗今日签到与概念 SVIP 升级 */
+  app.post('/api/admin/kugou/checkin', async () => {
+    invalidateKugouStatusCache();
+    const checkin = await runKugouCheckin(true);
+    const status = await readKugouLoginState();
+    return { ok: true, checkin, status };
+  });
 
   /** 退出授权：清掉 kugou.credentials（对齐 B 站 DELETE /api/bilibili/account 的语义） */
   app.delete('/api/admin/kugou/credentials', async () => {
     deleteSetting('kugou.credentials');
+    deleteSetting('kugou.credentialsInvalidAt');
+    deleteSetting('kugou.checkin');
+    invalidateKugouStatusCache();
     log.info('酷狗授权已退出（凭据清除）');
     return { ok: true };
   });

@@ -465,12 +465,20 @@ export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok';
 export interface KugouStatus {
   ok: boolean;
   state: KugouState;
-  /** 服务端给的中文（未登录 / 登录已失效，请重新授权 / 已登录 · 会员已到期 / 已登录 · 会员有效） */
+  /** 服务端给的中文（未登录 / 登录已失效，请重新授权 / 已登录 · 会员已到期 / 已登录 · 会员有效 · 已签） */
   label: string;
   userid: string;
   nickname: string;
   vipEndTime: string;
+  vipExpireAt?: string;
   vipRemainingMs: number | null;
+  checkedIn?: boolean;
+  upgraded?: boolean;
+  checkinDate?: string;
+  svipActive?: boolean;
+  svipEndTime?: string;
+  accountLabel?: string;
+  statusLabel?: string;
   savedAt: number;
   invalidReason: string;
 }

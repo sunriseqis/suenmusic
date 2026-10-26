@@ -370,6 +370,11 @@ struct KugouLoginState: Decodable {
     let userid: String?
     let nickname: String?
     let vipEndTime: String?
+    let vipExpireAt: String?
+    let checkedIn: Bool?
+    let upgraded: Bool?
+    let checkinDate: String?
+    let svipActive: Bool?
 }
 
 struct SourceAccount: Decodable {

@@ -13,6 +13,8 @@
 import crypto from 'node:crypto';
 import { createLogger } from '../logger.ts';
 import { setSetting, getSetting, deleteSetting } from '../db/repo/settings.ts';
+import { runKugouCheckin } from './kugou-checkin.ts';
+import { invalidateKugouStatusCache } from './kugou-status.ts';
 
 const log = createLogger('kugou-login');
 
@@ -264,8 +266,12 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
     };
     setSetting('kugou.credentials', JSON.stringify(creds));
     deleteSetting('kugou.credentialsInvalidAt');
+    invalidateKugouStatusCache();
     current = null;
     log.info(`酷狗登录凭据已保存（userid=${userid} mid=${devInfo.mid.slice(0, 8)}…）`);
+    void runKugouCheckin(true).catch(err =>
+      log.warn(`扫码后自动签到失败：${(err as Error)?.message ?? String(err)}`),
+    );
     return { status: 'confirmed', token, userid };
   }
   if (st === 0) return { status: 'expired' };

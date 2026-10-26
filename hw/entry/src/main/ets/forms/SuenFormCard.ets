@@ -311,26 +311,26 @@ struct SuenFormCard {
       Column() {
         if (this.hasCover()) {
           Image(this.coverUrl)
-            .width(84)
-            .height(84)
+            .width(72)
+            .height(72)
             .borderRadius(8)
             .objectFit(ImageFit.Cover)
         } else {
           Column() {
             Image($r('app.media.card_note'))
-              .width(26)
-              .height(26)
+              .width(24)
+              .height(24)
               .fillColor(this.cT2())
               .opacity(0.4)
           }
-          .width(84)
-          .height(84)
+          .width(72)
+          .height(72)
           .borderRadius(8)
           .backgroundColor(this.cWell())
           .justifyContent(FlexAlign.Center)
         }
       }
-      .width(112)
+      .width(92)
       .height('100%')
       .justifyContent(FlexAlign.Center)
 
@@ -342,7 +342,7 @@ struct SuenFormCard {
       Column() {
         Column() {
           Text(this.title)
-            .fontSize(14)
+            .fontSize(13.5)
             .fontWeight(FontWeight.Medium)
             .fontColor(this.cT1())
             .lineHeight(16)
@@ -352,7 +352,7 @@ struct SuenFormCard {
 
           if (!this.isIdle()) {
             Text(this.artist)
-              .fontSize(10)
+              .fontSize(9.5)
               .fontColor(this.cT2())
               .maxLines(1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
@@ -366,22 +366,23 @@ struct SuenFormCard {
         Column() {
           ForEach(this.lyricLines(), (line: string, idx: number) => {
             Text(line)
-              .fontSize(idx === this.activeIndex() ? 11 : 10)
+              .fontSize(idx === this.activeIndex() ? 11 : 9.5)
               .fontWeight(idx === this.activeIndex() ? FontWeight.Bold : FontWeight.Normal)
               .fontColor(idx === this.activeIndex()
                 ? this.cAccentText()
                 : this.cT2())
-              .maxLines(1)
+              .lineHeight(idx === this.activeIndex() ? 15 : 13)
+              .maxLines(idx === this.activeIndex() ? 2 : 1)
               .textOverflow({ overflow: TextOverflow.Ellipsis })
               .width('100%')
-              .padding({ left: idx === this.activeIndex() ? 8 : 0 })
-              .margin({ top: idx === 0 ? 0 : 3 })
+              .padding({ left: idx === this.activeIndex() ? 6 : 0 })
+              .margin({ top: idx === 0 ? 0 : 2 })
           }, (line: string, idx: number) => `${idx}_${line}`)
         }
         .layoutWeight(1)
         .width('100%')
         // 与歌名/歌手留出阅读间距（歌名两行后贴得太近，2026-10-23 用户反馈）
-        .margin({ top: 5 })
+        .margin({ top: 4 })
         .justifyContent(FlexAlign.Center)
         // 溢出防御：窗口行数异常时裁在本区域内，不再压到下方进度条
         .clip(true)
@@ -410,23 +411,23 @@ struct SuenFormCard {
             .fontColor(this.cT2())
         }
         .width('100%')
-        .margin({ top: 8 })
+        .margin({ top: 6 })
       }
       .layoutWeight(1)
       .height('100%')
-      .padding({ left: 14, right: 12, top: 12, bottom: 12 })
+      .padding({ left: 10, right: 10, top: 10, bottom: 10 })
 
       Column()
         .width(1)
         .height('100%')
         .backgroundColor(this.cLine())
 
-      Column({ space: 12 }) {
+      Column({ space: 10 }) {
         this.ctrlBtn('prev')
         this.ctrlBtn('toggle')
         this.ctrlBtn('next')
       }
-      .width(56)
+      .width(50)
       .height('100%')
       .justifyContent(FlexAlign.Center)
       .opacity(this.isIdle() ? 0.35 : 1)

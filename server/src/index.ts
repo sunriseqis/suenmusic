@@ -27,6 +27,7 @@ import { ensurePoolHealth, getActiveUserIds } from './services/library-topup.ts'
 import { autoTagUntagged } from './services/ai-tags.ts';
 import { refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
 import { runDailyMaintenance } from './services/daily-recommend.ts';
+import { ensureKugouCheckin, runKugouCheckin } from './services/kugou-checkin.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
 
 /** 曲目缓存保留 30 天。QQ 侧元数据变动很少，30 天足够且能显著减少上游请求 */
@@ -213,6 +214,9 @@ async function main(): Promise<void> {
     void autoTagUntagged(100).catch(err =>
       logger.warn(`后台打标失败：${(err as Error)?.message ?? String(err)}`)
     );
+    void ensureKugouCheckin().catch(err =>
+      logger.warn(`酷狗周期签到检查失败：${(err as Error)?.message ?? String(err)}`)
+    );
   }, PRUNE_INTERVAL_MS);
   // 启动 5 秒后执行未打标曲目自动补打（启发式秒级完成）
   setTimeout(() => {
@@ -220,10 +224,31 @@ async function main(): Promise<void> {
       logger.warn(`启动补打失败：${(err as Error)?.message ?? String(err)}`)
     );
   }, 5_000).unref();
+  // 启动 8 秒后执行酷狗概念版每日签到 + SVIP 升级检查
+  setTimeout(() => {
+    void ensureKugouCheckin().catch(err =>
+      logger.warn(`酷狗启动自动签到失败：${(err as Error)?.message ?? String(err)}`)
+    );
+  }, 8_000).unref();
   // 启动 60 秒后再做第一次体检（避开启动时的一堆初始化请求）
   setTimeout(checkPoolHealth, 60_000).unref();
   // unref 让定时器不阻止进程退出
   timer.unref();
+
+  /**
+   * 酷狗概念版每日签到 + 概念 SVIP 升级：**业务本地时间每天 00:05** 跑一次。
+   * 概念 SVIP 每次升级有效期 24 小时，每天零点后自动续期可保持全天候 FLAC/320k 取流权益。
+   */
+  let kugouCheckinTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleKugouDailyCheckin = (): void => {
+    kugouCheckinTimer = setTimeout(() => {
+      void runKugouCheckin(true)
+        .catch(err => logger.warn(`酷狗每日定时签到失败：${(err as Error)?.message ?? String(err)}`))
+        .finally(scheduleKugouDailyCheckin);
+    }, msUntilNextLocal(0, 5));
+    kugouCheckinTimer.unref();
+  };
+  scheduleKugouDailyCheckin();
 
   /**
    * 每日推荐维护：**业务本地时间每天 00:30** 跑一次。
@@ -292,6 +317,7 @@ async function main(): Promise<void> {
     logger.info(`收到 ${signal}，正在关闭`);
 
     clearInterval(timer);
+    if (kugouCheckinTimer) clearTimeout(kugouCheckinTimer);
     if (dailyTimer) clearTimeout(dailyTimer);
     try {
       await app.close();

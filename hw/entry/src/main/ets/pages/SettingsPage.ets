@@ -13,7 +13,7 @@
  * 经参数传值不会建立依赖、状态变了 UI 不刷（T10 实测口径，与 NativeRoot tabItem 同款）。
  */
 
-import { AppState, K_USER_NAME, K_USER_DISPLAY, K_USER_ROLE, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE } from '../viewmodel/AppState';
+import { AppState, K_USER_NAME, K_USER_DISPLAY, K_USER_ROLE, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE, K_BASE_URL } from '../viewmodel/AppState';
 import { APIClient, ApiError } from '../core/APIClient';
 import { WebDavClient } from '../core/WebDavClient';
 import { Tokens } from '../common/Tokens';
@@ -74,6 +74,8 @@ export struct SettingsPage {
   @StorageLink(K_LYRIC_TRANS) lyricTrans: boolean = true;
   /** 自动切换服务器（默认开，APIClient.failoverIfNeeded 首行判断；hw 专属条目） */
   @StorageLink(K_AUTO_FAILOVER) autoFailover: boolean = true;
+  /** 监听当前服务端地址变更，切服后自动重拉音源授权状态 */
+  @StorageProp(K_BASE_URL) @Watch('onServerChanged') baseUrl: string = '';
 
   /** 0 = 本机 / 1 = 智能 / 2 = 高级（web NeuTabs） */
   @State seg: number = 0;
@@ -137,6 +139,10 @@ export struct SettingsPage {
     this.loadWebdavFields();
     this.loadDislikes();
     this.loadPersona();
+    this.loadSources();
+  }
+
+  onServerChanged(): void {
     this.loadSources();
   }
 
@@ -1702,7 +1708,7 @@ export struct SettingsPage {
             Column() {
               this.rowStatic('bilibili', this.biliLabel, true)
               this.rowStatic('网易云', this.neteaseLabel, false)
-              this.rowStatic('酷狗（概念版）', this.kugouLabel, false)
+              this.rowStatic('酷狗', this.kugouLabel, false)
             }
             .width('100%')
             .backgroundColor(Tokens.panel)

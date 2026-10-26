@@ -351,7 +351,7 @@ struct SettingsView: View {
             card {
                 rowStatic("bilibili", value: biliLabel, first: true)
                 rowStatic("网易云", value: neteaseLabel)
-                rowStatic("酷狗（概念版）", value: kugouLabel)
+                rowStatic("酷狗", value: kugouLabel)
             }
         }
     }

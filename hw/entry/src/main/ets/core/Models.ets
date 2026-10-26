@@ -122,7 +122,15 @@ export interface KugouLoginState {
   userid: string;
   nickname: string;
   vipEndTime: string;
+  vipExpireAt?: string;
   vipRemainingMs: number;
+  checkedIn?: boolean;
+  upgraded?: boolean;
+  checkinDate?: string;
+  svipActive?: boolean;
+  svipEndTime?: string;
+  accountLabel?: string;
+  statusLabel?: string;
   savedAt: number;
   invalidReason: string;
 }

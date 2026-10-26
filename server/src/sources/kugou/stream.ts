@@ -18,6 +18,7 @@ import crypto from 'node:crypto';
 import { createLogger } from '../../logger.ts';
 import { getSetting } from '../../db/repo/settings.ts';
 import { getKugouDevice, ensureDfid, markKugouCredentialInvalid } from '../../services/kugou-login.ts';
+import { ensureKugouCheckin, isKugouCheckedInToday } from '../../services/kugou-checkin.ts';
 import {
   APPID_LITE,
   CLIENTVER_LITE,
@@ -403,6 +404,13 @@ export async function resolveKugouSource(track: ResolveInput): Promise<ResolveRe
   }).sort((a, b) => (a.versioned - b.versioned) || (a.durDiff - b.durDiff));
 
   if (!scored.length) return fail('no_candidates', '无匹配（' + keyword + '）');
+
+  // 取流前兜底：若今日尚未完成畅听签到 + 概念 SVIP 升级，先自动补签以解锁 320k/FLAC
+  if (!isKugouCheckedInToday(creds.userid)) {
+    await ensureKugouCheckin().catch(err =>
+      log.warn(`取流前自动签到失败：${(err as Error)?.message ?? String(err)}`),
+    );
+  }
 
   const dfid = await ensureDfid();
   let userAuth: string;

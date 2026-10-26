@@ -672,7 +672,7 @@ onBeforeUnmount(() => {
             </template>
           </div>
           <div class="row">
-            <span class="row-name">酷狗（概念版）</span>
+            <span class="row-name">酷狗</span>
             <span class="row-val">{{ kugouVal }}</span>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
               <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>

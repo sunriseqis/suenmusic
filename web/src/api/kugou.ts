@@ -36,3 +36,9 @@ export function pollKugouQr(signal?: AbortSignal): Promise<KugouQrPoll> {
 export function logoutKugou(): Promise<{ ok: boolean }> {
   return http.delete<{ ok: boolean }>('/api/admin/kugou/credentials');
 }
+
+export function checkinKugou(): Promise<{ ok: boolean; status: KugouStatus }> {
+  return http.post<{ ok: boolean; status: KugouStatus }>('/api/admin/kugou/checkin', undefined, {
+    timeoutMs: 15_000,
+  });
+}
