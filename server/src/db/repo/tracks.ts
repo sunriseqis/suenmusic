@@ -111,22 +111,55 @@ export function getTrack(id: string): Track | null {
 }
 
 /**
+ * 「哪些曲目会被清掉」的判定条件 —— **只此一处**：`pruneTracks` 与删除前留痕共用它，
+ * 避免『看到清单』与『真删除』两套条件漂移（历史上阈值各写一遍就出过事）。
+ *
+ * 保护集合（任一引用存在就不删）：
+ *   · favorites           收藏（用户可见资产）
+ *   · playlist_pool_items 每日推荐候选池（长期引用）
+ *   · play_history        播放历史 —— 缺了它『听过就换一批』失效、历史列表歌名封面变空
+ *   · recommend_history   7 天推荐冻结清单 —— 缺了它会开始重复推荐同一批歌
+ *   · track_tags          AI 打标结果（重建要重花 token）
+ *   · ai_passed           AI 否决台账（缺了它会反复把同一批歌递给模型）
+ */
+const PRUNABLE_WHERE = `fetched_at < ?
+    AND id NOT IN (SELECT track_id FROM favorites)
+    AND id NOT IN (SELECT track_id FROM playlist_pool_items)
+    AND id NOT IN (SELECT track_id FROM play_history)
+    AND id NOT IN (SELECT track_id FROM recommend_history)
+    AND id NOT IN (SELECT track_id FROM track_tags)
+    AND id NOT IN (SELECT track_id FROM ai_passed)`;
+
+/** 待清理曲目（删除前留痕用） */
+export interface PrunableTrack {
+  id: string;
+  name: string;
+  fetchedAt: number;
+}
+
+/** 只读：列出即将被 pruneTracks 删除的曲目，用于删除前写清单 */
+export function listPrunableTracks(olderThanMs: number): PrunableTrack[] {
+  const rows = getDatabase()
+    .prepare(`SELECT id, payload_json, fetched_at FROM tracks WHERE ${PRUNABLE_WHERE}`)
+    .all(now() - olderThanMs) as Array<{ id: string; payload_json: string; fetched_at: number }>;
+  return rows.map(r => ({
+    id: r.id,
+    name: safeParse(r.payload_json)?.name ?? '',
+    fetchedAt: toNumber(r.fetched_at),
+  }));
+}
+
+/**
  * 清掉超过指定年龄的缓存条目，避免库无限增长。
  *
- * 保护集合：收藏夹、每日推荐候选池（`playlist_pool_items`）。
- * 这里原先引用的是 `playlist_items`（用户歌单表）—— 那张表在 020 迁移里已删除，
- * 而真正会长期引用曲目的是候选池，改成它才是本意。
+ * ⚠️ 这是**不可逆**操作：tracks 既是缓存又是元数据唯一真相源，删掉的曲目若还挂在
+ *    收藏/历史/推荐清单上，就只剩一个 id（无歌名无封面），而 QQ 限流时也补不回来。
+ *    因此启动调用侧必须先快照 + 落删除清单。
  */
 export function pruneTracks(olderThanMs: number): number {
-  const cutoff = now() - olderThanMs;
   const res = getDatabase()
-    .prepare(
-      `DELETE FROM tracks
-        WHERE fetched_at < ?
-          AND id NOT IN (SELECT track_id FROM favorites)
-          AND id NOT IN (SELECT track_id FROM playlist_pool_items)`
-    )
-    .run(cutoff);
+    .prepare(`DELETE FROM tracks WHERE ${PRUNABLE_WHERE}`)
+    .run(now() - olderThanMs);
   return toNumber(res.changes);
 }
 

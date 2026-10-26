@@ -18,7 +18,10 @@ import { pruneLoginThrottle } from './services/auth.ts';
 import { loadBilibiliCookieFromDb } from './services/bilibili-account.ts';
 import { loadNeteaseCookieFromDb, initNeteaseVendor } from './services/netease-account.ts';
 import { pruneTokens } from './db/repo/tokens.ts';
-import { pruneTracks } from './db/repo/tracks.ts';
+import { listPrunableTracks, pruneTracks } from './db/repo/tracks.ts';
+import { getDatabase } from './db/index.ts';
+import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import { ensurePoolHealth, getActiveUserIds } from './services/library-topup.ts';
 import { autoTagUntagged } from './services/ai-tags.ts';
 import { refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
@@ -49,6 +52,76 @@ process.on('unhandledRejection', reason => {
   );
 });
 
+/**
+ * 删除陈旧曲目前的保险：**先快照、再留清单**。
+ *
+ * 为什么必须做：`tracks` 既是缓存又是元数据唯一真相源，删除不可逆；而 QQ 一旦限流，
+ * 被删曲目即使还挂在收藏/历史里也补不回歌名与封面。快照给出「能回滚」，清单给出
+ * 「删了哪些」，两者都落盘在数据目录下的 prune/ 里，保留最近 KEEP 份。
+ */
+const PRUNE_ARTIFACT_KEEP = 20;
+
+function snapshotBeforePrune(olderThanMs: number): void {
+  let candidates: ReturnType<typeof listPrunableTracks>;
+  try {
+    candidates = listPrunableTracks(olderThanMs);
+  } catch (e) {
+    logger.warn(`陈旧曲目预检失败，跳过本轮清理：${(e as Error).message}`);
+    return;
+  }
+  if (candidates.length === 0) return;
+
+  const dir = resolve(dirname(config.dbPath), 'prune');
+  const stampText = new Date().toISOString().replace(/[:.]/g, '-');
+  try {
+    mkdirSync(dir, { recursive: true });
+    // VACUUM INTO：SQLite 自己生成的**自洽单文件**快照（直接 cp .db 会丢 WAL 里的数据）
+    const snap = resolve(dir, `pre-prune-${stampText}.db`);
+    getDatabase().exec(`VACUUM INTO '${snap.replace(/'/g, "''")}'`);
+    const manifest = resolve(dir, `pre-prune-${stampText}.json`);
+    writeFileSync(
+      manifest,
+      JSON.stringify(
+        {
+          createdAt: new Date().toISOString(),
+          olderThanMs,
+          count: candidates.length,
+          tracks: candidates.map(t => ({ id: t.id, name: t.name })),
+        },
+        null,
+        2
+      )
+    );
+    logger.warn(
+      `准备清理陈旧曲目 ${candidates.length} 首；已快照 ${snap}，清单 ${manifest}`
+    );
+    pruneArtifacts(dir);
+  } catch (e) {
+    // 快照失败就不删：宁可库变大，也不能在无备份的情况下删元数据
+    throw new Error(`快照失败，已中止本轮陈旧曲目清理：${(e as Error).message}`);
+  }
+}
+
+/** 只保留最近 PRUNE_ARTIFACT_KEEP 组（db + json）备份，避免快照自己把磁盘吃满 */
+function pruneArtifacts(dir: string): void {
+  try {
+    const files = readdirSync(dir)
+      .filter(f => f.startsWith('pre-prune-'))
+      .sort();
+    const groups = new Map<string, string[]>();
+    for (const f of files) {
+      const key = f.replace(/\.(db|json)$/, '');
+      groups.set(key, [...(groups.get(key) ?? []), f]);
+    }
+    const keys = [...groups.keys()].sort();
+    for (const key of keys.slice(0, Math.max(0, keys.length - PRUNE_ARTIFACT_KEEP))) {
+      for (const f of groups.get(key) ?? []) rmSync(resolve(dir, f), { force: true });
+    }
+  } catch {
+    // 清理失败不影响主流程
+  }
+}
+
 async function main(): Promise<void> {
   // 第一件事：放开 Node 内置 fetch 的 300 秒隐藏上限（详见 utils/http-agent.ts）
   relaxOutboundTimeout();
@@ -77,6 +150,8 @@ async function main(): Promise<void> {
 
   const expiredSources = pruneExpired();
   const expiredTokens = pruneTokens();
+  // 陈旧曲目清理是**不可逆**的（tracks 同时是元数据唯一真相源）：先快照 + 落删除清单再删。
+  snapshotBeforePrune(TRACK_CACHE_TTL_MS);
   const staleTracks = pruneTracks(TRACK_CACHE_TTL_MS);
   logger.info(
     `启动清理：过期音源 ${expiredSources} 条、失效令牌 ${expiredTokens} 条、陈旧曲目 ${staleTracks} 条`
