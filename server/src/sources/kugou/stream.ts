@@ -131,17 +131,15 @@ async function fetchPlayUrl(hash: string, albumAudioId: string, quality: string,
   return { url: String(row?.info?.tracker_url?.[0] ?? '') || null, bitrate: Number(row?.info?.bitrate ?? 0) };
 }
 
-const QUALITY_LEVEL: Record<string, number> = { flac: 5, high: 6, '320': 4, '128': 2 };
-
-function pickQuality(goods: QualityRow[]): string | null {
-  for (const q of ['flac', 'high', '320', '128']) {
-    const row = goods.find(
-      g => String(g.quality ?? '') === q || Number(g.level ?? -1) === QUALITY_LEVEL[q],
-    );
-    if (row && Number(row.privilege ?? -1) === 0) return q;
-  }
-  return null;
-}
+/**
+ * 音质取值顺序。
+ *
+ * ⚠️ **不要用 privilege 预过滤**：VIP 账号能播的曲子 relate_goods 里 privilege≠0
+ *（实测：私有/付费曲 privilege=5、10）。之前要求 privilege===0 等于把 VIP 用户能播的全部剔除，
+ * 表现就是「APP 里能搜到能播，我们这儿全显示无音源」。
+ * 正确做法是**让上游回答**：逐个音质调 /v6/priv_url，拿到非空直链即用。
+ */
+const QUALITY_ORDER = ['flac', 'high', '320', '128'] as const;
 
 export async function resolveKugouSource(track: ResolveInput): Promise<ResolveResult> {
   const creds = readCreds();
@@ -153,51 +151,81 @@ export async function resolveKugouSource(track: ResolveInput): Promise<ResolveRe
   const artist = (track.artists ?? [])[0] ?? '';
   const keyword = artist ? name + ' ' + artist : name;
 
+  // 取 30 条：原版经常被现场版/翻唱/DJ 版挤出前 8 名（实测「叱咤红人」原版在 8 条之外）。
   let rows;
   try {
-    rows = await kugouSearchSongs(keyword, 8, creds);
+    rows = await kugouSearchSongs(keyword, 30, creds);
   } catch (err) {
     return fail('rejected', '搜索失败：' + (err as Error).message);
   }
   if (!rows.length) return fail('no_candidates', '搜索无结果（' + keyword + '）');
 
+  // 归一化：去空白/括号/常见版本后缀，用于「同名优先」排序（不做硬性等号，避免误杀别名）
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
+  const VERSION_RE = /(live|现场|演唱会|dj|翻唱|cover|纯音乐|伴奏|remix|版|钢琴|吉他|合唱|片段)/i;
   const target = norm(name);
   const durTarget = Math.round((track.durationMs ?? 0) / 1000);
-  const candidates = rows.filter(r => {
-    if (!norm(r.name).includes(target) && !target.includes(norm(r.name))) return false;
-    if (durTarget > 0 && r.durationSec > 0 && Math.abs(r.durationSec - durTarget) > 5) return false;
-    return true;
-  });
-  if (!candidates.length) return fail('no_candidates', '无匹配（' + keyword + '）');
 
-  for (const cand of candidates) {
-    let goods: QualityRow[];
-    try {
-      goods = await fetchQualities(cand.hash, cand.albumId, creds);
-    } catch (err) {
-      log.warn('权益查询失败 ' + cand.id + '：' + (err as Error).message);
-      continue;
-    }
-    const quality = pickQuality(goods);
-    if (!quality) continue;
+  // 匹配规则（用户 2026-10-26 拍板）：**歌名相等 + 歌手命中 + 时长差 ≤8s**；专辑放松（精选集也允许）。
+  // 只靠「包含」会错配：实测「晴天」会取到 176s 的另一版（差 93s）、「最伟大的作品」取到网友改编（差 56s）。
+  const MAX_DUR_DIFF = 8;
+  const artistHit = (r: { singers: Array<{ name: string }> }) => {
+    if (!artist) return true;
+    const a = norm(artist);
+    return r.singers.some((s: { name: string }) => {
+      const n = norm(s.name);
+      return n.length > 0 && (n.includes(a) || a.includes(n));
+    });
+  };
+  const durOk = (r: { durationSec: number }) =>
+    durTarget <= 0 || r.durationSec <= 0 || Math.abs(r.durationSec - durTarget) <= MAX_DUR_DIFF;
 
-    try {
-      const { url, bitrate } = await fetchPlayUrl(cand.hash, cand.albumAudioId, quality, creds);
-      if (!url) continue;
-      log.info('酷狗命中 ' + cand.id + ' 「' + cand.name + '」' + quality + '@' + bitrate + 'kbps');
-      return {
-        ok: true,
-        bvid: null,
-        sourceUrl: url,
-        score: 100,
-        source: 'kugou',
-        matchedTitle: cand.name,
-        matchedAuthor: cand.singers.map(s => s.name).join('/'),
-        durationDiff: durTarget > 0 ? Math.abs(cand.durationSec - durTarget) : 0,
-      };
-    } catch (err) {
-      log.warn('取流失败 ' + cand.id + '：' + (err as Error).message);
+  // 第一轮：**歌名相等 + 歌手命中即匹配**（用户规则：这两个错一个就不算匹配；专辑放松）。
+  // 时长**不做硬闸**：库里的时长可能是另一个版本（实测《处处吻》库 246s、酷狗原版 199s；
+  // 《小城大事》库 236s、酷狗 208s），硬闸会把正版挡掉。时长只用于排序取最接近的。
+  const strict = rows.filter(r => norm(r.name) === target && artistHit(r));
+  // 放宽轮：仍要求**不是版本后缀**（Live/现场/DJ/翻唱/伴奏/纯音乐/钢琴等），
+  // 否则「晴天( Live)」「处处吻(DJ老鹏版)」这类会冒充原版（实测两例）。
+  const loose = rows.filter(
+    r =>
+      norm(r.name) !== target &&
+      !VERSION_RE.test(r.name) &&
+      (norm(r.name).includes(target) || target.includes(norm(r.name))) &&
+      artistHit(r) &&
+      durOk(r),
+  );
+  const scored = [...strict, ...loose].map(r => {
+    const durDiff = durTarget > 0 && r.durationSec > 0 ? Math.abs(r.durationSec - durTarget) : 999;
+    const versioned = VERSION_RE.test(r.name) ? 1 : 0;
+    return { r, versioned, durDiff };
+  }).sort((a, b) => (a.versioned - b.versioned) || (a.durDiff - b.durDiff));
+
+  if (!scored.length) return fail('no_candidates', '无匹配（' + keyword + '）');
+
+  // 取前 6 个候选逐个试：每个候选按音质从高到低问上游，拿到非空直链即用
+  for (const entry of scored.slice(0, 6)) {
+    const cand = entry.r;
+    for (const quality of QUALITY_ORDER) {
+      try {
+        const { url, bitrate } = await fetchPlayUrl(cand.hash, cand.albumAudioId, quality, creds);
+        if (!url) continue;
+        log.info(
+          '酷狗命中 ' + cand.id + ' 「' + cand.name + '」' + quality + '@' + bitrate + 'kbps' +
+            ' 时长差=' + (durTarget > 0 ? Math.abs(cand.durationSec - durTarget) : 0) + 's'
+        );
+        return {
+          ok: true,
+          bvid: null,
+          sourceUrl: url,
+          score: 100,
+          source: 'kugou',
+          matchedTitle: cand.name,
+          matchedAuthor: cand.singers.map(s => s.name).join('/'),
+          durationDiff: durTarget > 0 ? Math.abs(cand.durationSec - durTarget) : 0,
+        };
+      } catch (err) {
+        log.warn('取流失败 ' + cand.id + '/' + quality + '：' + (err as Error).message);
+      }
     }
   }
   return fail('below_threshold', '候选均无可播音质');
