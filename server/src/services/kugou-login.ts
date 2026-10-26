@@ -117,6 +117,8 @@ export async function ensureDfid(): Promise<string> {
       },
     );
     const buf = Buffer.from(await res.arrayBuffer());
+    // 排查用：注册失败的原始回执（脱敏只留前 160 字符）
+    log.debug(`设备注册回执 status=${res.status} body=${buf.toString('utf8').slice(0, 200)}`);
     let dfid = '';
     try {
       const parsed = JSON.parse(buf.toString('utf8'));
@@ -135,7 +137,19 @@ export async function ensureDfid(): Promise<string> {
   } catch (e) {
     log.warn(`酷狗设备注册失败：${(e as Error).message}`);
   }
-  cachedDfid = '-';
+  // 注册接口签名失败（实测 20006）时**不要退回 '-'**：
+  // 参考实现（KuGouMusicApi）根本不强制注册，直接用一个随机 24 位串当 dfid 即可，
+  // 网关只要求「同一次会话里 dfid 稳定」，不要求它来自注册接口。
+  // 用 '-' 会让取流链被判定为匿名 → 只给 60 秒试听。
+  const persisted = getSetting('kugou.dfid');
+  if (persisted && persisted.length >= 16 && persisted !== '-') {
+    cachedDfid = persisted;
+    return cachedDfid;
+  }
+  const random = Array.from({ length: 24 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
+  setSetting('kugou.dfid', random);
+  log.info(`酷狗 dfid 用随机值兜底 dfid=${random.slice(0, 8)}…（注册接口签名不兼容，参考实现同样不注册）`);
+  cachedDfid = random;
   return cachedDfid;
 }
 
