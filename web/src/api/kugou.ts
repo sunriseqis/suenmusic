@@ -10,7 +10,7 @@
  */
 
 import { http } from './client.ts';
-import type { KugouQrSession, KugouQrPoll, KugouStatus, KugouVipStatus } from './types.ts';
+import type { KugouQrSession, KugouQrPoll, KugouStatus } from './types.ts';
 
 export function fetchKugouStatus(signal?: AbortSignal): Promise<KugouStatus> {
   return http.get<KugouStatus>('/api/admin/kugou/credentials', { signal });
@@ -27,11 +27,6 @@ export function pollKugouQr(signal?: AbortSignal): Promise<KugouQrPoll> {
     signal,
     timeoutMs: 15_000,
   });
-}
-
-/** 酷狗概念版会员状态（到期时间决定 VIP 曲能否播） */
-export function fetchKugouVip(signal?: AbortSignal): Promise<KugouVipStatus> {
-  return http.get<KugouVipStatus>('/api/admin/kugou/vip', { signal });
 }
 
 export function logoutKugou(): Promise<{ ok: boolean }> {

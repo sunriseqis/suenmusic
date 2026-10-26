@@ -13,7 +13,7 @@
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { fetchKugouStatus, startKugouQr, pollKugouQr, logoutKugou, fetchKugouVip } from '@/api/kugou.ts';
+import { fetchKugouStatus, startKugouQr, pollKugouQr, logoutKugou } from '@/api/kugou.ts';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -332,8 +332,6 @@ const kugouOn = ref(false);
 const kugouName = ref('');
 /** token 失效（服务端 20018 打标）：显示「需重新授权」并允许重新授权 */
 const kugouInvalid = ref(false);
-/** 会员状态文案：VIP 到期会直接导致 VIP 曲不可播，必须在这里看得见 */
-const kugouVipText = ref('');
 
 // ---------------------------------------------------------------- 音源授权
 type SourceKind = 'bilibili' | 'netease' | 'kugou';
@@ -455,22 +453,6 @@ async function loadSources(): Promise<void> {
     kugouOn.value = !!st.present;
     kugouInvalid.value = !!st.invalidAt;
     kugouName.value = st.userid ? ('uid ' + st.userid) : '';
-    // 会员状态（到期时间）——与凭据一并刷新
-    if (st.present) {
-      try {
-        const v = await fetchKugouVip();
-        if (v.ok && v.isVip) {
-          const hours = v.remainingMs === null ? null : Math.floor(v.remainingMs / 3600000);
-          kugouVipText.value = 'VIP 至 ' + v.endTime.slice(5, 16) + (hours === null ? '' : '（剩 ' + hours + ' 小时）');
-        } else if (v.ok) {
-          kugouVipText.value = 'VIP 已过期（VIP 曲将不可播）';
-        } else {
-          kugouVipText.value = '';
-        }
-      } catch {
-        kugouVipText.value = '';
-      }
-    }
   } catch {
     kugouOn.value = false;
     kugouInvalid.value = false;
@@ -682,8 +664,7 @@ onBeforeUnmount(() => {
           <div class="row">
             <span class="row-name">酷狗（概念版）</span>
             <span class="row-val">{{
-              kugouInvalid ? '授权已过期，请重新授权'
-                : kugouVipText || (kugouOn ? kugouName || '已授权' : '未授权')
+              kugouInvalid ? '授权已过期，请重新授权' : (kugouOn ? kugouName || '已授权' : '未授权')
             }}</span>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
               <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>

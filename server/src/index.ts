@@ -27,7 +27,6 @@ import { ensurePoolHealth, getActiveUserIds } from './services/library-topup.ts'
 import { autoTagUntagged } from './services/ai-tags.ts';
 import { refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
 import { runDailyMaintenance } from './services/daily-recommend.ts';
-import { readClaimSettings, runKugouClaim, nextClaimDelayMs } from './services/kugou-claim.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
 
 /** 曲目缓存保留 30 天。QQ 侧元数据变动很少，30 天足够且能显著减少上游请求 */
@@ -243,30 +242,6 @@ async function main(): Promise<void> {
     dailyTimer.unref();
   };
   scheduleDailyMaintenance();
-
-  /**
-   * 酷狗会员续签调度：每天按用户设置的小时拉起**用户自己的领取工具**。
-   * 本项目不实现领取协议（见 services/kugou-claim.ts 顶部边界说明），只负责调度与状态回读。
-   * 启动后 3 分钟补跑一次：容器重启常错过设定时间。
-   */
-  const scheduleKugouClaim = (): void => {
-    const settings = readClaimSettings();
-    if (!settings.enabled || !settings.command) return;
-    const timer = setTimeout(() => {
-      void runKugouClaim()
-        .catch(err => logger.warn(`酷狗续签失败：${(err as Error)?.message ?? String(err)}`))
-        .finally(scheduleKugouClaim);
-    }, nextClaimDelayMs(settings.hour));
-    timer.unref();
-  };
-  scheduleKugouClaim();
-  setTimeout(() => {
-    const settings = readClaimSettings();
-    if (!settings.enabled || !settings.command) return;
-    void runKugouClaim().catch(err =>
-      logger.warn(`酷狗续签启动补跑失败：${(err as Error)?.message ?? String(err)}`)
-    );
-  }, 180_000).unref();
 
   // 启动补跑：NAS 休眠 / 容器重启很可能错过 00:30，起来后补一次当日检查
   // （延迟 90 秒，避开启动时的一堆初始化请求）

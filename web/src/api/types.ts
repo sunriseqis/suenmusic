@@ -476,14 +476,6 @@ export interface KugouQrSession {
   expiresInSec: number;
 }
 
-export interface KugouVipStatus {
-  ok: boolean;
-  isVip: boolean;
-  endTime: string;
-  remainingMs: number | null;
-  message?: string;
-}
-
 export interface KugouQrPoll {
   ok: boolean;
   /** 服务端返回的是 status（waiting / confirmed / expired） */
