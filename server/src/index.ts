@@ -19,6 +19,7 @@ import { loadBilibiliCookieFromDb } from './services/bilibili-account.ts';
 import { loadNeteaseCookieFromDb, initNeteaseVendor } from './services/netease-account.ts';
 import { pruneTokens } from './db/repo/tokens.ts';
 import { listPrunableTracks, pruneTracks } from './db/repo/tracks.ts';
+import { pruneUpstreamCache } from './services/upstream-cache.ts';
 import { getDatabase } from './db/index.ts';
 import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
@@ -30,6 +31,14 @@ import { msUntilNextLocal } from './utils/dates.ts';
 
 /** 曲目缓存保留 30 天。QQ 侧元数据变动很少，30 天足够且能显著减少上游请求 */
 const TRACK_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+/**
+ * 上游缓存表保留 8 天。
+ *
+ * 取的是**所有 kind 里最长的 TTL**（歌手/歌词 7 天）再加 1 天余量：
+ * 过期行本来就已不被 cacheGet 返回，这里只负责别让表无限长，
+ * 所以宁可多留一天也不要误删一个还在 TTL 内的行。
+ */
+const UPSTREAM_CACHE_TTL_MS = 8 * 24 * 60 * 60 * 1000;
 /** 周期性清理间隔 */
 const PRUNE_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -153,8 +162,9 @@ async function main(): Promise<void> {
   // 陈旧曲目清理是**不可逆**的（tracks 同时是元数据唯一真相源）：先快照 + 落删除清单再删。
   snapshotBeforePrune(TRACK_CACHE_TTL_MS);
   const staleTracks = pruneTracks(TRACK_CACHE_TTL_MS);
+  const staleUpstream = pruneUpstreamCache(UPSTREAM_CACHE_TTL_MS);
   logger.info(
-    `启动清理：过期音源 ${expiredSources} 条、失效令牌 ${expiredTokens} 条、陈旧曲目 ${staleTracks} 条`
+    `启动清理：过期音源 ${expiredSources} 条、失效令牌 ${expiredTokens} 条、陈旧曲目 ${staleTracks} 条、过期上游缓存 ${staleUpstream} 条`
   );
 
   const app = buildApp();
@@ -190,6 +200,8 @@ async function main(): Promise<void> {
       // 登录节流计数也要清：每失败一次就留一条，不清理就是无界增长
       //（伪造 IP 会把它放大成「每个请求一条」）
       pruneLoginThrottle();
+      // 上游缓存表也要周期清理：只挂启动段的话，进程长期不重启，过期行会一直堆着
+      pruneUpstreamCache(UPSTREAM_CACHE_TTL_MS);
     } catch (err) {
       logger.error('周期清理失败', (err as Error)?.message ?? String(err));
     }

@@ -15,6 +15,7 @@
  */
 
 import { createLogger } from '../../logger.ts';
+import { cacheGet, cachePut } from '../../services/upstream-cache.ts';
 import { COMM_DEFAULT, requestQQMusic } from './client.ts';
 import {
   adaptQQAlbum,
@@ -27,6 +28,11 @@ import { fetchSearchSlice } from './search.ts';
 import type { Album, Artist, Track } from './adapter.ts';
 
 const log = createLogger('qq:artist');
+
+/** 歌手详情缓存有效期：7 天。歌手档案（名字/头像/统计）几乎不变 */
+const ARTIST_DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** 歌手歌曲/专辑缓存有效期：24 小时。搜索分片会随新歌新专辑变化，不宜太久 */
+const ARTIST_LIST_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * 取歌手统计数字（专辑数 / MV 数）。
@@ -57,6 +63,10 @@ async function fetchSingerStats(
 export async function getArtistDetail(singerMid: string): Promise<Artist | null> {
   if (!singerMid) return null;
 
+  // 先查表：歌手页是高频入口，重启后靠这一层避免重复打上游
+  const cached = cacheGet<Artist>('artist_detail', singerMid, ARTIST_DETAIL_TTL_MS);
+  if (cached) return cached;
+
   try {
     const res = await requestQQMusic<any>(
       {
@@ -84,6 +94,8 @@ export async function getArtistDetail(singerMid: string): Promise<Artist | null>
       if (typeof stats.mvNum === 'number') artist.mvSize = stats.mvNum;
     }
 
+    // 落表放在补统计之后：否则缓存里存的是 albumSize/mvSize 缺失的版本
+    cachePut('artist_detail', singerMid, artist);
     return artist;
   } catch (err) {
     log.warn(`歌手详情失败 singerMid=${singerMid}: ${(err as Error)?.message ?? err}`);
@@ -126,6 +138,11 @@ export async function getArtistSongs(
 ): Promise<ArtistSongsResult> {
   if (!singerName) return { songs: [], hasMore: false };
 
+  // key 带上 singerName：召回本身就是按名字搜索的，同一 mid 换了名字结果会变
+  const cacheKey = `${singerMid}:${singerName}:${limit}:${page}`;
+  const cached = cacheGet<ArtistSongsResult>('artist_songs', cacheKey, ARTIST_LIST_TTL_MS);
+  if (cached) return cached;
+
   try {
     const { list, code } = await fetchSearchSlice('song', singerName, (page - 1) * limit, limit);
     if (code !== null && code !== 0) {
@@ -148,7 +165,9 @@ export async function getArtistSongs(
       return mids.includes(singerMid);
     });
 
-    return { songs: owned.length ? owned : songs, hasMore };
+    const result: ArtistSongsResult = { songs: owned.length ? owned : songs, hasMore };
+    cachePut('artist_songs', cacheKey, result);
+    return result;
   } catch (err) {
     log.warn(`歌手歌曲失败 singerMid=${singerMid}: ${(err as Error)?.message ?? err}`);
     return { songs: [], hasMore: false };
@@ -180,6 +199,11 @@ export async function getArtistAlbums(
 ): Promise<ArtistAlbumsResult> {
   if (!singerName) return { albums: [], hasMore: false };
 
+  // key 同 getArtistSongs：名字是搜索的输入之一
+  const cacheKey = `${singerMid}:${singerName}:${limit}:${page}`;
+  const cached = cacheGet<ArtistAlbumsResult>('artist_albums', cacheKey, ARTIST_LIST_TTL_MS);
+  if (cached) return cached;
+
   try {
     const { list, code } = await fetchSearchSlice('album', singerName, (page - 1) * limit, limit);
     if (code !== null && code !== 0) {
@@ -209,7 +233,9 @@ export async function getArtistAlbums(
       picked.push(a);
     }
 
-    return { albums: picked, hasMore };
+    const result: ArtistAlbumsResult = { albums: picked, hasMore };
+    cachePut('artist_albums', cacheKey, result);
+    return result;
   } catch (err) {
     log.warn(`歌手专辑失败 singerMid=${singerMid}: ${(err as Error)?.message ?? err}`);
     return { albums: [], hasMore: false };

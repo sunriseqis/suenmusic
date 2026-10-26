@@ -14,6 +14,7 @@
  */
 
 import { createLogger } from '../../logger.ts';
+import { cacheGet, cachePut } from '../../services/upstream-cache.ts';
 import { COMM_DEFAULT, requestQQMusic } from './client.ts';
 
 const log = createLogger('qq:lyric');
@@ -30,6 +31,8 @@ const EMPTY: QQLyric = {
   tlyric: { lyric: '' },
 };
 
+/** L2（表）有效期：歌词内容基本不可变，7 天足够 */
+const LYRIC_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** 歌词缓存上限。歌词内容不可变，命中率极高，值得常驻内存。 */
 const LYRIC_CACHE_MAX = 500;
 const cache = new Map<string, QQLyric>();
@@ -86,6 +89,13 @@ export async function getQQLyric(
   const hit = cache.get(key);
   if (hit) return hit;
 
+  // L2：表。重启后内存清空，这一层保证不会为同一首歌重复打上游
+  const stored = cacheGet<QQLyric>('lyric', key, LYRIC_TTL_MS);
+  if (stored) {
+    remember(key, stored); // 回填 L1
+    return stored;
+  }
+
   try {
     const res = await requestQQMusic<any>(
       {
@@ -113,7 +123,10 @@ export async function getQQLyric(
     };
 
     // 只有确实拿到歌词才缓存，避免把"上游抽风"固化成 500 条空结果
-    if (result.lrc.lyric) remember(key, result);
+    if (result.lrc.lyric) {
+      remember(key, result);
+      cachePut('lyric', key, result);
+    }
 
     return result;
   } catch (err) {

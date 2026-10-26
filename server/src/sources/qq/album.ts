@@ -10,6 +10,7 @@
  */
 
 import { createLogger } from '../../logger.ts';
+import { cacheGet, cachePut } from '../../services/upstream-cache.ts';
 import { BROWSER_UA, QQ_REFERER } from '../../utils/constants.ts';
 import { requestJson } from '../../utils/http.ts';
 import { COMM_DEFAULT, requestQQMusic } from './client.ts';
@@ -23,6 +24,9 @@ import {
 import type { Album, Track, TrackArtist } from './adapter.ts';
 
 const log = createLogger('qq:album');
+
+/** 专辑详情缓存有效期：6 小时。曲目列表相对稳定，但新专辑可能很快补曲目 */
+const ALBUM_DETAIL_TTL_MS = 6 * 60 * 60 * 1000;
 
 /**
  * 老版专辑接口。**它的 `code` 恒为 404，但 `data` 是完整的** ——
@@ -76,6 +80,11 @@ export async function getAlbumDetail(
   limit = 100
 ): Promise<AlbumDetail | null> {
   if (!albumMid) return null;
+
+  // 先查表：命中直接返回，不打上游（limit 参与 key，不同 limit 是不同的结果）
+  const cacheKey = `${albumMid}:${limit}`;
+  const cached = cacheGet<AlbumDetail>('album_detail', cacheKey, ALBUM_DETAIL_TTL_MS);
+  if (cached) return cached;
 
   try {
     const res = await requestQQMusic<any>(
@@ -139,7 +148,11 @@ export async function getAlbumDetail(
       notice = (await fetchAlbumEmptyReason(albumMid)) ?? '该专辑暂无可播放曲目';
     }
 
-    return { album, songs, notice };
+    const detail: AlbumDetail = { album, songs, notice };
+    // 只缓存拿到完整元信息的结果：前面两条 `return null` 是"专辑不存在"，
+    // 落表会把一次上游异常固化 6 小时（见 upstream-cache.ts 设计第 2 条）
+    cachePut('album_detail', cacheKey, detail);
+    return detail;
   } catch (err) {
     log.warn(`专辑详情失败 albumMid=${albumMid}: ${(err as Error)?.message ?? err}`);
     return null;
