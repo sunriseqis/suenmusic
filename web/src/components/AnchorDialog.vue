@@ -309,15 +309,17 @@ onBeforeUnmount(stopPreview);
             <span class="avail-state" :class="avail && avail.kugou.ok ? 'ok' : 'bad'">
               {{ !avail ? '查询中' : (avail.kugou.ok ? '音源可用' : '无音源') }}
             </span>
-            <NeuButton
-              size="sm"
-              :variant="pinnedSource === 'kugou' ? 'default' : 'ghost'"
-              :disabled="!avail || !avail.kugou.ok"
-              :loading="pinBusy && pinnedSource === 'kugou'"
-              @click="setPinSource(pinnedSource === 'kugou' ? null : 'kugou')"
-            >
-              {{ pinnedSource === 'kugou' ? '已锚定' : '锚定' }}
-            </NeuButton>
+            <span class="avail-op">
+              <NeuButton
+                size="sm"
+                :variant="pinnedSource === 'kugou' ? 'default' : 'ghost'"
+                :disabled="!avail || !avail.kugou.ok"
+                :loading="pinBusy && pinnedSource === 'kugou'"
+                @click="setPinSource(pinnedSource === 'kugou' ? null : 'kugou')"
+              >
+                {{ pinnedSource === 'kugou' ? '已锚定' : '锚定' }}
+              </NeuButton>
+            </span>
           </div>
           <div class="avail-row">
             <span class="avail-name">网易云</span>
@@ -325,15 +327,17 @@ onBeforeUnmount(stopPreview);
             <span class="avail-state" :class="avail && avail.netease.ok ? 'ok' : 'bad'">
               {{ !avail ? '查询中' : (avail.netease.ok ? '音源可用' : '无音源') }}
             </span>
-            <NeuButton
-              size="sm"
-              :variant="pinnedSource === 'netease' ? 'default' : 'ghost'"
-              :disabled="!avail || !avail.netease.ok"
-              :loading="pinBusy && pinnedSource === 'netease'"
-              @click="setPinSource(pinnedSource === 'netease' ? null : 'netease')"
-            >
-              {{ pinnedSource === 'netease' ? '已锚定' : '锚定' }}
-            </NeuButton>
+            <span class="avail-op">
+              <NeuButton
+                size="sm"
+                :variant="pinnedSource === 'netease' ? 'default' : 'ghost'"
+                :disabled="!avail || !avail.netease.ok"
+                :loading="pinBusy && pinnedSource === 'netease'"
+                @click="setPinSource(pinnedSource === 'netease' ? null : 'netease')"
+              >
+                {{ pinnedSource === 'netease' ? '已锚定' : '锚定' }}
+              </NeuButton>
+            </span>
           </div>
         </div>
 
@@ -416,6 +420,8 @@ onBeforeUnmount(stopPreview);
   gap: var(--sp-4);
   padding: var(--sp-5);
   border-radius: var(--r-lg);
+  /* 子项必须能收缩：否则候选列表把弹窗撑破（用户 2026-10-26 反馈：B 站结果溢出容器） */
+  overflow: hidden;
 }
 
 .head {
@@ -509,6 +515,12 @@ onBeforeUnmount(stopPreview);
 .avail-state.bad {
   color: var(--t2);
 }
+.avail-op {
+  /* 固定宽度：按钮文案在「锚定 / 已锚定 / 载入中」之间变化时不推动其它列 */
+  flex: 0 0 5.6em;
+  display: flex;
+  justify-content: flex-end;
+}
 .avail-detail {
   flex: 1 1 auto;
   min-width: 0;
@@ -576,7 +588,9 @@ onBeforeUnmount(stopPreview);
   list-style: none;
   margin: 0;
   padding: 0;
-  min-height: 120px;
+  min-height: 0;
+  /* flex:1 + min-height:0 才能在弹窗限高内滚动，而不是把弹窗撑出屏幕 */
+  flex: 1 1 auto;
   overflow-y: auto;
   display: flex;
   flex-direction: column;

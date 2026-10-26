@@ -9,7 +9,7 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from './config.ts';
 import { createLogger } from './logger.ts';
@@ -136,8 +136,29 @@ export function buildApp(): FastifyInstance {
   // 关键约束：**只有存在 index.html 才接管**。server 镜像（server/Dockerfile）
   // 里只 COPY 了 src/，没有前端产物 —— 那种情况下必须保持「纯 API」行为不变。
   const webRoot = existsSync(join(config.webRoot, 'index.html')) ? config.webRoot : null;
-  // index.html 读一次就够：SPA 回退会命中它，缓存起来避免每次读盘
-  const indexHtml = webRoot ? readFileSync(join(webRoot, 'index.html'), 'utf8') : null;
+  /**
+   * index.html **按 mtime 热读**，不再启动时缓存一份。
+   *
+   * 踩过：`web` 重新构建后 index.html 引用了新的 assets 哈希，但服务端手里还是旧 HTML，
+   * 浏览器继续跑旧 bundle —— 表现为「新加的功能在页面上完全不存在」
+   * （酷狗显示未登录、钉了源仍显示未钉，都是这个原因）。
+   * 现在每次取都比一次 mtime：构建完刷新页面即生效，不用重启服务端。
+   */
+  let indexHtmlCache: { mtimeMs: number; html: string } | null = null;
+  const readIndexHtml = (): string | null => {
+    if (!webRoot) return null;
+    const file = join(webRoot, 'index.html');
+    try {
+      const st = statSync(file);
+      if (!indexHtmlCache || indexHtmlCache.mtimeMs !== st.mtimeMs) {
+        indexHtmlCache = { mtimeMs: st.mtimeMs, html: readFileSync(file, 'utf8') };
+      }
+      return indexHtmlCache.html;
+    } catch {
+      return null;
+    }
+  };
+  const indexHtml = readIndexHtml();
 
   if (webRoot && indexHtml) {
     app.register(fastifyStatic, {
@@ -179,10 +200,12 @@ export function buildApp(): FastifyInstance {
     }
 
     // 其余路径交给前端路由（Vue Router 的 history 模式）
-    if (indexHtml) {
+    const liveIndexHtml = readIndexHtml();
+    if (liveIndexHtml) {
       reply.header('Cache-Control', 'no-cache');
       reply.type('text/html; charset=utf-8');
-      reply.send(indexHtml);
+      reply.header('Cache-Control', 'no-cache');
+      reply.send(liveIndexHtml);
       return;
     }
 

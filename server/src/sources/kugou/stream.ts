@@ -46,6 +46,26 @@ function md5(s: string): string {
   return crypto.createHash('md5').update(s).digest('hex');
 }
 
+/**
+ * 判断酷狗给的直链是不是完整音频。
+ *
+ * 依据：Content-Length ÷ (码率/8) ≈ 秒数。比曲目时长短太多（<70%）说明是试听/片段，
+ * 用它播放会「播到中途就结束、然后自动跳下一首」—— 实测 VIP 曲给过 960KB 的 128k 片段。
+ * HEAD 失败时按可用处理（不要把网络抖动当成无音源）。
+ */
+async function estimateCoverage(url: string, bitrate: number, expectedSec: number): Promise<boolean> {
+  if (expectedSec <= 0 || bitrate <= 0) return true;
+  try {
+    const res = await fetch(url, { method: 'HEAD', headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(6_000) });
+    const len = Number(res.headers.get('content-length') ?? 0);
+    if (!len) return true;
+    const sec = (len * 8) / (bitrate * 1000);
+    return sec >= expectedSec * 0.7;
+  } catch {
+    return true;
+  }
+}
+
 export function getKugouCreds(): KugouCreds | null {
   return readCreds();
 }
@@ -218,6 +238,13 @@ export async function resolveKugouSource(track: ResolveInput): Promise<ResolveRe
       try {
         const { url, bitrate } = await fetchPlayUrl(cand.hash, cand.albumAudioId, quality, creds);
         if (!url) continue;
+        // VIP 曲可能只给「试听片段」：文件很小、播到一半就结束（前端表现为进度条能拉到末尾然后自动跳下一曲）。
+        // 用 Content-Length + 码率估算真实时长，明显短于曲目时长就弃用该候选，交给下一源。
+        const covered = await estimateCoverage(url, bitrate, durTarget);
+        if (!covered) {
+          log.warn('酷狗仅返回试听片段（' + cand.id + '/' + quality + '），跳过');
+          continue;
+        }
         log.info(
           '酷狗命中 ' + cand.id + ' 「' + cand.name + '」' + quality + '@' + bitrate + 'kbps' +
             ' 时长差=' + (durTarget > 0 ? Math.abs(cand.durationSec - durTarget) : 0) + 's'
