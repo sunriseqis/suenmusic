@@ -746,8 +746,11 @@ export struct SettingsPage {
     }
     try {
       const kg = await APIClient.shared().kugouStatus();
-      // 文案完全用服务端下发：会员到期 / 登录失效是两种不同故障，端侧不自己拼
-      this.kugouLabel = kg.label.length > 0 ? kg.label : '未登录';
+      // 文案完全用服务端下发：会员到期 / 登录失效是两种不同故障，端侧不自己拼；
+      // 有昵称时前置昵称，与 bilibili / 网易云两行同构（账号名 · 状态）
+      const name = kg.nickname.length > 0 ? kg.nickname : (kg.userid.length > 0 ? 'uid ' + kg.userid : '');
+      const label = kg.label.length > 0 ? kg.label : '未登录';
+      this.kugouLabel = name.length > 0 && kg.state !== 'logged_out' ? name + ' · ' + label : label;
     } catch (e) {
       this.kugouLabel = '未登录';
     }
@@ -801,14 +804,21 @@ export struct SettingsPage {
   /** 静态展示行（名/值两端对齐，不可点） */
   @Builder
   rowStatic(name: string, val: string, first: boolean) {
-    Row() {
+    Row({ space: Dim.s3 }) {
+      // 名称定宽：三行（bilibili / 网易云 / 酷狗）的账号名与状态必须同一竖列对齐，
+      // 不能让名称吃掉全部宽度把状态挤到最右（用户 2026-10-26 反馈「账号信息没对齐」）
       Text(name)
         .fontSize(Dim.fsBody)
         .fontColor(Tokens.text1)
-        .layoutWeight(1)
+        .width('104vp')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
       Text(val)
         .fontSize(Dim.fsMinor)
         .fontColor(Tokens.text2)
+        .layoutWeight(1)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
     }
     .width('100%')
     .height(Dim.touchMin)

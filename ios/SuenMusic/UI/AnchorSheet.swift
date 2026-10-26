@@ -138,6 +138,9 @@ struct AnchorSheet: View {
     /// 正在提交锚定的候选
     @State private var anchoringBvid = ""
     @State private var removing = false
+    /// 源钉（kugou/netease，空 = 自动匹配）。服务端 resolver 里钉优先于锚点。
+    @State private var pinnedSource = ""
+    @State private var pinBusy = false
 
     /// 卡片宽 / 最大高占屏幕比例（hw `width('92%')` + `maxHeight('80%')`）
     private static let cardRatio: CGFloat = 0.92
@@ -163,6 +166,7 @@ struct AnchorSheet: View {
                 VStack(spacing: Dim.s3) {
                     header
                     if anchorInfo != nil { anchorRow }
+                    pinSection
                     searchRow
                     if !note.isEmpty { noteText }
                     if meta != nil { refCard }
@@ -191,6 +195,79 @@ struct AnchorSheet: View {
     }
 
     // MARK: - 分块
+
+    /// 音源检查（与 web/hw 同构）：只有酷狗与网易云两行，B 站走下方搜索锚定。
+    /// 钉住后显示「恢复自动」，否则用户没有退回自动匹配的出口。
+    private var pinSection: some View {
+        VStack(spacing: Dim.s2) {
+            HStack(spacing: Dim.s2) {
+                Text("音源检查")
+                    .font(.system(size: Dim.fsMinor))
+                    .foregroundStyle(p.text2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                if !pinnedSource.isEmpty {
+                    Button {
+                        Task { await setPin(pinnedSource) }
+                    } label: {
+                        Text("恢复自动匹配")
+                            .font(.system(size: Dim.fsMinor))
+                            .foregroundStyle(p.text2)
+                    }
+                    .disabled(pinBusy)
+                }
+            }
+            pinRow("酷狗", source: "kugou")
+            pinRow("网易云", source: "netease")
+        }
+        .padding(Dim.s2)
+        .background(
+            RoundedRectangle(cornerRadius: Dim.radiusSm, style: .continuous).fill(p.panel2)
+        )
+    }
+
+    private func pinRow(_ name: String, source: String) -> some View {
+        HStack(spacing: Dim.s2) {
+            Text(name)
+                .font(.system(size: Dim.fsBody))
+                .foregroundStyle(p.text1)
+                .frame(width: 72, alignment: .leading)
+            Spacer(minLength: 0)
+            Button {
+                Task { await setPin(source) }
+            } label: {
+                Text(pinnedSource == source ? "已锚定" : "锚定")
+                    .font(.system(size: Dim.fsMinor))
+                    .foregroundStyle(pinnedSource == source ? p.bg : p.text1)
+                    .padding(.horizontal, Dim.s2)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: Dim.radiusSm, style: .continuous)
+                            .fill(pinnedSource == source ? p.text1 : p.panel2)
+                    )
+            }
+            .disabled(pinBusy)
+        }
+    }
+
+    /// 钉 / 解钉（最近一次用户选择生效：钉了酷狗就压过历史 B 站锚点）
+    private func setPin(_ source: String) async {
+        guard let track = player.currentTrack, !pinBusy else { return }
+        pinBusy = true
+        defer { pinBusy = false }
+        do {
+            if pinnedSource == source {
+                try await APIClient.shared.unpinSource(track.id)
+                pinnedSource = ""
+            } else {
+                try await APIClient.shared.pinSource(track.id, source: source)
+                pinnedSource = source
+            }
+            // 钉源改变了解析结果 → 重装当前曲（与锚定成功后的收尾一致）
+            await player.reloadCurrentTrack(autoplay: true)
+        } catch {
+            note = "源钉设置失败，请稍后重试"
+        }
+    }
 
     private var header: some View {
         HStack(spacing: Dim.s2) {
@@ -393,6 +470,7 @@ struct AnchorSheet: View {
         anchoringBvid = ""
         preview.stop(resumeMain: true, main: player)
         anchorInfo = try? await APIClient.shared.trackAnchor(track.id)
+        pinnedSource = (try? await APIClient.shared.pinSourceState(track.id)) ?? ""
         await search()
     }
 

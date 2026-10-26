@@ -52,6 +52,8 @@ struct SettingsView: View {
     @AppStorage("auto_failover") private var autoFailover = true
     @State private var biliLabel = "未授权"
     @State private var neteaseLabel = "未授权"
+    /// 酷狗（概念版）：昵称 · 登录态，文案来自服务端四态
+    @State private var kugouLabel = "未登录"
 
     private let segLabels = ["本机", "智能", "高级"]
 
@@ -349,6 +351,7 @@ struct SettingsView: View {
             card {
                 rowStatic("bilibili", value: biliLabel, first: true)
                 rowStatic("网易云", value: neteaseLabel)
+                rowStatic("酷狗（概念版）", value: kugouLabel)
             }
         }
     }
@@ -596,6 +599,13 @@ struct SettingsView: View {
             neteaseLabel = sourceLabel(st)
         } else {
             neteaseLabel = "未授权"
+        }
+        if let kg = try? await APIClient.shared.kugouStatus() {
+            // 与另两行同构：有昵称时前置「昵称 · 状态」
+            let name = (kg.nickname?.isEmpty == false) ? kg.nickname! : ((kg.userid?.isEmpty == false) ? "uid \(kg.userid!)" : "")
+            kugouLabel = (kg.state != "logged_out" && !name.isEmpty) ? "\(name) · \(kg.label)" : kg.label
+        } else {
+            kugouLabel = "未登录"
         }
     }
 

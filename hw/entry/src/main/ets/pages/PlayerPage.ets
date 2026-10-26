@@ -232,9 +232,13 @@ export struct PlayerPage {
     if (this.npSource === 'kugou') {
       return '酷狗';
     }
-    // 兜底：解析还没回来/失败但已手动锚定 —— 锚点必然是 bilibili
+    // 兜底①：用户钉了某个源（服务端 resolver 里钉优先于锚点）→ 先按钉显示，
+    // 否则会出现「明明钉了酷狗、播放页却写哔哩哔哩」（历史自动锚点还在）。
+    if (this.pinnedSource === 'kugou') { return '酷狗'; }
+    if (this.pinnedSource === 'netease') { return '网易云'; }
+    // 兜底②：解析还没回来但已手动锚定 —— 锚点必然是 bilibili
     if (this.npSource.length === 0 && this.anchorInfo !== null) {
-      return 'bilibili';
+      return '哔哩哔哩';
     }
     return '未匹配';
   }
@@ -1162,7 +1166,20 @@ export struct PlayerPage {
         // 音源检查（用户 2026-10-26 标准语义）：只有酷狗与网易云两行；
         // 每行 = 源名 + 可用性文案 + 锚定按钮（无音源时按钮灰）。B 站不在此列（走下方搜索锚定）。
         Column({ space: Dim.s2 }) {
-          Text('音源检查').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%')
+          Row({ space: Dim.s2 }) {
+            Text('音源检查').fontSize(Dim.fsMinor).fontColor(Tokens.text2).layoutWeight(1)
+            // 钉住之后必须留一个明确的出口：否则用户没法把「只用酷狗」退回自动匹配
+            if (this.pinnedSource !== '') {
+              WebButton({
+                labelStr: '恢复自动匹配',
+                sizeKind: NeuBtnSize.SM,
+                disabledFlag: this.pinBusy,
+                onTap: () => {
+                  this.togglePin(this.pinnedSource);
+                }
+              })
+            }
+          }.width('100%')
           Row({ space: Dim.s2 }) {
             Text('酷狗').fontSize(Dim.fsBody).fontColor(Tokens.text1).width('72')
             Text(this.availText(this.availKugou))

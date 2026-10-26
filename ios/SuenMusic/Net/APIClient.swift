@@ -526,6 +526,32 @@ final class APIClient {
         let _: EmptyReply = try await send("/api/tracks/\(seg(trackId))/anchor", method: "DELETE")
     }
 
+    // MARK: 酷狗（登录态四态 + 源钉）
+
+    /// 酷狗登录态。文案由服务端下发，端侧只负责展示。
+    func kugouStatus() async throws -> KugouLoginState {
+        try await get("/api/admin/kugou/status")
+    }
+
+    /// 当前源钉（kugou / netease）。没钉时服务端回 null。
+    func pinSourceState(_ trackId: String) async throws -> String? {
+        struct Reply: Decodable { let source: String? }
+        let r: Reply = try await get("/api/tracks/\(seg(trackId))/pin-source")
+        return r.source
+    }
+
+    /// 钉住某个源：该曲此后只走这个源（优先级高于 B 站锚点）
+    func pinSource(_ trackId: String, source: String) async throws {
+        struct Body: Encodable { let source: String }
+        let data = try JSONEncoder().encode(Body(source: source))
+        let _: EmptyReply = try await send("/api/tracks/\(seg(trackId))/pin-source", method: "PUT", body: data)
+    }
+
+    /// 取消钉源（回到自动匹配：网易云 → 酷狗 → B 站）
+    func unpinSource(_ trackId: String) async throws {
+        let _: EmptyReply = try await send("/api/tracks/\(seg(trackId))/pin-source", method: "DELETE")
+    }
+
     // MARK: 批量解析 / 流会话令牌
 
     /// 播放队列预取：服务端串行解析（最多 10 首），返回按 trackId 索引的结果

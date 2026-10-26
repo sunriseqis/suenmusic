@@ -333,6 +333,12 @@ const kugouName = ref('');
 /** 酷狗登录态（服务端统一给 label：未登录 / 已失效 / 会员到期 / 正常） */
 const kugouState = ref<KugouState>('logged_out');
 const kugouLabel = ref('未登录');
+/** 与另两行同构：有账号名就先显示账号名，再跟登录态 */
+const kugouVal = computed(() =>
+  kugouOn.value && kugouName.value && !kugouName.value.startsWith('uid ')
+    ? `${kugouName.value} · ${kugouLabel.value}`
+    : kugouLabel.value
+);
 const kugouInvalid = computed(() => kugouState.value === 'invalid');
 
 // ---------------------------------------------------------------- 音源授权
@@ -455,7 +461,7 @@ async function loadSources(): Promise<void> {
     kugouState.value = st.state;
     kugouLabel.value = st.label;
     kugouOn.value = st.state !== 'logged_out';
-    kugouName.value = st.userid ? ('uid ' + st.userid) : '';
+    kugouName.value = st.nickname ? st.nickname : (st.userid ? 'uid ' + st.userid : '');
   } catch {
     kugouOn.value = false;
     kugouState.value = 'logged_out';
@@ -667,7 +673,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="row">
             <span class="row-name">酷狗（概念版）</span>
-            <span class="row-val">{{ kugouLabel }}</span>
+            <span class="row-val">{{ kugouVal }}</span>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
               <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>
               <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('kugou')">退出</NeuButton>

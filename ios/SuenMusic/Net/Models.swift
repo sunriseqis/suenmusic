@@ -358,6 +358,20 @@ struct PersonaReply: Decodable {
 // MARK: - 音源账号（B 站 / 网易云，全站共用一份出网身份）
 
 /// `GET /api/bilibili/account` 与 `GET /api/netease/account`（两源同构）
+/**
+ * 酷狗登录态（服务端四态统一判定）。
+ *
+ * state: logged_out 未登录 / invalid 登录已失效 / vip_expired 已登录·会员到期 / ok 已登录·会员有效。
+ * label 直接用服务端文案 —— 会员到期与登录失效是两种不同故障，端侧不再自己拼。
+ */
+struct KugouLoginState: Decodable {
+    let state: String
+    let label: String
+    let userid: String?
+    let nickname: String?
+    let vipEndTime: String?
+}
+
 struct SourceAccount: Decodable {
     /// B 站是 `mid`、网易云是 `userId`，其余字段两源共用
     struct Inner: Decodable {
