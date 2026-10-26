@@ -12,7 +12,7 @@
 
 import crypto from 'node:crypto';
 import { createLogger } from '../logger.ts';
-import { setSetting, getSetting } from '../db/repo/settings.ts';
+import { setSetting, getSetting, deleteSetting } from '../db/repo/settings.ts';
 
 const log = createLogger('kugou-login');
 
@@ -165,11 +165,23 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
   const st = Number(j?.data?.status ?? -1);
 
   if (st === 4) {
-    const token = String(j?.data?.token ?? '');
-    const userid = String(j?.data?.userid ?? '');
-    if (!token || !userid) throw new Error(`登录成功但凭据缺失：${JSON.stringify(j?.data).slice(0, 200)}`);
-    // 凭据只进 settings（管理员通道），不进代码库；与业务用户数据物理隔离
-    setSetting('kugou.credentials', JSON.stringify({ token, userid, savedAt: Date.now() }));
+    const d = (j?.data ?? {}) as Record<string, unknown>;
+    const token = String(d.token ?? '');
+    const userid = String(d.userid ?? '');
+    if (!token || !userid) throw new Error(`登录成功但凭据缺失：${JSON.stringify(d).slice(0, 200)}`);
+    // **保存完整凭据**：vip_token / vip_type 决定能不能拿 VIP 音质；
+    // t1 是 /login/token 续期必需（缺了就只能重新扫码）。
+    // 只进 settings（管理员通道），不进代码库。
+    const creds = {
+      token,
+      userid,
+      vipToken: String(d.vip_token ?? d.viptoken ?? ''),
+      vipType: String(d.vip_type ?? ''),
+      t1: String(d.t1 ?? ''),
+      savedAt: Date.now(),
+    };
+    setSetting('kugou.credentials', JSON.stringify(creds));
+    deleteSetting('kugou.credentialsInvalidAt');
     current = null;
     log.info(`酷狗登录凭据已保存（userid=${userid}）`);
     return { status: 'confirmed', token, userid };
@@ -179,13 +191,38 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
 }
 
 /** 管理页查询当前凭据状态 */
-export function readKugouCredentialStatus(): { present: boolean; savedAt?: number; userid?: string } {
+export function readKugouCredentialStatus(): {
+  present: boolean;
+  savedAt?: number;
+  userid?: string;
+  /** token 失效时间（非空 = 需要重新扫码授权） */
+  invalidAt?: number;
+  invalidReason?: string;
+} {
   const raw = getSetting('kugou.credentials');
   if (!raw) return { present: false };
+  const invalidRaw = getSetting('kugou.credentialsInvalidAt');
+  let invalidAt = 0;
+  let invalidReason = '';
+  if (invalidRaw) {
+    try {
+      const inv = JSON.parse(invalidRaw) as { at?: number; reason?: string };
+      invalidAt = Number(inv.at ?? 0);
+      invalidReason = String(inv.reason ?? '');
+    } catch {
+      invalidAt = 0;
+    }
+  }
   try {
     const p = JSON.parse(raw) as { token: string; userid: string; savedAt: number };
-    return { present: true, savedAt: p.savedAt, userid: p.userid };
+    return { present: true, savedAt: p.savedAt, userid: p.userid, invalidAt, invalidReason };
   } catch {
     return { present: false };
   }
+}
+
+/** token 失效打标（取流遇 20018 时调用），让 Web 面板明确提示「需重新授权」 */
+export function markKugouCredentialInvalid(reason: string): void {
+  setSetting('kugou.credentialsInvalidAt', JSON.stringify({ at: Date.now(), reason }));
+  log.warn(`酷狗凭据标记失效：${reason}`);
 }

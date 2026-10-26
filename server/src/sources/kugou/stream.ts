@@ -19,6 +19,7 @@
 import crypto from 'node:crypto';
 import { createLogger } from '../../logger.ts';
 import { getSetting } from '../../db/repo/settings.ts';
+import { markKugouCredentialInvalid } from '../../services/kugou-login.ts';
 import { kugouSearchSongs } from './source.ts';
 import type { ResolveInput, ResolveResult } from '../bilibili/stream.ts';
 
@@ -37,6 +38,8 @@ interface KugouCreds {
   userid: string;
   vipToken?: string;
   vipType?: string;
+  /** 续期票据（/login/token 需要；缺了只能重新扫码） */
+  t1?: string;
 }
 
 function md5(s: string): string {
@@ -51,9 +54,9 @@ function readCreds(): KugouCreds | null {
   const raw = getSetting('kugou.credentials');
   if (!raw) return null;
   try {
-    const p = JSON.parse(raw) as { token?: string; userid?: string; vipToken?: string; vipType?: string };
+    const p = JSON.parse(raw) as { token?: string; userid?: string; vipToken?: string; vipType?: string; t1?: string };
     if (!p.token || !p.userid) return null;
-    return { token: p.token, userid: p.userid, vipToken: p.vipToken, vipType: p.vipType };
+    return { token: p.token, userid: p.userid, vipToken: p.vipToken, vipType: p.vipType, t1: p.t1 };
   } catch {
     return null;
   }
@@ -127,6 +130,12 @@ async function fetchPlayUrl(hash: string, albumAudioId: string, quality: string,
     signal: AbortSignal.timeout(8000),
   });
   const j: any = await res.json();
+  // 20018 = token 失效/类型不对：打标让 Web 面板显示「需重新授权」，
+  // 并在消息里说人话（否则用户只看到「无音源」，永远不知道要去授权）。
+  if (Number(j?.error_code ?? 0) === 20018) {
+    markKugouCredentialInvalid('token api error (20018)：酷狗授权已过期');
+    throw new Error('酷狗授权已过期，请在设置→音源授权重新扫码');
+  }
   const row = (j?.data ?? [])[0] ?? {};
   return { url: String(row?.info?.tracker_url?.[0] ?? '') || null, bitrate: Number(row?.info?.bitrate ?? 0) };
 }

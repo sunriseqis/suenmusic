@@ -112,7 +112,11 @@ export async function kugouSearchSongs(keyword: string, limit = 30, creds?: Kugo
     'https://complexsearch.kugou.com/v2/search/song',
     {
       keyword, page: '1', pagesize: String(limit),
-      platform: 'AndroidFilter', iscorrection: '1', privilegefilter: '1', area_code: '1', docipfull: '1',
+      // ⚠️ privilegefilter=1 会**滤掉 VIP/付费曲目**（实测：搜「淘金小镇 周杰伦」，
+      //    privfilter=1 返回千山万水/稻香/简单爱等免费曲，原版《淘金小镇》消失；
+      //    改成 0 后原版就在第一条）。概念版 App 能搜到的歌我们必须也能搜到，故必须为 0。
+      privilegefilter: '0',
+      platform: 'AndroidFilter', iscorrection: '1', area_code: '1', docipfull: '1',
     },
     creds,
   );

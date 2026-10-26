@@ -330,6 +330,8 @@ const biliOn = ref(false);
 const neteaseOn = ref(false);
 const kugouOn = ref(false);
 const kugouName = ref('');
+/** token 失效（服务端 20018 打标）：显示「需重新扫码」并允许重新授权 */
+const kugouInvalid = ref(false);
 
 // ---------------------------------------------------------------- 音源授权
 type SourceKind = 'bilibili' | 'netease' | 'kugou';
@@ -444,9 +446,11 @@ async function loadSources(): Promise<void> {
   try {
     const st = await fetchKugouStatus();
     kugouOn.value = !!st.present;
+    kugouInvalid.value = !!st.invalidAt;
     kugouName.value = st.userid ? ('uid ' + st.userid) : '';
   } catch {
     kugouOn.value = false;
+    kugouInvalid.value = false;
   }
 }
 
@@ -654,9 +658,11 @@ onBeforeUnmount(() => {
           </div>
           <div class="row">
             <span class="row-name">酷狗（概念版）</span>
-            <span class="row-val">{{ kugouOn ? kugouName || '已授权' : '未授权' }}</span>
+            <span class="row-val">{{
+              kugouInvalid ? '授权已过期，请重新扫码' : (kugouOn ? kugouName || '已授权' : '未授权')
+            }}</span>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
-              <NeuButton v-if="!kugouOn" size="sm" @click="openQr('kugou')">授权</NeuButton>
+              <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>
               <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('kugou')">退出</NeuButton>
             </template>
           </div>

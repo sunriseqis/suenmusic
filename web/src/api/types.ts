@@ -464,6 +464,9 @@ export interface KugouStatus {
   present: boolean;
   savedAt?: number;
   userid?: string;
+  /** 非空 = token 已失效，需重新扫码 */
+  invalidAt?: number;
+  invalidReason?: string;
 }
 
 export interface KugouQrSession {
