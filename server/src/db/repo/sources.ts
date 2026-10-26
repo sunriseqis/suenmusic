@@ -45,7 +45,7 @@ export interface PlaySourceRow {
   resolvedAt: number;
   expiresAt: number;
   /** 音源来源。旧行缺列时按 bilibili 处理（迁移 004 的 DEFAULT 保证） */
-  source: 'bilibili' | 'netease';
+  source: 'bilibili' | 'netease' | 'kugou';
   /** B 站视频封面（显示层兜底，曲目无 Q 音专辑封面时用） */
   coverUrl: string;
 }
@@ -106,7 +106,9 @@ function toRow(r: SourceDbRow): PlaySourceRow {
     message: r.message,
     resolvedAt: toNumber(r.resolved_at),
     expiresAt: toNumber(r.expires_at),
-    source: r.source === 'netease' ? 'netease' : 'bilibili',
+    // ⚠️ 归一化必须保留全部已知源：曾写成「非 netease 即 bilibili」，酷狗命中会被
+    //    静默改标成 bilibili（客户端音源角标跟着错、CDN 请求头也跟着错）。
+    source: r.source === 'netease' || r.source === 'kugou' ? r.source : 'bilibili',
     coverUrl: r.cover_url ?? '',
   };
 }

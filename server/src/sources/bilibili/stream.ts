@@ -132,12 +132,13 @@ export interface ResolveInput {
  * B 站 CDN 校验 Referer（实测：带 Referer 206 / 不带 403，且不同节点严格程度不同）；
  * 网易云反过来 —— 带了 B 站 Referer 反而可能被拒，只该带干净浏览器 UA。
  */
-export function audioHeadersFor(source: 'bilibili' | 'netease'): Record<string, string> {
+export function audioHeadersFor(source: 'bilibili' | 'netease' | 'kugou'): Record<string, string> {
   // ⚠️ **绝不能带 Cookie**：`biliHeaders()` 里那份是账号登录凭据（SESSDATA/DedeUserID…），
-  //    它只用于服务端调 API；CDN 播放只校验 Referer。把 Cookie 下发给客户端等于泄露账号。
-  return source === 'netease'
-    ? { 'User-Agent': BROWSER_UA }
-    : { 'User-Agent': BROWSER_UA, Referer: 'https://www.bilibili.com' };
+  //    它只用于服务端调 API。B 站 CDN 只校验 Referer；酷狗/网易 CDN 连 Referer 都不要。
+  if (source === 'netease' || source === 'kugou') {
+    return { 'User-Agent': BROWSER_UA };
+  }
+  return { 'User-Agent': BROWSER_UA, Referer: 'https://www.bilibili.com' };
 }
 
 function biliHeaders(): Record<string, string> {
@@ -519,7 +520,10 @@ export async function fetchAudioStream(
   const headers =
     options.source === 'netease'
       ? { 'User-Agent': BROWSER_UA }
-      : biliHeaders();
+      : options.source === 'kugou'
+        ? // 酷狗 CDN 不校验 Referer，干净 UA 即可；**不能带 B 站 Referer 或账号 Cookie**
+          { 'User-Agent': BROWSER_UA }
+        : biliHeaders();
   if (range) headers.Range = range;
 
   return request(url, {

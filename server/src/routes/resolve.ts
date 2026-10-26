@@ -24,6 +24,7 @@ import {
   buildQuery,
   searchCandidates,
 } from '../sources/bilibili/stream.ts';
+import type { ResolveResult } from '../sources/bilibili/stream.ts';
 import { scoreCandidate } from '../sources/bilibili/matcher.ts';
 import { invalidateTrack, resolveTrack } from '../services/resolver.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
