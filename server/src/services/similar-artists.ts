@@ -54,14 +54,19 @@ function cacheGet(name: string): string[] | null {
 
 function cachePut(name: string, names: string[]): void {
   try {
+    // ⚠️ 列名是 `fetched_at`（migration 008），不是 updated_at。
+    // 这里曾写成 updated_at → 每次都抛「no column named updated_at」，又被下面的 catch 吞掉，
+    // 于是缓存**从来没有一行**：效果是 `ai-recall` 的相似歌手支路（SHARE.simi=0.5）永远空，
+    // 50% 名额静默流给公共歌单/榜单（实测来源 playlist 18 / chart 9 / simi 0）。
+    // 现在失败必须留痕：静默的 except 比 bug 本身更贵。
     getDatabase()
       .prepare(
-        `INSERT INTO artist_simi_cache (name, names_json, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(name) DO UPDATE SET names_json = excluded.names_json, updated_at = excluded.updated_at`
+        `INSERT INTO artist_simi_cache (name, names_json, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET names_json = excluded.names_json, fetched_at = excluded.fetched_at`
       )
       .run(name, JSON.stringify(names), Date.now());
-  } catch {
-    /* 缓存写失败无所谓 */
+  } catch (e) {
+    log.warn(`相似歌手缓存写入失败「${name}」：${(e as Error).message}`);
   }
 }
 

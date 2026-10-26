@@ -21,6 +21,7 @@ import { getLibraryTracks, saveLibraryTracks } from '../db/repo/library.ts';
 import { getRejectionStats, listActiveRejections } from '../db/repo/ai-rejections.ts';
 import { heuristicTag } from './ai-tags.ts';
 import { coolingArtists, pickTopArtistForToday, topArtists } from './artist-stats.ts';
+import { getSimilarArtists } from './similar-artists.ts';
 import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track, Album } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
@@ -411,21 +412,56 @@ export async function resolveArtistMids(names: string[], limit = 40): Promise<st
   return [...new Set(out)];
 }
 
-/** 相似歌手名字（读永久缓存；没有的跳过 —— 不为召回再去打网易云） */
-function simiNamesOf(artistNames: string[]): string[] {
+/**
+ * 相似歌手名字。
+ *
+ * 历史实现只读 `artist_simi_cache`，而这张表**只有两个写入口**：歌手详情页
+ * （`routes/catalog.ts:292`）与库补全（`library-topup.ts:185`）。于是从没点过歌手页的用户，
+ * 这个表是空的 → `SHARE.simi` 那 50% 名额被 water-filling 静默流给公共歌单和榜单
+ * （实测来源：playlist 18 / seedOld 13 / chart 9 / simi 0 → 70% 内容来自公共源）。
+ *
+ * 现在：缓存缺的**现算一次并写回**（`getSimilarArtists` 自带永久缓存），一次最多补
+ * `SIMI_FILL_MAX` 位歌手以控制上游压力；仍然全空时打 error，让「50% 名额失效」不再无声。
+ */
+const SIMI_FILL_MAX = 6;
+
+async function simiNamesOf(artistNames: string[]): Promise<string[]> {
   if (artistNames.length === 0) return [];
   const db = getDatabase();
   const ph = artistNames.map(() => '?').join(',');
   const rows = db
-    .prepare(`SELECT names_json FROM artist_simi_cache WHERE name IN (${ph})`)
-    .all(...artistNames) as unknown as Array<{ names_json: string }>;
-  const out: string[] = [];
+    .prepare(`SELECT name, names_json FROM artist_simi_cache WHERE name IN (${ph})`)
+    .all(...artistNames) as unknown as Array<{ name: string; names_json: string }>;
+  const filled = new Map<string, string[]>();
   for (const r of rows) {
     try {
-      out.push(...(JSON.parse(r.names_json) as string[]));
+      filled.set(r.name, JSON.parse(r.names_json) as string[]);
     } catch {
       /* 忽略坏数据 */
     }
+  }
+
+  const missing = artistNames.filter(n => !filled.has(n)).slice(0, SIMI_FILL_MAX);
+  if (missing.length > 0) {
+    await Promise.all(
+      missing.map(async name => {
+        try {
+          // getSimilarArtists 返回 {id,name}：我们只要名字（mid 由另一条路解析）
+          const neighbors = await getSimilarArtists(name);
+          filled.set(name, neighbors.map(a => a.name).filter(Boolean));
+        } catch (e) {
+          log.warn(`相似歌手现算失败「${name}」：${(e as Error).message}`);
+        }
+      })
+    );
+  }
+
+  const out = [...new Set([...filled.values()].flat().filter(Boolean))];
+  if (out.length === 0) {
+    log.error(
+      `相似歌手全部解析失败（种子 ${artistNames.length} 位）：本次推荐将退化给公共歌单/榜单，` +
+        `SHARE.simi=${SHARE.simi} 的名额失效`
+    );
   }
   return out;
 }
@@ -575,7 +611,7 @@ export async function buildCandidatePool(
   }
 
   // ---- 2) 相似歌手：读缓存名单 → 找库内曲目 ----
-  const neighborNames = simiNamesOf(seeds.map(s => s.name));
+  const neighborNames = await simiNamesOf(seeds.map(s => s.name));
   if (neighborNames.length > 0) {
     const db = getDatabase();
     const ph = neighborNames.map(() => '?').join(',');
