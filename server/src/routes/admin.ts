@@ -21,6 +21,7 @@ import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { readAiHealthView } from '../services/ai-health.ts';
 import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
 import { readKugouVipStatus } from '../services/kugou-vip.ts';
+import { readClaimSettings, saveClaimSettings, readLastClaim, runKugouClaim } from '../services/kugou-claim.ts';
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
 
@@ -448,6 +449,28 @@ export function registerAdminRoutes(app: FastifyInstance): void {
    */
   app.get('/api/admin/kugou/vip', async () => {
     return { ...(await readKugouVipStatus()), ok: true };
+  });
+
+  /** 会员续签编排设置（执行的是用户自己的领取工具，本项目不重写领取协议） */
+  app.get('/api/admin/kugou/claim', async () => {
+    return { ok: true, settings: readClaimSettings(), last: readLastClaim() };
+  });
+
+  app.put('/api/admin/kugou/claim', async req => {
+    const body = (req.body ?? {}) as Partial<{ enabled: boolean; command: string; hour: number }>;
+    const settings = saveClaimSettings({
+      enabled: body.enabled,
+      command: body.command,
+      hour: body.hour,
+    });
+    log.info(`酷狗续签设置已更新：enabled=${settings.enabled} hour=${settings.hour}`);
+    return { ok: true, settings };
+  });
+
+  /** 手动触发一次续签（设置页「立即执行」） */
+  app.post('/api/admin/kugou/claim/run', async () => {
+    const result = await runKugouClaim();
+    return { ok: result.ok, result };
   });
 
   /** 退出授权：清掉 kugou.credentials（对齐 B 站 DELETE /api/bilibili/account 的语义） */
