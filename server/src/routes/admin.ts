@@ -20,6 +20,7 @@ import {
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { readAiHealthView } from '../services/ai-health.ts';
 import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
+import { readKugouVipStatus } from '../services/kugou-vip.ts';
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
 
@@ -437,6 +438,16 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   app.get('/api/admin/kugou/credentials', async () => {
     return { ok: true, ...readKugouCredentialStatus() };
+  });
+
+  /**
+   * 酷狗概念版会员状态。
+   *
+   * VIP 到期会直接导致 VIP 曲取流拿不到 url（音质掉回 128 或整首不可播），
+   * 所以必须在面板上能看到到期时间，而不是等点播失败才发现。
+   */
+  app.get('/api/admin/kugou/vip', async () => {
+    return { ...(await readKugouVipStatus()), ok: true };
   });
 
   /** 退出授权：清掉 kugou.credentials（对齐 B 站 DELETE /api/bilibili/account 的语义） */
