@@ -29,6 +29,7 @@ import {
 import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { biliCooldown, resolveTrackSource } from '../sources/bilibili/stream.ts';
 import { resolveKugouSource } from '../sources/kugou/stream.ts';
+import { getPin } from '../db/repo/pins.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveInput, ResolveResult } from '../sources/bilibili/stream.ts';
 
@@ -253,29 +254,38 @@ export function resolveTrack(
   stats.upstreamCalls++;
   const ts = Date.now();
 
-  const promise = resolveNeteaseSource(input)
-    .then(async (neteaseResult): Promise<ResolveResult> => {
-      if (neteaseResult.ok) {
-        log.info(
-          `音源链 qq → 网易云命中 ${key} 「${neteaseResult.matchedTitle}」` +
-            ` 时长差=${neteaseResult.durationDiff ?? 0}s`
-        );
-        return neteaseResult;
-      }
-      log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
-      // 酷狗（概念版 VIP）：有凭据才进链（resolveKugouSource 内部自判，无凭据返回 below_threshold）；
-      // 音质 FLAC/320 优先于 B 站视频转音频。B 站仍是最终兜底（它自己有冷却闸，不重复判）。
-      const kugouResult = await resolveKugouSource(input);
-      if (kugouResult.ok) {
-        log.info(
-          `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
-            ` 时长差=${kugouResult.durationDiff ?? 0}s`
-        );
-        return kugouResult;
-      }
-      log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
-      return resolveTrackSource(input);
-    })
+  // 用户源钉（锚定页「只用某源」）：**优先于默认链**。钉 kugou/netease 时只走该源；
+  // 钉外的源（含 B 站兜底）全部跳过。pin 无效（该源失败）时按失败处理，
+  // 不自动落回别的源 —— 用户的指令就是「只用它」，落回等于悄悄违背。
+  const pin = getPin(key);
+  const baseChain: Promise<ResolveResult> = pin
+    ? (async (): Promise<ResolveResult> => {
+        log.info(`源钉 ${key} → 只走 ${pin.source}`);
+        return pin.source === 'kugou' ? resolveKugouSource(input) : resolveNeteaseSource(input);
+      })()
+    : resolveNeteaseSource(input)
+      .then(async (neteaseResult): Promise<ResolveResult> => {
+        if (neteaseResult.ok) {
+          log.info(
+            `音源链 qq → 网易云命中 ${key} 「${neteaseResult.matchedTitle}」` +
+              ` 时长差=${neteaseResult.durationDiff ?? 0}s`
+          );
+          return neteaseResult;
+        }
+        log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
+        const kugouResult = await resolveKugouSource(input);
+        if (kugouResult.ok) {
+          log.info(
+            `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
+              ` 时长差=${kugouResult.durationDiff ?? 0}s`
+          );
+          return kugouResult;
+        }
+        log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
+        return resolveTrackSource(input);
+      });
+
+  const promise = baseChain
     .then((result): ResolveOutcome => {
       // 成功与失败都落库。负缓存同样重要：否则重启后会把"注定匹配不到"的
       // 曲子重新打一遍上游，而这正是风控的主要来源。

@@ -23,10 +23,14 @@ import {
   audioHeadersFor,
   buildQuery,
   searchCandidates,
+  type ResolveInput,
 } from '../sources/bilibili/stream.ts';
 import type { ResolveResult } from '../sources/bilibili/stream.ts';
 import { scoreCandidate } from '../sources/bilibili/matcher.ts';
 import { invalidateTrack, resolveTrack } from '../services/resolver.ts';
+import { getPin, setPin, deletePin } from '../db/repo/pins.ts';
+import { resolveKugouSource } from '../sources/kugou/stream.ts';
+import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
 
@@ -393,6 +397,97 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     log.info(`曲目已锚定 ${parsed.raw} → ${bvid}`);
 
     return { ok: true, trackId: parsed.raw, bvid };
+  });
+
+  /**
+   * 各音源可用性（锚定页三态展示用）。
+   *
+   * 返回酷狗 / 网易云 / B 站各自「有无可用音源 + 匹配摘要」，让用户自己决定锚谁。
+   * 并发查三源；B 站给 top1 候选摘要（锚定要选具体视频），酷狗/网易云给命中曲目摘要。
+   * 结果不落缓存（锚定页是低频手动操作）。
+   */
+  app.get('/api/resolve/:trackId/availability', async req => {
+    requireUser(req);
+    const raw = (req.params as any).trackId as string;
+    const parsed = parseId(raw);
+    if (!parsed || parsed.kind !== 'track') throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
+    const meta = await loadTrack(parsed.raw);
+    if (!meta) throw notFound('曲目不存在');
+
+    const input: ResolveInput = {
+      id: parsed.raw,
+      name: meta.name,
+      artists: meta.artists,
+      durationMs: meta.durationMs,
+    };
+
+    const [kugouR, neteaseR, biliCand] = await Promise.all([
+      resolveKugouSource(input).catch(err => ({ ok: false, message: (err as Error).message } as ResolveResult)),
+      resolveNeteaseSource(input).catch(err => ({ ok: false, message: (err as Error).message } as ResolveResult)),
+      (async () => {
+        const keyword = buildQuery(meta);
+        const { candidates } = await searchCandidates(keyword, 5);
+        return candidates;
+      })().catch(() => []),
+    ]);
+
+    return {
+      kugou: {
+        ok: kugouR.ok,
+        title: kugouR.matchedTitle ?? null,
+        author: kugouR.matchedAuthor ?? null,
+        message: kugouR.ok ? null : (kugouR.message ?? null),
+      },
+      netease: {
+        ok: neteaseR.ok,
+        title: neteaseR.matchedTitle ?? null,
+        author: neteaseR.matchedAuthor ?? null,
+        message: neteaseR.ok ? null : (neteaseR.message ?? null),
+      },
+      bilibili: {
+        ok: biliCand.length > 0,
+        top: biliCand[0] ? { bvid: biliCand[0].bvid, title: biliCand[0].title, author: biliCand[0].author } : null,
+        count: biliCand.length,
+      },
+    };
+  });
+
+  /**
+   * 源钉（用户指定该曲只用某源）：设置 / 查询 / 清除。
+   * resolve 时 pin 优先于默认链；钉外的源全部跳过（不落回，用户指令不许被悄悄违背）。
+   */
+  app.put('/api/tracks/:id/pin-source', async req => {
+    requireUser(req);
+    const raw = (req.params as any).id as string;
+    const parsed = parseId(raw);
+    if (!parsed || parsed.kind !== 'track') throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
+    const body = (req.body ?? {}) as { source?: string };
+    const source = String(body.source ?? '');
+    if (source !== 'kugou' && source !== 'netease') {
+      throw badRequest('source 只支持 kugou / netease（B 站用锚点，无需钉）', 'invalid_source');
+    }
+    setPin(parsed.raw, source);
+    invalidateTrack(parsed.raw);
+    return { ok: true, trackId: parsed.raw, source };
+  });
+
+  app.get('/api/tracks/:id/pin-source', async req => {
+    requireUser(req);
+    const raw = (req.params as any).id as string;
+    const parsed = parseId(raw);
+    if (!parsed || parsed.kind !== 'track') throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
+    const pin = getPin(parsed.raw);
+    return { ok: true, trackId: parsed.raw, source: pin?.source ?? null };
+  });
+
+  app.delete('/api/tracks/:id/pin-source', async req => {
+    requireUser(req);
+    const raw = (req.params as any).id as string;
+    const parsed = parseId(raw);
+    if (!parsed || parsed.kind !== 'track') throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
+    deletePin(parsed.raw);
+    invalidateTrack(parsed.raw);
+    return { ok: true, trackId: parsed.raw };
   });
 
   /** 解除锚定。之后该曲目回到正常自动匹配（可能又变成低置信不播） */

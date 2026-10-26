@@ -97,6 +97,43 @@ export function fetchBiliCandidates(
   });
 }
 
+// ---------------------------------------------------------------------------
+// 音源可用性 + 源钉（锚定页三态展示 / 用户指定只用某源）
+// ---------------------------------------------------------------------------
+
+export interface SourceAvailabilityItem {
+  ok: boolean;
+  title: string | null;
+  author: string | null;
+  message: string | null;
+}
+
+export interface SourceAvailability {
+  kugou: SourceAvailabilityItem;
+  netease: SourceAvailabilityItem;
+  bilibili: {
+    ok: boolean;
+    count: number;
+    top: { bvid: string; title: string; author: string } | null;
+  };
+}
+
+export function fetchSourceAvailability(trackId: string): Promise<SourceAvailability> {
+  return http.get(`/api/resolve/${encodeURIComponent(trackId)}/availability`, { timeoutMs: 30_000 });
+}
+
+export function pinSource(trackId: string, source: 'kugou' | 'netease'): Promise<{ ok: boolean; source: string }> {
+  return http.put(`/api/tracks/${encodeURIComponent(trackId)}/pin-source`, { source });
+}
+
+export function getPinSource(trackId: string): Promise<{ ok: boolean; source: string | null }> {
+  return http.get(`/api/tracks/${encodeURIComponent(trackId)}/pin-source`);
+}
+
+export function unpinSource(trackId: string): Promise<{ ok: boolean }> {
+  return http.delete(`/api/tracks/${encodeURIComponent(trackId)}/pin-source`);
+}
+
 /** 锚定：把「这首曲 = 这个 B 站视频」永久入库，之后播放直接按锚点取流 */
 export function anchorTrack(
   trackId: string,

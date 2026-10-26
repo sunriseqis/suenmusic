@@ -20,7 +20,8 @@ import {
   unanchorTrack,
   type TrackAnchorInfo,
 } from '@/api/playback.ts';
-import type { AnchorTrackMeta, BiliCandidate } from '@/api/playback.ts';
+import { fetchSourceAvailability, pinSource, getPinSource, unpinSource } from '@/api/playback.ts';
+import type { AnchorTrackMeta, BiliCandidate, SourceAvailability } from '@/api/playback.ts';
 import { resolveUrl } from '@/api/client.ts';
 import { usePlayerStore } from '@/stores/player.ts';
 import { useUiStore } from '@/stores/ui.ts';
@@ -46,6 +47,43 @@ const anchoringBvid = ref<string | null>(null);
 /** 该曲目已存在的锚点（回显 + 可解除） */
 const currentAnchor = ref<TrackAnchorInfo | null>(null);
 const removingAnchor = ref(false);
+
+// ---- 各源可用性 + 源钉（用户指定「只用酷狗/只用网易云」）----
+const avail = ref<SourceAvailability | null>(null);
+const availLoading = ref(false);
+const pinnedSource = ref<'kugou' | 'netease' | null>(null);
+const pinBusy = ref(false);
+
+async function loadAvailability(): Promise<void> {
+  const t = track.value;
+  if (!t) return;
+  availLoading.value = true;
+  try {
+    const [av, pin] = await Promise.all([fetchSourceAvailability(t.id), getPinSource(t.id).catch(() => null)]);
+    avail.value = av;
+    pinnedSource.value = (pin?.source as 'kugou' | 'netease' | null) ?? null;
+  } catch {
+    avail.value = null;
+  } finally {
+    availLoading.value = false;
+  }
+}
+
+async function setPinSource(source: 'kugou' | 'netease' | null): Promise<void> {
+  const t = track.value;
+  if (!t || pinBusy.value) return;
+  pinBusy.value = true;
+  try {
+    if (source === null) await unpinSource(t.id);
+    else await pinSource(t.id, source);
+    pinnedSource.value = source;
+    ui.ok(source === null ? '已恢复自动匹配' : `已指定只用${source === 'kugou' ? '酷狗' : '网易云'}`);
+  } catch (e) {
+    ui.err(e instanceof Error ? e.message : '操作失败');
+  } finally {
+    pinBusy.value = false;
+  }
+}
 
 /**
  * 「当前音源」。
@@ -196,6 +234,7 @@ watch(track, t => {
   searchNote.value = '';
   void search();
   void loadCurrentAnchor();
+  void loadAvailability();
 });
 
 async function loadCurrentAnchor(): Promise<void> {
@@ -243,6 +282,63 @@ onBeforeUnmount(stopPreview);
         <div class="src-row" data-role="current-source">
           <span class="src-k">当前音源</span>
           <span class="src-v">{{ currentSourceLabel }}</span>
+        </div>
+
+        <!-- 各源可用性：酷狗 / 网易云 / B 站各自「有无音源」，一键钉源 -->
+        <div class="avail" data-role="source-availability">
+          <div class="avail-head">
+            <span class="src-k">各源可用性</span>
+            <NeuButton v-if="pinnedSource" size="sm" variant="ghost" :loading="pinBusy" @click="setPinSource(null)">
+              恢复自动匹配
+            </NeuButton>
+          </div>
+          <p v-if="availLoading" class="avail-note neu-t2">正在查询各源…</p>
+          <template v-else-if="avail">
+            <div class="avail-row">
+              <span class="avail-name">酷狗</span>
+              <span class="avail-state" :class="avail.kugou.ok ? 'ok' : 'bad'">
+                {{ avail.kugou.ok ? '有匹配音源' : '无音源' }}
+              </span>
+              <span class="neu-t2 neu-ellipsis avail-detail">
+                {{ avail.kugou.ok ? (avail.kugou.title + ' · ' + avail.kugou.author) : (avail.kugou.message ?? '') }}
+              </span>
+              <NeuButton
+                size="sm"
+                :variant="pinnedSource === 'kugou' ? 'default' : 'ghost'"
+                :loading="pinBusy && pinnedSource === 'kugou'"
+                @click="setPinSource(pinnedSource === 'kugou' ? null : 'kugou')"
+              >
+                {{ pinnedSource === 'kugou' ? '已钉' : '只用酷狗' }}
+              </NeuButton>
+            </div>
+            <div class="avail-row">
+              <span class="avail-name">网易云</span>
+              <span class="avail-state" :class="avail.netease.ok ? 'ok' : 'bad'">
+                {{ avail.netease.ok ? '有匹配音源' : '无音源' }}
+              </span>
+              <span class="neu-t2 neu-ellipsis avail-detail">
+                {{ avail.netease.ok ? (avail.netease.title + ' · ' + avail.netease.author) : (avail.netease.message ?? '') }}
+              </span>
+              <NeuButton
+                size="sm"
+                :variant="pinnedSource === 'netease' ? 'default' : 'ghost'"
+                :loading="pinBusy && pinnedSource === 'netease'"
+                @click="setPinSource(pinnedSource === 'netease' ? null : 'netease')"
+              >
+                {{ pinnedSource === 'netease' ? '已钉' : '只用网易云' }}
+              </NeuButton>
+            </div>
+            <div class="avail-row">
+              <span class="avail-name">B 站</span>
+              <span class="avail-state" :class="avail.bilibili.ok ? 'ok' : 'bad'">
+                {{ avail.bilibili.ok ? '有匹配音源' : '无音源' }}
+              </span>
+              <span class="neu-t2 neu-ellipsis avail-detail">
+                {{ avail.bilibili.top ? (avail.bilibili.top.title + ' · ' + avail.bilibili.top.author) : '' }}
+              </span>
+              <span class="neu-t2">候选 {{ avail.bilibili.count }} 条（下方可试听/锚定）</span>
+            </div>
+          </template>
         </div>
 
         <!-- 已有锚点：回显并可解除（锚错了随时推翻重来） -->
@@ -374,6 +470,49 @@ onBeforeUnmount(stopPreview);
   margin: 0;
   font-size: var(--fs-sm);
   text-align: center;
+}
+
+.avail {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.avail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.avail-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.avail-name {
+  flex: 0 0 4.5em;
+  font-size: var(--fs-md);
+  color: var(--t1);
+}
+.avail-state {
+  flex: 0 0 6em;
+  font-size: var(--fs-sm);
+}
+.avail-state.ok {
+  color: var(--accent);
+}
+.avail-state.bad {
+  color: var(--t2);
+}
+.avail-detail {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-xs);
+}
+.avail-note {
+  font-size: var(--fs-sm);
 }
 
 .src-row {
