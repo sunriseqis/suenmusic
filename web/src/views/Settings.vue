@@ -365,8 +365,13 @@ async function pollOnce(): Promise<void> {
       : qrSource.value === 'kugou'
         ? await (async () => {
             const r = await pollKugouQr();
-            // 服务端三态 → 页面统一的 state/message
-            return { state: r.state, message: r.state === 'confirmed' ? '已授权' : r.state === 'expired' ? '二维码已过期' : '等待扫码' };
+            // ⚠️ 服务端字段是 `status`（waiting/confirmed/expired），不是 state。
+            //    之前读 r.state 恒 undefined → 扫码确认后仍卡在「等待扫码」，刷新才显示已授权。
+            const st = r.status;
+            return {
+              state: st === 'confirmed' ? 'confirmed' : st === 'expired' ? 'expired' : 'waiting',
+              message: st === 'confirmed' ? '已授权' : st === 'expired' ? '二维码已过期，请重新获取' : '等待扫码',
+            };
           })()
         : await pollNeteaseQr(qrKey.value);
     qrMsg.value = res.message;

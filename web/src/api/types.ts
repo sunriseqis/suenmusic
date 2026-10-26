@@ -478,7 +478,8 @@ export interface KugouQrSession {
 
 export interface KugouQrPoll {
   ok: boolean;
-  state: KugouQrState;
+  /** 服务端返回的是 status（waiting / confirmed / expired） */
+  status: KugouQrState;
   token?: string;
   userid?: string;
 }
