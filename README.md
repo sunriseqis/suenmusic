@@ -6,13 +6,12 @@
 
 | 端 | 状态 | 说明 |
 |---|---|---|
-| 服务端 `server/` | ✅ 主线 | 单一真相源；音源解析、流代理、多用户、AI 推荐 |
+| 服务端 `server/` | ✅ 主线 | 单一真相源；多音源解析（酷狗 VIP / 网易云 / B 站）、直链与流代理、多用户、AI 推荐 |
 | Web `web/` | ✅ 主线 | **PC 端唯一客户端 + 管理面板**（同一份 SPA） |
-| 鸿蒙 `hw/` | ✅ 主线 | ArkUI 原生客户端（`pages/NativeRoot`），无 WebView |
-| iOS `ios/SuenMusic/` | 🚧 重做中 | SwiftUI 原生，代码已就位（S0），**待 Xcode 环境验证** |
-| iOS `ios/App/` | ⚠️ 旧壳 | Capacitor 壳，待 S1 通过后删除 |
+| 鸿蒙 `hw/` | ✅ 主线 | ArkUI 原生客户端（`pages/NativeRoot`）+ 2x2/2x4 桌面卡片，无 WebView |
+| iOS `ios/SuenMusic/` | ✅ 主线 | SwiftUI 原生客户端 + 灵动岛 Live Activity，已对齐鸿蒙端（v2.0.0） |
 | Android `android/` | ❄️ **已封库** | 2026-10-21 起不再更新/构建/分发/上架，见 `android/README.md` |
-| fnOS `fn/` | ✅ 主线 | 服务端 + Web 打进 `.fpk`，面向飞牛应用中心 |
+| fnOS `fn/` | ✅ 主线 | 服务端 + Web + Node 22 运行时自包含打进 `.fpk`，面向飞牛应用中心 |
 单仓（monorepo），Node 22 起步，无原生编译依赖的服务端（`node:sqlite`）。
 
 ## 结构
@@ -45,10 +44,10 @@ cd web && npm ci && npm run dev
 首个注册账号自动成为管理员；注册通道在首账号落地后自动收闭，
 可在 Web 面板「设置 → 账号管理」重新打开。
 
-## 当前阶段（2026-10-22）
+## 当前阶段（2026-10-26 · v2.0.0）
 
-鸿蒙原生客户端 T0–T5 已通过验收（T6 冻结定稿中，WebView 壳已删除）；
-iOS 原生重做 S0 代码就位、待 Xcode 环境验证；Android 已封库不再维护。
+- **客户端**：Web 端、鸿蒙 ArkUI 原生端（`hw/`）与 iOS SwiftUI 原生端（`ios/SuenMusic/`）均已对齐 v2.0.0；Android 已封库不再维护。
+- **音源与元数据**：酷狗概念版每日自动签到与 SVIP 24h 自动升级已打通（支持 FLAC 无损 / 320k 直链下发）；下一阶段按 `docs/plan/2026-10-26-多源元数据聚合与零翻唱直取方案.md` 落地「酷狗为主 + 网易云为辅 + QQ 兜底/门面」零翻唱聚合与直取架构。
 
 ## 构建产物
 
