@@ -920,6 +920,20 @@ onBeforeUnmount(() => {
   color: var(--t1);
   min-width: 0;
 }
+
+/* 音源授权行：三列对齐 —— 名称固定列宽、状态紧跟其后、按钮推到最右。
+   space-between 会把三列均匀撑开，名称长短不一时状态列就参差了。
+   限定在本节内：.row-name/.row-val 是全局类，别处（WebDAV 等）仍是旧布局。 */
+.panel .row .row-name {
+  flex: 0 0 8.5em;
+}
+.panel .row .row-val {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .row-val {
   font-size: var(--fs-xs);
   color: var(--t2);
