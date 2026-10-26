@@ -110,3 +110,4 @@
 - [2026-10-26 多音源调研：酷狗 API / 签到会员 / EchoMusic](2026-10-26-多音源调研-酷狗与EchoMusic.md) —— 酷狗元数据匿名可通（我方实测 200/status=1）但播放直链被 20028 风控拦；签到换会员实为伪造广告播放上报（刷量）+ 接口季度崩，不做；EchoMusic 把 KuGouMusicApi 当库进程内联、音频走官方 CDN 直链、风控靠真人过验证、跨平台只搬元数据；结论：酷狗做元数据兜底、音源层改责任链
 - [2026-10-26 直链通道落地与鸿蒙模拟器验收](2026-10-26-直链通道落地与模拟器验收.md) —— 服务端下发 directUrl/directHeaders/directExpiresInSec（剥掉 Cookie、开关可回退纯代理），hw 用 createMediaSourceWithUrl 直连 + 失败回退；模拟器实测直链装载 exp≈30min、AVSession 时间轴推进、服务端零 stream 请求
 - [2026-10-26 后端优化与酷狗接入](2026-10-26-后端优化与酷狗接入.md) —— 服务端优化批次（prune 保护/相似歌手列名 bug/上游缓存表/复核三态+退避+ai-health/打回摘要/直链通道+模拟器验收）+ 酷狗接入（概念版盐/gateway+x-router/body 参与签名/VIP FLAC spike 3/3/扫码登录三接口与 Web 面板）+ 网易云 code!==200 误判修复 + systemd 常驻
+- [2026-10-26 酷狗音源正式接入](2026-10-26-酷狗音源接入.md) —— resolveKugouSource 实现 ResolveResult 契约插入音源链（网易云→酷狗→B站）；概念版搜索盐/标准版取流盐+gateway+x-router/body 参与签名全链实测（FLAC@871kbps）；kg_ id 与 qq_ 路由约定的边界说明；/api/search/kugou 独立探索端点
