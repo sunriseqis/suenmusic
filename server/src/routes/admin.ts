@@ -447,17 +447,32 @@ export function registerAdminRoutes(app: FastifyInstance): void {
    * body: { token, userid, vipToken?, t1?, nickname? }
    */
   app.post('/api/admin/kugou/credentials/import', async req => {
-    const body = (req.body ?? {}) as { token?: string; userid?: unknown; vipToken?: string; t1?: string; nickname?: string };
-    const token = String(body.token ?? '').trim();
-    const userid = String(body.userid ?? '').trim();
-    if (!token || !userid) throw badRequest('token 与 userid 必填', 'invalid_param');
+    const body = (req.body ?? {}) as {
+      token?: string; userid?: unknown; vipToken?: string; t1?: string; nickname?: string;
+      /** 直接粘 Cookie 串（抓包/工具状态文件），省得逐个字段抠 */
+      cookie?: string;
+    };
+    const parseCookie = (text: string): Record<string, string> => {
+      const out: Record<string, string> = {};
+      for (const seg of text.split(';')) {
+        const i = seg.indexOf('=');
+        if (i <= 0) continue;
+        out[seg.slice(0, i).trim()] = seg.slice(i + 1).trim();
+      }
+      return out;
+    };
+    const cookie = body.cookie ? parseCookie(String(body.cookie)) : {};
+    const token = String(body.token ?? cookie.token ?? '').trim();
+    const userid = String(body.userid ?? cookie.userid ?? '').trim();
+    if (!token || !userid) throw badRequest('token 与 userid 必填（或直接给 cookie 串）', 'invalid_param');
     setSetting(
       'kugou.credentials',
       JSON.stringify({
         token,
         userid,
-        vipToken: String(body.vipToken ?? ''),
-        t1: String(body.t1 ?? ''),
+        // vip_token 是完整音频的关键：没有它酷狗只给 60 秒试听片段
+        vipToken: String(body.vipToken ?? cookie.vip_token ?? cookie.viptoken ?? ''),
+        t1: String(body.t1 ?? cookie.t1 ?? ''),
         nickname: String(body.nickname ?? ''),
         savedAt: Date.now(),
       })
