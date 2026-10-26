@@ -19,6 +19,7 @@ import {
 } from '../db/repo/users.ts';
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
 import { readAiHealthView } from '../services/ai-health.ts';
+import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
 
@@ -414,4 +415,27 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       };
     }
   );
+
+  /**
+   * 酷狗扫码登录（三步）：
+   *   POST /api/admin/kugou/login/qr     → 生成二维码（pngBase64 dataURL 直接给 <img>）
+   *   POST /api/admin/kugou/login/poll   → 轮询扫码状态（confirmed 时凭据已落库）
+   *   GET  /api/admin/kugou/credentials  → 查凭据是否已存在
+   *
+   * 凭据落在 app_settings 的 kugou.credentials（管理员通道），用于 VIP 取流。
+   * 用户扫码必须用**概念版 App**（权益跟平台参数走）。
+   */
+  app.post('/api/admin/kugou/login/qr', async () => {
+    const session = await startKugouQrLogin();
+    return { ok: true, pngBase64: session.pngBase64, expiresInSec: Math.round((session.expiresAt - Date.now()) / 1000) };
+  });
+
+  app.post('/api/admin/kugou/login/poll', async () => {
+    const r = await pollKugouQrLogin();
+    return { ok: true, ...r };
+  });
+
+  app.get('/api/admin/kugou/credentials', async () => {
+    return { ok: true, ...readKugouCredentialStatus() };
+  });
 }
