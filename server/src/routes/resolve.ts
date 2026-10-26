@@ -107,7 +107,7 @@ function shape(outcome: ResolveOutcome, meta: TrackMeta = null): Record<string, 
     directUrl: directEnabled() && outcome.ok ? (row?.audioUrl || outcome.sourceUrl || null) : null,
     directHeaders:
       directEnabled() && outcome.ok
-        ? audioHeadersFor((row?.source ?? outcome.source ?? 'bilibili') as 'bilibili' | 'netease')
+        ? audioHeadersFor((row?.source ?? outcome.source ?? 'bilibili') as 'bilibili' | 'netease' | 'kugou')
         : null,
     /** 直链剩余有效期（秒）：与音源缓存同口径，到期必须重新解析 */
     directExpiresInSec:

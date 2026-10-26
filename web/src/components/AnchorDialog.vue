@@ -98,7 +98,7 @@ const currentSourceLabel = computed(() => {
   if (!t) return '';
   if (currentAnchor.value) return 'B 站 · 已锚定';
   if (player.currentSourceTrackId === t.id && player.currentSource) {
-    return player.currentSource === 'netease' ? '网易云' : 'B 站';
+    return player.currentSource === 'netease' ? '网易云' : player.currentSource === 'kugou' ? '酷狗' : 'B 站';
   }
   return '未解析';
 });

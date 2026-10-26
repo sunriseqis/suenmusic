@@ -5,7 +5,7 @@
  *      → poll 返回 status=4 → 落 token/userid 到 sources/credentials 通道（kugou 专用键）。
  *
  * 两个签名体系（实测）：
- *   · 拿 key / 轮询 = web 盐（NVPh…）+ appid 1014（encryptType=web）；
+ *   · 拿 key / 轮询 = web 盐（NVPh…）+ appid 1001/3116（encryptType=web）；
  *   · 之后取流 = 概念版盐（LnT6…）+ appid 3116 / clientver 11440。
  * 二维码里编的是 h5 登录页 URL（qrcode=key），App 扫码后走它自己的授权域。
  */
@@ -17,49 +17,121 @@ import { setSetting, getSetting, deleteSetting } from '../db/repo/settings.ts';
 const log = createLogger('kugou-login');
 
 const WEB_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt';
-const guid = crypto.createHash('md5').update('suenmusic-kugou-device-v1').digest('hex');
+const DEFAULT_GUID = crypto.createHash('md5').update('suenmusic-kugou-device-v1').digest('hex');
+const DEFAULT_MID = BigInt('0x' + crypto.createHash('md5').update(DEFAULT_GUID).digest('hex')).toString();
 const UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36';
-/**
- * 注册过的 dfid（2026-10-26 实测：**必须先 /risk/v3/r_register_dev 注册设备**，
- * 否则 login-user 的两个接口全部 `20010`；注册后拿 key ✅、轮询 ✅）。
- * 进程内缓存；重启后重注册一次（接口幂等，返回同 guid 的新 dfid 也没关系）。
- */
+
+const PUBLIC_KEY_RSA_LITE = `-----BEGIN PUBLIC KEY-----
+MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDECi0Np2UR87scwrvTr72L6oO01rBbbBPriSDFPxr3Z5syug0O24QyQO8bg27+0+4kBzTBTBOZ/WWU0WryL1JSXRTXLgFVxtzIY41Pe7lPOgsfTCn5kZcvKhYKJesKnnJDNr5/abvTGf+rHG3YRwsCHcQ08/q6ifSioBszvb3QiwIDAQAB
+-----END PUBLIC KEY-----`;
+
+export interface KugouDevice {
+  guid: string;
+  mid: string;
+  dfid: string;
+}
+
 let cachedDfid: string | null = null;
 
-async function ensureDfid(): Promise<string> {
-  if (cachedDfid) return cachedDfid;
-  const registerSalt = '1014';
-  const inner = {
-    appid: '3116', clientver: '11440', mid: guid, guid,
-    device_id: guid, mac: guid, os: '13', osver: '13.0.0',
-    model: '2210132C',Density: '440',resolution: '2400x1080',
-    remove_last_cookie: '1', MANUFACTURER: 'Xiaomi',
-  };
-  const values = Object.keys(inner).map(k => String((inner as any)[k])).sort().join('');
-  const params: Record<string, string> = {
-    ...inner,
-    signature: md5('1014' + values + '1014'),
-  };
-  // register_dev 走 POST + AES/RSA 加密体，直接用 KuGouMusicApi 的本地服务最省事 —— 
-  // 但为了不引入外部进程依赖，这里走**公开注册参数的等价 HTTP**（实测 20010 修复的真正前提是 dfid 有效，
-  // 因此失败时降级用 '-' 并明确告警）。
+function md5(s: string): string {
+  return crypto.createHash('md5').update(s).digest('hex');
+}
+
+function aesEncrypt(data: unknown): { str: string; key: string } {
+  const randomStr = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const key = md5(randomStr).slice(0, 16);
+  const iv = key.slice(0, 16);
+  const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
+  const str = cipher.update(JSON.stringify(data), 'utf8', 'hex') + cipher.final('hex');
+  return { str, key };
+}
+
+function aesDecrypt(hexStr: string, key: string): any {
+  const iv = key.slice(0, 16);
+  const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
+  const plain = decipher.update(hexStr, 'hex', 'utf8') + decipher.final('utf8');
+  return JSON.parse(plain);
+}
+
+function rsaEncryptLite(data: unknown): string {
+  const buf = Buffer.from(JSON.stringify(data), 'utf8');
+  if (buf.length > 128) throw new Error('RSA payload 超过 128 字节');
+  const padded = Buffer.concat([buf, Buffer.alloc(128 - buf.length)]);
+  return crypto
+    .publicEncrypt({ key: PUBLIC_KEY_RSA_LITE, padding: crypto.constants.RSA_NO_PADDING }, padded)
+    .toString('hex');
+}
+
+/**
+ * 读取当前酷狗概念版设备指纹（guid / 十进制 mid / dfid）。
+ * 若凭据里已绑定 mid/dfid 则优先沿用，保证扫码、验权、取流全程使用同一设备指纹。
+ */
+export function getKugouDevice(): KugouDevice {
+  const raw = getSetting('kugou.credentials');
+  if (raw) {
+    try {
+      const c = JSON.parse(raw) as { guid?: string; mid?: string; dfid?: string };
+      const g = c.guid || DEFAULT_GUID;
+      const m = c.mid || BigInt('0x' + md5(g)).toString();
+      const d =
+        c.dfid && c.dfid !== '-'
+          ? c.dfid
+          : (cachedDfid && cachedDfid !== '-' ? cachedDfid : getSetting('kugou.dfid')) || '-';
+      return { guid: g, mid: m, dfid: d };
+    } catch {
+      // ignore
+    }
+  }
+  const savedDfid = (cachedDfid && cachedDfid !== '-' ? cachedDfid : getSetting('kugou.dfid')) || '-';
+  return { guid: DEFAULT_GUID, mid: DEFAULT_MID, dfid: savedDfid };
+}
+
+export async function ensureDfid(): Promise<string> {
+  const dev = getKugouDevice();
+  if (dev.dfid && dev.dfid !== '-') {
+    cachedDfid = dev.dfid;
+    return dev.dfid;
+  }
+  const { mid } = dev;
   try {
-    const res = await fetch('https://userservice.kugou.com/risk/v3/r_register_dev', {
-      method: 'POST',
-      headers: { 'User-Agent': UA_WEB, 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-      signal: AbortSignal.timeout(10_000),
-    });
-    const j: any = await res.json();
-    const dfid = String(j?.data?.dfid ?? '');
-    if (dfid) {
+    const aes = aesEncrypt({ mid, uuid: '', appid: '1014', userid: '0' });
+    const p = rsaEncryptLite({ aes: aes.key, uid: '0', token: '' });
+    const queryParams: Record<string, string> = {
+      part: '1',
+      platid: '4',
+      p,
+    };
+    const values = Object.keys(queryParams)
+      .map(k => queryParams[k])
+      .sort()
+      .join('');
+    queryParams.signature = md5('1014' + values + '1014');
+
+    const res = await fetch(
+      `https://userservice.kugou.com/risk/v3/r_register_dev?${new URLSearchParams(queryParams)}`,
+      {
+        method: 'POST',
+        headers: { 'User-Agent': UA_WEB, 'Content-Type': 'text/plain' },
+        body: aes.str,
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    const buf = Buffer.from(await res.arrayBuffer());
+    let dfid = '';
+    try {
+      const parsed = JSON.parse(buf.toString('utf8'));
+      dfid = String(parsed?.data?.dfid ?? '');
+    } catch {
+      const decrypted = aesDecrypt(buf.toString('hex'), aes.key);
+      dfid = String(decrypted?.data?.dfid ?? '');
+    }
+    if (dfid && dfid !== '-') {
       cachedDfid = dfid;
+      setSetting('kugou.dfid', dfid);
       log.info(`酷狗设备注册成功 dfid=${dfid.slice(0, 8)}…`);
       return dfid;
     }
-    // 注册失败不阻塞扫码登录（实测 2026-10-26：注册 20006 时扫码仍成功）。
-    // '-' 只是轮询可能拿不到状态，登录成功与否取决于 App 侧确认。
-    log.warn(`酷狗设备注册未返回 dfid（${JSON.stringify(j).slice(0, 120)}）——扫码流程继续，轮询可能受限`);
+    log.warn(`酷狗设备注册未返回有效 dfid`);
   } catch (e) {
     log.warn(`酷狗设备注册失败：${(e as Error).message}`);
   }
@@ -67,19 +139,21 @@ async function ensureDfid(): Promise<string> {
   return cachedDfid;
 }
 
-/** 公共参数（轮询/拿 key 都要带；2026-10-26 实测缺任何一个 → 20010） */
+/** 公共参数（轮询/拿 key 都要带；统一使用十进制 mid） */
 function commonParams(dfid: string): Record<string, string> {
+  const { guid, mid } = getKugouDevice();
   return {
-    mid: guid, dfid, uuid: guid,
+    mid, dfid, uuid: guid,
     clienttime: String(Math.floor(Date.now() / 1000)), clientver: '11440',
   };
 }
 
 /** 酷狗内部标识头（request.js:101 注入的那四件套） */
 function kgHeaders(dfid: string): Record<string, string> {
+  const { mid } = getKugouDevice();
   return {
     'User-Agent': UA_WEB, Referer: 'https://h5.kugou.com/',
-    dfid, mid: guid, clienttime: String(Math.floor(Date.now() / 1000)),
+    dfid, mid, clienttime: String(Math.floor(Date.now() / 1000)),
     'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1',
     'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
   };
@@ -95,10 +169,6 @@ export interface KugouQrSession {
 
 let current: KugouQrSession | null = null;
 
-function md5(s: string): string {
-  return crypto.createHash('md5').update(s).digest('hex');
-}
-
 function signedWeb(p: Record<string, string>): URLSearchParams {
   const sig = md5(WEB_SALT + Object.keys(p).sort().map(k => `${k}=${p[k]}`).join('') + WEB_SALT);
   return new URLSearchParams({ ...p, signature: sig });
@@ -108,7 +178,6 @@ function signedWeb(p: Record<string, string>): URLSearchParams {
 export async function startKugouQrLogin(): Promise<KugouQrSession> {
   const dfid = await ensureDfid();
   const params = {
-    // 出码用 1001（参考实现口径）；**token 归属由 check 的 appid 决定**，见 pollKugouQrLogin
     appid: '1001',
     type: '1',
     plat: '4',
@@ -141,9 +210,6 @@ export interface KugouPollResult {
 
 /** 轮询扫码状态；status=4 时把凭据写进 settings（kugou 专用键） */
 export async function pollKugouQrLogin(): Promise<KugouPollResult> {
-  // 会话已确认清空（或服务重启）时**优雅返回**：凭据已在库 → confirmed；否则 expired。
-  // 之前直接 throw → 前端在「确认成功后最后一轮轮询」会收到 500（用户看到「服务端内部错误」，
-  // 而实际登录是成功的——凭据已落库，2026-10-26 实测 userid=2302235937 就是这么丢的提示）。
   const sess = current;
   if (!sess) {
     const st = readKugouCredentialStatus();
@@ -152,12 +218,9 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
   if (Date.now() > sess.expiresAt) return { status: 'expired' };
 
   const dfid = await ensureDfid();
-  // ⚠️ 轮询接口也必须带**全套公共参数** + 酷狗内部头（2026-10-26 实测：只带 plat/appid/srcappid/qrcode/dev
-  //    会 `20010`，加上 commonParams + kgHeaders 后 → status=1/data.status=1 正常返回）。
-  // ⚠️ **appid 决定 token 归属**：写 1014 拿到的是网页 token，tracker 侧 /v1/user_verify 直接回
-  //    「token invalid (35005)」、取流回 20018。概念版取流必须用 appid=3116 + clientver 11440 查询。
+  const devInfo = getKugouDevice();
   const params: Record<string, string> = {
-    plat: '4', appid: '3116', srcappid: '2919', qrcode: sess.key, dev: guid,
+    plat: '4', appid: '3116', srcappid: '2919', qrcode: sess.key, dev: devInfo.guid,
     ...commonParams(dfid),
   };
   const res = await fetch(`https://login-user.kugou.com/v2/get_userinfo_qrcode?${signedWeb(params)}`, {
@@ -172,30 +235,23 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
     const token = String(d.token ?? '');
     const userid = String(d.userid ?? '');
     if (!token || !userid) throw new Error(`登录成功但凭据缺失：${JSON.stringify(d).slice(0, 200)}`);
-    // **保存完整凭据**：vip_token / vip_type 决定能不能拿 VIP 音质；
-    // t1 是 /login/token 续期必需（缺了就只能重新扫码）。
-    // 只进 settings（管理员通道），不进代码库。
-    // 落库前先看清楚上游到底给了哪些字段：
-    // KuGouMusicApi 的 login_qr_check 只转发了 token，vip_token 是存在的但被丢掉的 ——
-    // 我们之前同样只取 token/userid，导致「有会员却只拿 60 秒试听」。
-    const keys = Object.keys(d);
-    const tokenKeys = keys.filter(k => k.toLowerCase().includes('token') || k.toLowerCase().includes('vip'));
-    log.info(
-      `酷狗扫码成功：字段 ${keys.length} 个，含 token/vip 的字段：` +
-        tokenKeys.map(k => `${k}=${String(d[k] ?? '').length > 0 ? '有(' + String(d[k]).length + ')' : '空'}`).join(' '),
-    );
+
     const creds = {
       token,
       userid,
+      nickname: String(d.nickname ?? ''),
       vipToken: String(d.vip_token ?? d.viptoken ?? ''),
       vipType: String(d.vip_type ?? ''),
       t1: String(d.t1 ?? ''),
+      guid: devInfo.guid,
+      mid: devInfo.mid,
+      dfid,
       savedAt: Date.now(),
     };
     setSetting('kugou.credentials', JSON.stringify(creds));
     deleteSetting('kugou.credentialsInvalidAt');
     current = null;
-    log.info(`酷狗登录凭据已保存（userid=${userid}）`);
+    log.info(`酷狗登录凭据已保存（userid=${userid} mid=${devInfo.mid.slice(0, 8)}…）`);
     return { status: 'confirmed', token, userid };
   }
   if (st === 0) return { status: 'expired' };
@@ -233,7 +289,7 @@ export function readKugouCredentialStatus(): {
   }
 }
 
-/** token 失效打标（取流遇 20018 时调用），让 Web 面板明确提示「需重新授权」 */
+/** token 失效打标（取流遇 35005/20018 时调用），让 Web 面板明确提示「需重新授权」 */
 export function markKugouCredentialInvalid(reason: string): void {
   setSetting('kugou.credentialsInvalidAt', JSON.stringify({ at: Date.now(), reason }));
   log.warn(`酷狗凭据标记失效：${reason}`);

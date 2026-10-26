@@ -112,3 +112,5 @@
 - [2026-10-26 后端优化与酷狗接入](2026-10-26-后端优化与酷狗接入.md) —— 服务端优化批次（prune 保护/相似歌手列名 bug/上游缓存表/复核三态+退避+ai-health/打回摘要/直链通道+模拟器验收）+ 酷狗接入（概念版盐/gateway+x-router/body 参与签名/VIP FLAC spike 3/3/扫码登录三接口与 Web 面板）+ 网易云 code!==200 误判修复 + systemd 常驻
 - [2026-10-26 酷狗音源正式接入](2026-10-26-酷狗音源接入.md) —— resolveKugouSource 实现 ResolveResult 契约插入音源链（网易云→酷狗→B站）；概念版搜索盐/标准版取流盐+gateway+x-router/body 参与签名全链实测（FLAC@871kbps）；kg_ id 与 qq_ 路由约定的边界说明；/api/search/kugou 独立探索端点
 - [2026-10-26 酷狗接入交接（暂停点）](2026-10-26-酷狗接入交接-暂停点.md) —— 取流只给 60 秒片段的完整证据链；vip_token 是唯一卡点（酷狗自家扫码不签发、只有 QQ 开放平台 login_by_openplat 才有）；源钉/锚定页/四态登录态/片段检测等已落地能力的索引；A/B 两条下一步方案与工作量
+
+- [2026-10-26 酷狗概念版 VIP 完整取流破局与明日交接](2026-10-26-酷狗VIP完整取流破局与明日交接.md) —— **推翻上条「必须 QQ 登录拿 vip_token」的错误结论**：前序只给 60s 片段并报 20018 的真因是 `stream.ts` 误用 `appid=1005` + `/v6/priv_url` 跨 appid 调概念版 token 并误写 `credentialsInvalidAt` 污染数据库，以及各模块 `mid/dfid` 分裂；本轮对齐 EchoMusic 改为概念版 `appid=3116` 三步认证取流（`privilege/lite` → `v1/user_verify` 换 `auth` → `v1/authorization` + `tracker/v5/url`）+ 真实设备注册 `ensureDfid` + 纯十进制 `mid` 统一，本地实测 6 首 VIP 曲目 100% 拿到完整时长 FLAC（25–30MB）/ 320 直链；含明日 4 项待办交接（同步部署 `192.168.89.10` 清脏标、概念版每日自动签到与 VIP 升级、三端设置页「音源授权」三段式展示改造、HW/iOS 锚定页收尾验收）

@@ -143,13 +143,13 @@ const sniffedTypeCache = new Map<string, { type: string; at: number }>();
  * 不能就地嗅响应体：AVPlayer 首次探测只发 Range: bytes=0-1，上游只回 2 字节，
  * 凑不够 12 字节认不出 ftyp。
  */
-async function sniffUpstreamType(sourceUrl: string, upstream: Response): Promise<string | null> {
+async function sniffUpstreamType(sourceUrl: string, upstream: Response, source: 'bilibili' | 'netease' | 'kugou' = 'bilibili'): Promise<string | null> {
   const declared = (upstream.headers.get('content-type') ?? '').toLowerCase();
   if (declared && !declared.includes('octet-stream')) return null;
   const cached = sniffedTypeCache.get(sourceUrl);
   if (cached && Date.now() - cached.at < 10 * 60_000) return cached.type;
   try {
-    const probe = await fetchAudioStream(sourceUrl, 'bytes=0-1023', { source: 'bilibili' });
+    const probe = await fetchAudioStream(sourceUrl, 'bytes=0-1023', { source });
     if (!probe.ok && probe.status !== 206) {
       await probe.body?.cancel();
       return null;
@@ -463,7 +463,8 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     const anchorSec = getAnchor(trackId)?.durationSec ?? 0;
     const sourceMs = anchorSec > 0 ? Math.round(anchorSec * 1000) : metadataMs;
     // MIME 修正：AVPlayer 认 MIME，上游给 octet-stream 时必须改写成真实音频类型（见 sniffAudioType 注释）
-    const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream) : null;
+    const sniffSourceKind = (row?.source ?? 'bilibili') as 'bilibili' | 'netease' | 'kugou';
+    const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream, sniffSourceKind) : null;
     return forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs, sniffedType);
   };
 

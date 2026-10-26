@@ -690,6 +690,8 @@ export class MediaPlayerCore {
     if (this.current === null) { return; }
     this.failStreak = 0;
     this.failHandled = false;
+    this.direct = null;
+    this.proxyFallbackUsed = false;
     // 用户点「重试」/ 锚定后重装 = 显式点播语义：再失败也不跳
     this.manualLoad = true;
     this.bumpQueue();

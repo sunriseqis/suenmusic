@@ -141,6 +141,12 @@ export interface AvailabilityResponse {
   bilibili: AvailabilityBilibili;
 }
 
+export interface PinSourceReply {
+  ok: boolean;
+  trackId: string;
+  source: string | null;
+}
+
 export interface BiliTop {
   bvid: string;
   title: string;

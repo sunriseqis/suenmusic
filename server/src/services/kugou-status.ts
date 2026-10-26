@@ -3,7 +3,7 @@
  *
  * 面板只显示一个状态，但底层其实是**两件独立的事**：
  *   ① 凭据是否还能用（token 被拒 = 20018/35005 → 失效）；
- *   ② 账号会员是否还在期（到期后 VIP 曲取流拿不到 url，只能 128）。
+ *   ② 账号会员是否还在期（到期后 VIP 曲取流拿不到 url，只能免费曲）。
  * 因此这里把两者合成四种状态，客户端不需要各自拼逻辑：
  *
  *   logged_out   未登录（没有凭据）
@@ -15,10 +15,11 @@
 import crypto from 'node:crypto';
 import { createLogger } from '../logger.ts';
 import { getSetting } from '../db/repo/settings.ts';
+import { getKugouDevice } from './kugou-login.ts';
 
 const log = createLogger('kugou:status');
 
-const SALT = 'OIlwieks28dk2k092lksi2UIkp';
+const SALT_LITE = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA';
 const UA = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
 
 export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok';
@@ -52,14 +53,13 @@ async function queryVip(
   token: string,
   userid: string
 ): Promise<{ ok: boolean; isVip: boolean; endTime: string; remainingMs: number | null; rejected: boolean }> {
-  const guid = md5('suenmusic-kugou-device-v1');
-  const mid = BigInt('0x' + md5(guid)).toString();
+  const { mid, dfid } = getKugouDevice();
   const base: Record<string, string> = {
-    dfid: '-', mid, uuid: guid, appid: '1005', clientver: '20489',
+    dfid: dfid || '-', mid, uuid: '-', appid: '3116', clientver: '11440',
     clienttime: String(Math.floor(Date.now() / 1000)), token, userid, busi_type: 'concept',
   };
   const sorted = Object.keys(base).sort().map(k => `${k}=${base[k]}`).join('');
-  const signature = md5(`${SALT}${sorted}${SALT}`);
+  const signature = md5(`${SALT_LITE}${sorted}${SALT_LITE}`);
   const res = await fetch(
     `https://kugouvip.kugou.com/v1/get_union_vip?${new URLSearchParams({ ...base, signature })}`,
     { headers: { 'User-Agent': UA, Cookie: `token=${token}; userid=${userid};` }, signal: AbortSignal.timeout(8_000) }

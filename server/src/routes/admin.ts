@@ -449,6 +449,7 @@ export function registerAdminRoutes(app: FastifyInstance): void {
   app.post('/api/admin/kugou/credentials/import', async req => {
     const body = (req.body ?? {}) as {
       token?: string; userid?: unknown; vipToken?: string; t1?: string; nickname?: string;
+      mid?: string; dfid?: string; guid?: string;
       /** 直接粘 Cookie 串（抓包/工具状态文件），省得逐个字段抠 */
       cookie?: string;
     };
@@ -474,6 +475,9 @@ export function registerAdminRoutes(app: FastifyInstance): void {
         vipToken: String(body.vipToken ?? cookie.vip_token ?? cookie.viptoken ?? ''),
         t1: String(body.t1 ?? cookie.t1 ?? ''),
         nickname: String(body.nickname ?? ''),
+        mid: String(body.mid ?? cookie.mid ?? cookie.KugouC1 ?? '') || undefined,
+        dfid: String(body.dfid ?? cookie.dfid ?? '') || undefined,
+        guid: String(body.guid ?? cookie.guid ?? '') || undefined,
         savedAt: Date.now(),
       })
     );

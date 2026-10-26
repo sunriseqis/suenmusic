@@ -24,7 +24,7 @@ import {
   K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
-import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, ResolveResponse } from '../core/Models';
+import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse } from '../core/Models';
 import { OfflineCache } from '../core/OfflineCache';
 import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
@@ -244,6 +244,13 @@ export struct PlayerPage {
     this.availLoading = true;
     this.availKugou = null;
     this.availNetease = null;
+    APIClient.shared().getPinSource(trackId)
+      .then((p: PinSourceReply) => {
+        if (this.trackId === trackId) {
+          this.pinnedSource = (p.source !== null && p.source !== undefined) ? p.source : '';
+        }
+      })
+      .catch(() => {});
     APIClient.shared().sourceAvailability(trackId)
       .then((r: AvailabilityResponse) => {
         this.availKugou = r.kugou;
@@ -267,7 +274,9 @@ export struct PlayerPage {
     op.then(() => {
       this.pinnedSource = isPinned ? '' : source;
       AppToast.show(isPinned ? '已恢复自动匹配' : '已指定只用该源');
-      // 钉完立刻回读解析来源，音源标签当场变（否则要等下一次解析，用户会以为没生效）
+      OfflineCache.shared().setProtected('');
+      OfflineCache.shared().remove(trackId);
+      void MediaPlayerCore.shared().retryCurrent(true);
       this.refreshSourceNow(trackId);
     }).catch(() => {
       AppToast.show('操作失败，请稍后重试');

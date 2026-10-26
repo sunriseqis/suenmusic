@@ -16,7 +16,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import {
   AuthConfig, AuthSession, FavoritePage, HomeData, PublicUser,
-  ResolveResponse, AvailabilityResponse, KugouLoginState, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
+  ResolveResponse, AvailabilityResponse, PinSourceReply, KugouLoginState, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
   SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
   DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
@@ -67,6 +67,10 @@ interface DislikeBody {
   type: string;
   id: string;
   name: string;
+}
+
+interface PinSourceBody {
+  source: string;
 }
 
 export class ApiError extends Error {
@@ -533,8 +537,14 @@ export class APIClient {
 
   /** 源钉：指定该曲只用某源（kugou / netease） */
   async pinSource(trackId: string, source: string): Promise<Object> {
+    const payload: PinSourceBody = { source: source };
     return this.request<Object>('/api/tracks/' + encodeURIComponent(trackId) + '/pin-source',
-      http.RequestMethod.PUT, JSON.stringify({ source }), true, false);
+      http.RequestMethod.PUT, JSON.stringify(payload), true, false);
+  }
+
+  async getPinSource(trackId: string): Promise<PinSourceReply> {
+    return this.request<PinSourceReply>('/api/tracks/' + encodeURIComponent(trackId) + '/pin-source',
+      http.RequestMethod.GET, '', true, false);
   }
 
   async unpinSource(trackId: string): Promise<Object> {
