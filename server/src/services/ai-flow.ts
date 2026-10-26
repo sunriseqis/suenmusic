@@ -573,6 +573,11 @@ export async function runDailyFlow(
   const ts = Date.now();
   const batchId = `flow_${ts.toString(36)}`;
   const finalPicks = picks.slice(0, DAILY_MAX);
+  // 快照：把**完整 Track** 跟着 payload 一起存（而不是只存 id）。
+  //
+  // 为什么：读取路径此前只拿到 id，要 `getTracks()` 回查，查不到就串行打 QQ 补 —— 
+  // 既慢、又污染上游，且 tracks 被清理后歌单会退化成「只有 id」。存快照后读取零上游，
+  // 且歌单自带元数据（元数据不再依赖 tracks 表的存活）。45 首约 80–120KB，settings 存 TEXT 够。
   const payload = JSON.stringify({
     date,
     greeting,
@@ -585,6 +590,8 @@ export async function runDailyFlow(
       reason: p.reason,
       source: p.source,
     })),
+    // 快照顺序与 picks 一致；缺失曲目（模型编造/解析失败）对应位置为空，读取时跳过
+    snapshot: finalPicks.map(p => p.track ?? null),
   });
 
   const fullTracks = finalPicks.map(p => p.track).filter((t): t is Track => !!t);

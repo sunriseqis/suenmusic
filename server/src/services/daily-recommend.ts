@@ -105,6 +105,23 @@ export function bootstrapDailyIfEmpty(userId: number): void {
 
 const userStatuses = new Map<number, UserDailyStatus>();
 
+/** 旧 payload 的自动重建时间戳（按用户）。6 小时内不重复触发，避免读取路径放大 AI 成本。 */
+const staleRegenAt = new Map<number, number>();
+
+/**
+ * 读取期发现 payload 里有当前规则不合格的曲目 → 后台重建一次。
+ *
+ * 不再单独埋点统计：过滤的唯一闸门是**选池阶段**（AI 之前），读取期只是历史数据兜底；
+ * 兜底一旦发生，正确动作是重建，而不是记一笔日志让人去翻。
+ */
+function scheduleStaleRegenerate(userId: number, dropped: number): void {
+  const last = staleRegenAt.get(userId) ?? 0;
+  if (Date.now() - last < 6 * 60 * 60 * 1000) return;
+  staleRegenAt.set(userId, Date.now());
+  log.warn(`歌单有 ${dropped} 首在现行规则下不合格（历史 payload）→ 触发一次后台重建`);
+  void triggerDailyFlow(userId);
+}
+
 function getUserStatus(userId: number): UserDailyStatus {
   let s = userStatuses.get(userId);
   if (!s) {
@@ -166,25 +183,20 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
   const activeRaw = getDailyActiveSetting(userId);
   if (activeRaw) {
     try {
-      const parsed = JSON.parse(activeRaw) as {
-        date: string;
-        greeting?: string;
-        welcomePhrase?: string;
-        picks: Array<{
-          trackId: string;
-          name: string;
-          artist: string;
-          reason: string;
-          source: string;
-        }>;
-      };
+      // 直接复用 DailyPayload：本地各写一份内联类型正是「字段加了但读取看不见」的老毛病来源
+      const parsed = JSON.parse(activeRaw) as DailyPayload;
 
       // 只要有一份**可用**歌单就服务它 —— 不再要求「日期等于今天」：
       // 定时维护会把没被操作过的歌单顺延到今天，而万一定时被错过（服务器没开机），
       // 也不该在读取路径上偷偷重新生成（那正是要关掉的懒加载）。
       if (Array.isArray(parsed.picks) && parsed.picks.length >= LAND_MIN) {
         const ids = parsed.picks.map(p => p.trackId);
-        let tracks = getTracks(ids);
+        // 优先用 payload 里的**完整快照**：读取零上游、也不依赖 tracks 表还活着。
+        // 老 payload（没有 snapshot）才回退到 getTracks + library_tracks + QQ 补。
+        let tracks: Track[] = Array.isArray(parsed.snapshot)
+          ? parsed.snapshot.filter((t): t is Track => !!t && !!t.id)
+          : [];
+        if (tracks.length === 0) tracks = getTracks(ids);
 
         // 如果 tracks 缓存表有缺失，自动补齐
         if (tracks.length < ids.length) {
@@ -238,6 +250,12 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
         );
 
         // 挂载推荐理由（自动清洗 Markdown 符号）
+        // 读取期剔除 = 这份 payload 是旧规则生成的（现在选池阶段就能拦下，AI 根本看不到它们）。
+        // 不做埋点，直接判过期并在后台重建一次；否则旧 payload 会一直「少几首」且永远没人修。
+        if (filteredTracks.length < tracks.length) {
+          scheduleStaleRegenerate(userId, tracks.length - filteredTracks.length);
+        }
+
         const reasonMap = new Map(parsed.picks.map(p => [p.trackId, cleanAiText(p.reason)]));
         const tracksWithReason = filteredTracks.map(t => ({
           ...t,
@@ -306,6 +324,8 @@ interface DailyPayload {
   greeting?: string;
   welcomePhrase?: string;
   picks: Array<{ trackId: string; name?: string; artist?: string; reason?: string; source?: string }>;
+  /** 生成时的完整曲目快照（与 picks 同序）。老数据没有 → 读取回退到库/上游 */
+  snapshot?: Array<Track | null>;
 }
 
 /**
