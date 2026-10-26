@@ -158,7 +158,12 @@ struct DailyView: View {
     // MARK: - 头部（hw head-info：greeting 首逗号前为主标题、其后为副题）
 
     private func header(_ data: DailyRecommend) -> some View {
-        let head = Self.parseHeader(data.greeting ?? "", defaultTitle: Self.defaultHeaderTitle)
+        // 生成失败时**问候语位置直接显示失败原因**（用户口径：别让用户对着空列表猜）
+        let failed = data.status == "failed"
+        let head = Self.parseHeader(
+            failed ? (data.statusMessage ?? Self.failedText) : (data.greeting ?? ""),
+            defaultTitle: Self.defaultHeaderTitle
+        )
         return VStack(alignment: .leading, spacing: Dim.s1) {
             Text(head.title)
                 .font(.system(size: Dim.fsBrand, weight: .bold))
@@ -214,6 +219,10 @@ struct DailyView: View {
             )
         case "generating":
             EmptyState(title: message.isEmpty ? Self.generatingText : message)
+        case "failed":
+            // 生成失败（模型侧问题，服务端给的是可直接上屏的文案）。
+            // 不给「重试」：服务端已关闭手动重建口子，重试只会空转。
+            EmptyState(title: data.statusMessage ?? Self.failedText)
         case "error":
             EmptyState(
                 title: message.isEmpty ? Self.failedText : message,

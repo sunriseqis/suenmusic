@@ -245,12 +245,21 @@ struct FavoritePage: Codable {
 
 /// `GET /api/recommend/daily` —— 只读（服务端每天 00:30 产出，无「换一批」）
 struct DailyRecommend: Codable {
+    /// ready | generating | failed（服务端契约；老版本可能是 shortfall | error）
     let status: String?
     let date: String?
     let greeting: String?
     let welcomePhrase: String?
     let tracks: [Track]
     let message: String?
+    /// 失败时**可直接上屏**的中文（服务端定文案，客户端不再自己编）
+    let statusMessage: String?
+    /// 失败分类：timeout/ratelimit/auth/billing/parse/error/shortfall —— 只是给排查用，不上屏
+    let statusDetail: DailyStatusDetail?
+}
+
+struct DailyStatusDetail: Codable {
+    let code: String?
 }
 
 // MARK: - 收藏导入 / 去重（`/api/favorites/*`）

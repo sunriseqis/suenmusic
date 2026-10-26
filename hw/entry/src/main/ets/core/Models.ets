@@ -292,12 +292,21 @@ export interface FavoriteRemoveReply {
  * **`shortfall` 不是错误** —— 曲库不足是正常业务结果，界面要说人话。
  */
 export interface DailyRecommend {
+  /** ready | generating | failed（服务端契约；旧值可能是 shortfall | error） */
   status: string;
   date: string;
   greeting?: string;
   welcomePhrase?: string;
   tracks: Track[];
   message?: string;
+  /** 失败时可直接上屏的中文（服务端定文案，客户端不再自己编） */
+  statusMessage?: string;
+  /** 失败分类：timeout/ratelimit/auth/billing/parse/error/shortfall，仅用于排查 */
+  statusDetail?: DailyStatusDetail;
+}
+
+export interface DailyStatusDetail {
+  code?: string;
 }
 
 /** `POST /api/recommend/dislike` 的返回（track = 永久过滤这首歌；artist = 连带删用户曲库归属链） */

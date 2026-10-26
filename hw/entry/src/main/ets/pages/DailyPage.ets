@@ -61,12 +61,20 @@ export struct DailyPage {
   // ---------------- 专属推荐语（greeting → 主标题/副题，web parseAiHeader 同口径） ----------------
   // 首页欢迎语（welcomePhrase）只属于首页 —— 本页不渲染，两个概念彻底分开（T5.5 用户反馈）。
 
+  /** 生成失败时，问候语位置直接显示失败原因（与 iOS 同口径：别让用户对着空列表猜） */
+  private failedText(): string {
+    if (this.data === null || this.data.status !== 'failed') { return ''; }
+    return this.data.statusMessage ?? '今天的歌单生成失败，请登录服务端确认模型状态';
+  }
+
   private headerTitle(): string {
+    if (this.data !== null && this.data.status === 'failed') { return this.failedText(); }
     const g = this.data === null ? '' : (this.data.greeting ?? '');
     return parseAiHeader(g, DEFAULT_HEADER_TITLE).title;
   }
 
   private headerSub(): string {
+    if (this.data !== null && this.data.status === 'failed') { return ''; }
     const g = this.data === null ? '' : (this.data.greeting ?? '');
     return parseAiHeader(g, DEFAULT_HEADER_TITLE).sub;
   }
@@ -284,6 +292,9 @@ export struct DailyPage {
           EmptyState({
             title: this.data.message === undefined ? '今日歌单正在生成，稍后再来看看' : this.data.message
           })
+        } else if (this.data.status === 'failed') {
+          // 生成失败（模型侧问题）：服务端给可直接上屏的文案；不给「重试」（手动重建口子已关闭）
+          EmptyState({ title: this.failedText(), subtitle: Copy.emptyDailySub })
         } else if (this.data.status === 'error') {
           Column({ space: Dim.s3 }) {
             Text(this.data.message === undefined ? '今日歌单生成失败' : this.data.message)
