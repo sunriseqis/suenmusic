@@ -14,11 +14,10 @@
  *   - **本尊新歌必须进**（收藏歌手的新作品是必进项，只受去重限制）
  *   - 同一歌手最多 1 首
  */
-import { getDatabase } from '../db/index.ts';
 import { aiChat, AiUnavailableError } from './ai-client.ts';
 import { SHARE, buildCandidatePool, type Candidate } from './ai-recall.ts';
 import { readMemorySummary, rebuildMemory } from './ai-memory.ts';
-import { topArtists } from './artist-stats.ts';
+import { rejectionDigestSection } from './ai-rejection-digest.ts';
 import type { Track } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
 import { cleanAiText } from '../utils/text.ts';
@@ -89,120 +88,6 @@ export interface AiDecisionResult {
   picks: Array<{ track: Track; reason: string; source: Candidate['source'] }>;
   /** AI 主动否掉的（已记库，以后不再进池） */
   passed: number;
-}
-
-/**
- * 用户最近的前端操作 —— **全流权重最高的上下文**（用户拍板）。
- *
- * 他点"不喜欢"、他新收藏了什么，是比任何模型推断都硬的信号：
- *   - 点"不喜欢"：要分析他为什么不喜欢（过度熟悉？风格不对？年代久远？）
- *   - 新收藏：即便与他既往判断冲突（例如"不要年代久远的"），也**以他实际行为为准**
- */
-function recentUserActions(userId: number): string {
-  const db = getDatabase();
-  // ⚠️ 表名是 user_dislikes（type = 'track' | 'artist'，name 在建表时就存好了）
-  const dislikes = db
-    .prepare(
-      `SELECT type, name FROM user_dislikes
-        WHERE user_id = ? ORDER BY created_at DESC LIMIT 15`
-    )
-    .all(userId) as unknown as Array<{ type: string; name: string }>;
-  const buys = db
-    .prepare(
-      `SELECT json_extract(t.payload_json, '$.name') AS name,
-              json_extract(t.artists_json, '$[0].name') AS artist
-         FROM favorites f JOIN tracks t ON t.id = f.track_id
-        WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT 20`
-    )
-    .all(userId) as unknown as Array<{ name: string; artist: string }>;
-  const lines: string[] = [];
-  if (dislikes.length > 0) {
-    lines.push(
-      '他最近点了"不喜欢"（**最高权重信号，务必分析原因并据此调整**）：\n' +
-        '　（口径：**不喜欢谁就带他的全部避开** —— 他的独唱、他参与的任何合唱/合作曲都不要）\n' +
-        dislikes.map(d => `${d.name}（${d.type === 'artist' ? '整位歌手' : '单曲'}）`).join('、')
-    );
-  }
-  if (buys.length > 0) {
-    lines.push(
-      '他最近新收藏的（**实际行为优先于任何既往判断**，哪怕与他之前的偏好冲突）：' +
-        buys.map(b => `${b.name}-${b.artist}`).join('、')
-    );
-  }
-  return lines.join('\n');
-}
-
-/**
- * 最近被否掉的东西（含理由）——**每次生成都要让模型看到**。
- *
- * 用户要求："把打回理由丢回去，这样下一次选歌才知道这首歌被打回了"。
- * 只靠记忆摘要不够：摘要会压缩、会丢具体曲目；这里直接给最近 20 条，
- * 让模型在挑歌前就知道"这些路数已经被否过、为什么"。
- */
-function recentRejections(userId: number): string {
-  const rows = getDatabase()
-    .prepare(
-      `SELECT name, artist, reason FROM ai_passed
-        WHERE user_id = ? AND reason != ''
-        ORDER BY created_at DESC LIMIT 20`
-    )
-    .all(userId) as unknown as Array<{ name: string; artist: string; reason: string }>;
-  if (rows.length === 0) return '';
-  return rows.map(r => `- ${r.name} - ${r.artist}：${r.reason.slice(0, 60)}`).join('\n');
-}
-
-/** 口味摘要：最近收藏 + 收藏歌手排行（控制体量，不塞几百首） */
-function tasteBrief(userId: number): {
-  anchorArtists: string;
-  artists: string;
-  recent: string;
-  rejections: string;
-  userActions: string;
-  favCount: number;
-} {
-  const db = getDatabase();
-  const favCount = Number(
-    (db.prepare('SELECT COUNT(*) AS n FROM favorites WHERE user_id = ?').get(userId) as { n: number } | undefined)?.n ?? 0
-  );
-  const artists = (
-    db
-      .prepare(
-        `SELECT json_extract(je.value, '$.name') AS artist_name, COUNT(DISTINCT f.track_id) AS n
-           FROM favorites f JOIN tracks t ON t.id = f.track_id, json_each(t.artists_json) je
-          WHERE f.user_id = ? AND json_extract(je.value, '$.name') != ''
-          GROUP BY artist_name ORDER BY n DESC LIMIT 18`
-      )
-      .all(userId) as unknown as Array<{ artist_name: string; n: number }>
-  )
-    .map(r => `${r.artist_name}(${r.n})`)
-    .join('、');
-
-  const recent = (
-    db
-      .prepare(
-        `SELECT json_extract(t.payload_json, '$.name') AS name,
-                json_extract(t.artists_json, '$[0].name') AS artist
-           FROM favorites f JOIN tracks t ON t.id = f.track_id
-          WHERE f.user_id = ? ORDER BY f.created_at DESC LIMIT 25`
-      )
-      .all(userId) as unknown as Array<{ name: string; artist: string }>
-  )
-    .map(r => `${r.name}-${r.artist}`)
-    .join('、');
-
-  // 核心审美基调：口径与 ai-flow 一致（收藏 > 10 首，见 services/artist-stats.ts）
-  const anchorArtists = topArtists(userId)
-    .map(a => `${a.name}(${a.count})`)
-    .join('、');
-
-  return {
-    anchorArtists,
-    artists,
-    recent,
-    rejections: recentRejections(userId),
-    userActions: recentUserActions(userId),
-    favCount,
-  };
 }
 
 /**
@@ -284,7 +169,16 @@ export function quotasFor(
 
 function buildMessages(
   pool: Candidate[],
-  brief: { anchorArtists: string; artists: string; recent: string; rejections: string; userActions: string; favCount?: number },
+  brief: {
+    userId: number;
+    anchorArtists: string;
+    artists: string;
+    recent: string;
+    /** 最近 N 条原始打回理由（新→旧，已剥 [审核打回] 标签），填 prompt 的"最近原始理由"段 */
+    rejections: string;
+    userActions: string;
+    favCount?: number;
+  },
   memory: string,
   count: number,
   explore: boolean,
@@ -366,6 +260,8 @@ ${brief.artists}
 
 ## 你最近的操作（**权重最高，优先满足**）
 ${brief.userActions || '（暂无）'}
+
+${rejectionDigestSection(brief.userId, brief.rejections)}
 
 ## 候选池（${pool.length} 首）
 ${lines}
@@ -512,7 +408,15 @@ export async function selectFromPool(
     /** 上一轮被打回的原因（补全时喂回去，避免重犯；用户流程里的"打回理由"） */
     avoidNotes?: string;
     memory: string;
-    brief: { anchorArtists: string; artists: string; recent: string; rejections: string; userActions: string; favCount?: number };
+    brief: {
+      userId: number;
+      anchorArtists: string;
+      artists: string;
+      recent: string;
+      rejections: string;
+      userActions: string;
+      favCount?: number;
+    };
   }
 ): Promise<{
     picks: Array<{ track: Track; reason: string; source: Candidate['source'] }>;

@@ -18,6 +18,7 @@ import {
   deleteUser,
 } from '../db/repo/users.ts';
 import { passwordMinLength, registrationAllowed } from '../services/auth.ts';
+import { readAiHealthView } from '../services/ai-health.ts';
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
 
@@ -180,6 +181,17 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       dbBytes,
       users: countUsers(),
     };
+  });
+
+  /**
+   * AI 健康度：最近一次尝试/成功/失败 + 连续失败次数 + 一句人话判定。
+   *
+   * 数据由生成流程写入（`services/ai-health.ts`：复核 ok 记成功，失败按 401/429/超时…分类记失败），
+   * 这里只做读取映射 —— 面板不该自己再猜一遍原因。
+   */
+  app.get('/api/admin/ai-health', async req => {
+    requireWebAdmin(req);
+    return readAiHealthView();
   });
 
   /**

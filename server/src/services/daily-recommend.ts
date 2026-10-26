@@ -20,6 +20,12 @@ import { getTracks, upsertTracks } from '../db/repo/tracks.ts';
 import { getSongDetail } from '../sources/qq/home.ts';
 import { getDislikeSets } from '../db/repo/library.ts';
 import { runDailyFlow, LAND_MIN } from './ai-flow.ts';
+import {
+  readAiHealth,
+  recordAiFailure,
+  classifyAiFailure,
+  type AiFailureKind,
+} from './ai-health.ts';
 import { isJunk } from './ai-recall.ts';
 import { isCoverOrInstrumental } from './content-filter.ts';
 import { getActiveUserIds } from './library-topup.ts';
@@ -67,6 +73,8 @@ interface UserDailyStatus {
   isGenerating: boolean;
   lastStatus: 'shortfall' | 'error' | null;
   lastError: string | null;
+  /** 最近一次失败的分类（给每日接口的 statusDetail.code 用） */
+  lastFailureKind?: AiFailureKind;
 }
 
 /** 读出当前生效的歌单载荷（不触发生成）；损坏或没有返回 null */
@@ -131,14 +139,49 @@ function getUserStatus(userId: number): UserDailyStatus {
   return s;
 }
 
+/**
+ * 每日推荐返回（**已定契约**，客户端照此展示）。
+ *
+ * - `ready`：有可用 payload（`picks.length >= LAND_MIN`）；
+ * - `failed`：没有可用 payload，且最近一次生成失败 / 复核不可用 ——
+ *   必须带 `statusMessage`（可直接上屏的中文）与 `statusDetail.code`；
+ * - `generating`：**契约之外保留的过渡态**。契约只定义了 ready/failed 两种终态，
+ *   但"首次使用、还没失败过、正在生成"既不是 ready 也不该说成 failed
+ *   （否则新用户一打开就看到"生成失败，请确认模型状态"）。
+ */
 export interface DailyRecommendResponse {
-  status: 'ready' | 'generating' | 'shortfall' | 'error';
+  status: 'ready' | 'failed' | 'generating';
+  /** 可直接上屏的中文提示（failed 时必给） */
+  statusMessage?: string;
+  statusDetail?: { code?: AiFailureKind | 'shortfall' | 'error' };
   date: string;
   tracks: Track[];
   welcomePhrase?: string;
   greeting?: string;
+  /** @deprecated 旧客户端读这个字段，值等同 statusMessage；新客户端请用 statusMessage */
   message?: string;
   generated?: boolean;
+}
+
+/** 复核/生成失败的统一上屏文案（契约固定） */
+const DAILY_FAILED_MESSAGE = '今天的歌单生成失败，请登录服务端确认模型状态';
+/** 曲库不足不是模型故障，给的是可执行的建议（仍属 failed） */
+const DAILY_SHORTFALL_MESSAGE = '曲库积累不足，先去收藏几首歌，明天再来为你定制专属歌单';
+const DAILY_GENERATING_MESSAGE = '正在为你挑选今日专属歌单…';
+
+function failedResponse(
+  date: string,
+  code: AiFailureKind | 'shortfall' | 'error'
+): DailyRecommendResponse {
+  const statusMessage = code === 'shortfall' ? DAILY_SHORTFALL_MESSAGE : DAILY_FAILED_MESSAGE;
+  return {
+    status: 'failed',
+    statusMessage,
+    statusDetail: { code },
+    date,
+    tracks: [],
+    message: statusMessage,
+  };
 }
 
 /** 触发后台异步生成流程（如果该用户已在生成中则忽略） */
@@ -153,17 +196,32 @@ export async function triggerDailyFlow(userId: number): Promise<void> {
     try {
       log.info(`开始后台异步生成每日专属推荐 (userId: ${userId})...`);
       const res = await runDailyFlow(userId);
-      if (res.shortfall && !res.landed) {
+      if (res.reviewFailure) {
+        // 复核不可用：旧歌单原样保留。失败台账已在 ai-flow 里记过，这里不重复计数
+        status.lastStatus = 'error';
+        status.lastFailureKind = res.reviewFailure.kind;
+        status.lastError = res.reviewFailure.message;
+        log.warn(
+          `每日推荐复核不可用，保留旧歌单 (userId: ${userId}, ${res.reviewFailure.kind})`
+        );
+      } else if (res.shortfall && !res.landed) {
         status.lastStatus = 'shortfall';
+        status.lastFailureKind = undefined;
+        status.lastError = null;
         log.warn(`每日推荐生成结果为曲库不足 (shortfall, userId: ${userId})`);
       } else {
         status.lastStatus = null;
+        status.lastFailureKind = undefined;
+        status.lastError = null;
         log.info(`每日推荐生成完成 (userId: ${userId})，歌单 A 共 ${res.counts[0] ?? 0} 首，已装填入库`);
       }
     } catch (err) {
+      const failure = classifyAiFailure(err);
       status.lastStatus = 'error';
-      status.lastError = (err as Error).message;
-      log.error(`每日推荐后台生成失败 (userId: ${userId}): ${status.lastError}`);
+      status.lastFailureKind = failure.kind;
+      status.lastError = failure.message;
+      recordAiFailure(failure.kind, failure.message);
+      log.error(`每日推荐后台生成失败 (userId: ${userId}, ${failure.kind}): ${failure.message}`);
     } finally {
       status.isGenerating = false;
     }
@@ -284,29 +342,30 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
       status: 'generating',
       date: today,
       tracks: [],
-      message: '正在为你挑选今日专属歌单…',
+      message: DAILY_GENERATING_MESSAGE,
     };
   }
 
   if (userStatus.lastStatus === 'shortfall') {
-    return {
-      status: 'shortfall',
-      date: today,
-      tracks: [],
-      message: '曲库积累不足，先去收藏几首歌，明天再来为你定制专属歌单',
-    };
+    return failedResponse(today, 'shortfall');
   }
 
-  if (userStatus.lastStatus === 'error') {
-    return {
-      status: 'error',
-      date: today,
-      tracks: [],
-      message: userStatus.lastError || '生成失败，请稍后重试',
-    };
+  /**
+   * 没有可用 payload 且最近一次生成失败 / 复核不可用 → `failed`。
+   *
+   * 「最近一次失败」有两个来源：
+   *   ① 本进程内的生成状态（启动后跑过的那几次）；
+   *   ② 持久化的 `ai.health`（重启后仍能告诉用户"歌单为什么没生成"）。
+   * 两者都没有才算"从没尝试过"，才走下面的懒触发。
+   */
+  const health = readAiHealth();
+  const healthKind = health.consecutiveFailures > 0 ? health.lastFailure?.kind : undefined;
+  const failureKind = userStatus.lastFailureKind ?? healthKind;
+  if (userStatus.lastStatus === 'error' || failureKind) {
+    return failedResponse(today, failureKind ?? 'error');
   }
 
-  // 走到这里 = 还没有可用歌单（首次使用，或缓存损坏）。
+  // 走到这里 = 既没有可用歌单，也没有失败记录（首次使用，或缓存损坏）。
   // 这是**唯一**保留的懒触发：否则新用户要空等到第二天 00:30。
   void triggerDailyFlow(userId);
 
@@ -314,7 +373,7 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
     status: 'generating',
     date: today,
     tracks: [],
-    message: '正在为你挑选今日专属歌单…',
+    message: DAILY_GENERATING_MESSAGE,
   };
 }
 

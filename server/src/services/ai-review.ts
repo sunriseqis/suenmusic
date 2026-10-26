@@ -11,7 +11,8 @@
  *
  * 输出很短：只报打回的（{"reject":[{"id","why"}]}），通过的不用写 —— 短输出更稳。
  */
-import { aiChat, AiUnavailableError } from './ai-client.ts';
+import { aiChat } from './ai-client.ts';
+import { classifyAiFailure, type AiFailureKind } from './ai-health.ts';
 import { createLogger } from '../logger.ts';
 
 const log = createLogger('ai-review');
@@ -47,9 +48,40 @@ export interface ReviewHistory {
   lines: string[];
 }
 
-export interface ReviewResult {
-  /** trackId → 打回原因 */
-  rejects: Map<string, string>;
+/**
+ * 复核结论三态。
+ *
+ * 用户拍板：失败**不再**"catch → 全部放行"。放行等于让没审过的歌直接落库，
+ * 而调用方无法区分"模型说都通过"和"模型根本没答上来" —— 那正是审核形同虚设的原因。
+ * `unavailable` 由调用侧决定怎么处置（ai-flow：保留旧歌单，不用未过闸的批次覆盖）。
+ */
+export type ReviewOutcome =
+  /**
+   * 模型正常回传（可能打回，也可能一首都不打回）。
+   *
+   * `rejects` 用 Map 而不是数组：调用侧要按 id 查（`has`）、要计数（`size`）、
+   * 要遍历 id→理由；且同一次回传里模型可能对同一首重复列出，Map 天然去重。
+   */
+  | { status: 'ok'; rejects: Map<string, string> }
+  | { status: 'unavailable'; reason: AiFailureKind; message: string };
+
+/**
+ * 复核重试：用户拍板「超时可能只是被限流，间隔一会再问」。
+ *
+ * 最多 3 次重试（= 最多 4 次调用），间隔 5s → 20s → 60s。
+ * 仅当原因可恢复（timeout / ratelimit / error）才重试；
+ * auth / billing 重试一万次也还是同一个结果，直接判不可用。
+ */
+export const REVIEW_RETRY_DELAYS_MS = [5_000, 20_000, 60_000] as const;
+
+const RETRYABLE_REVIEW_FAILURES: ReadonlySet<AiFailureKind> = new Set<AiFailureKind>([
+  'timeout',
+  'ratelimit',
+  'error',
+]);
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 interface RawReview {
@@ -91,8 +123,8 @@ export async function reviewPicks(
   items: ReviewItem[],
   history: ReviewHistory,
   opts: { collectionHint?: string; memory?: string; userActions?: string } = {}
-): Promise<ReviewResult> {
-  if (items.length === 0) return { rejects: new Map() };
+): Promise<ReviewOutcome> {
+  if (items.length === 0) return { status: 'ok', rejects: new Map() };
 
   const system = `你是歌单审核员。生成侧刚刚产出一份**专属候选知音歌单（30 首，每首带推荐理由）**。
 请结合用户音乐画像与历史反馈复核整份歌单，把不合格的挑出来打回。
@@ -150,32 +182,52 @@ ${opts.memory || '（暂无）'}
 
 请复核并直接输出纯 JSON 对象（以 "{" 开头，以 "}" 结尾，若全部合格则输出 {"reject":[]}，严禁任何前导或尾随闲聊文本）。`;
 
-  let rawText = '';
-  try {
-    rawText = await aiChat(
-      [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      // ⚠️ 900s：本地 9router/glm-5.3-flash 是推理模型，实测一次 14k token 的输出要
-      // 530.9 秒（其中 8k 是思考 token）。原来的 90s 必然超时，且失败时是
-      // "安全放行全部曲目"这种静默降级 —— 等于审核环节形同虚设。
-      { purpose: 'review', jsonMode: true, maxTokens: 8000, timeoutMs: 900_000 }
-    );
-  } catch (err) {
-    log.warn(`审核阶段模型调用失败或超时，安全放行全部曲目：${(err as Error).message}`);
-    return { rejects: new Map() };
-  }
-
-  const raw = parseReview(rawText);
-
   const valid = new Set(items.map(i => i.id));
-  const rejects = new Map<string, string>();
-  for (const r of raw.reject) {
-    if (valid.has(r.id)) rejects.set(r.id, r.why);
+  let failure: { kind: AiFailureKind; message: string } | null = null;
+
+  for (let attempt = 0; attempt <= REVIEW_RETRY_DELAYS_MS.length; attempt += 1) {
+    if (attempt > 0 && failure) {
+      const waitMs = REVIEW_RETRY_DELAYS_MS[attempt - 1];
+      log.warn(
+        `审核调用失败（${failure.kind}）：${failure.message} —— ` +
+          `${Math.round(waitMs / 1000)}s 后重试（第 ${attempt}/${REVIEW_RETRY_DELAYS_MS.length} 次）`
+      );
+      await sleep(waitMs);
+    }
+
+    let rawText: string;
+    try {
+      rawText = await aiChat(
+        [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        // ⚠️ 900s：本地 9router/glm-5.3-flash 是推理模型，实测一次 14k token 的输出要
+        // 530.9 秒（其中 8k 是思考 token）。原来的 90s 必然超时。
+        { purpose: 'review', jsonMode: true, maxTokens: 8000, timeoutMs: 900_000 }
+      );
+    } catch (err) {
+      failure = classifyAiFailure(err);
+      if (!RETRYABLE_REVIEW_FAILURES.has(failure.kind)) {
+        log.warn(`审核不可用（${failure.kind}，重试无意义）：${failure.message}`);
+        return { status: 'unavailable', reason: failure.kind, message: failure.message };
+      }
+      continue;
+    }
+
+    // 模型答上来了：解析（非 JSON 的自然语言仍按"全部合格"处理，见 parseReview 注释）
+    const raw = parseReview(rawText);
+    const rejects = new Map<string, string>();
+    for (const r of raw.reject) {
+      if (valid.has(r.id)) rejects.set(r.id, r.why);
+    }
+    log.info(`审核完成：打回 ${rejects.size}/${items.length} 首`);
+    return { status: 'ok', rejects };
   }
-  log.info(`审核完成：打回 ${rejects.size}/${items.length} 首`);
-  return { rejects };
+
+  const last = failure ?? { kind: 'error' as AiFailureKind, message: '审核调用失败（原因未知）' };
+  log.warn(`审核重试用尽（${last.kind}）：${last.message}`);
+  return { status: 'unavailable', reason: last.kind, message: last.message };
 }
 
 // ---------------------------------------------------------------------------

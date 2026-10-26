@@ -14,7 +14,7 @@
 import type { FastifyInstance } from 'fastify';
 import { requireUser } from '../http/require-auth.ts';
 import { badRequest } from '../http/errors.ts';
-import { getDailyRecommend } from '../services/daily-recommend.ts';
+import { getDailyRecommend, type DailyRecommendResponse } from '../services/daily-recommend.ts';
 import { triggerFavoritesSummaryUpdate } from '../services/ai-memory.ts';
 import {
   addDislike,
@@ -33,10 +33,11 @@ function parseType(raw: unknown): DislikeType {
 }
 
 export function registerDailyRoutes(app: FastifyInstance): void {
-  app.get('/api/recommend/daily', async req => {
+  app.get('/api/recommend/daily', async (req): Promise<DailyRecommendResponse> => {
     const user = requireUser(req);
     // 只读：歌单由每天 00:30 的定时维护产出。
     // 原 `?force=1`（「换一批」/「重试」按钮）会清缓存重建 —— 按用户要求已关闭。
+    // 返回契约见 services/daily-recommend.ts 的 DailyRecommendResponse（status/statusMessage/statusDetail）。
     return getDailyRecommend(user.id);
   });
 

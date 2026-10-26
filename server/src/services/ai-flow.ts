@@ -28,9 +28,17 @@ import {
   reviewPicks,
   reviewExclusions,
   type ReviewItem,
+  type ReviewOutcome,
   type ExclusionClaim,
 } from './ai-review.ts';
+import {
+  recordAiFailure,
+  recordAiSuccess,
+  classifyAiFailure,
+  type AiFailureKind,
+} from './ai-health.ts';
 import { readMemorySummary, rebuildMemory } from './ai-memory.ts';
+import { RECENT_RAW_LIMIT, maybeRefreshDigest } from './ai-rejection-digest.ts';
 import { topArtists } from './artist-stats.ts';
 import { consumePlaylists } from './playlist-pool.ts';
 import { recordAiRejection } from '../db/repo/ai-rejections.ts';
@@ -102,6 +110,13 @@ export interface FlowResult {
   refilled: number;
   /** 各列表最终首数 */
   counts: number[];
+  /**
+   * 复核不可用（模型超时/限流/密钥失效……）。
+   *
+   * 有值就表示**这次没有写 `ai.daily.active`**：旧歌单原样保留，
+   * 客户端据 `kind` 给用户一句可上屏的说明。
+   */
+  reviewFailure?: { kind: AiFailureKind; message: string };
 }
 
 type Bucket = Record<'simi' | 'playlist' | 'seedOld' | 'chart', number>;
@@ -135,9 +150,12 @@ const briefFor = (userId: number): {
    *     不能当每日主力（它们收藏量最大，靠权重必然是它们，用户天天跳过）；
    *   - `artists`：整体熟悉度参考，用于判断"次熟悉"档。
    */
+  /** 摘要段要按用户读 `ai.rejection_digest:<userId>`，所以 brief 里带上 userId */
+  userId: number;
   anchorArtists: string;
   artists: string;
   recent: string;
+  /** 最近几条原始打回理由（已剥 `[审核打回]` 标签），只填 prompt 的"最近原始理由"段 */
   rejections: string;
   userActions: string;
   favCount: number;
@@ -171,15 +189,16 @@ const briefFor = (userId: number): {
     .map(r => `${r.name}-${r.artist}`)
     .join('、');
   // 最近被否掉的（含理由）：让模型每次挑歌前都知道"这些路数已被否、为什么"
+  // 只取最近几条 —— 结论性规律交给 ai-rejection-digest 的摘要，这里只留"刚从哪掉下去"
   const rejections = (
     getDatabase()
       .prepare(
         `SELECT name, artist, reason FROM ai_passed
-          WHERE user_id = ? AND reason != '' ORDER BY created_at DESC LIMIT 20`
+          WHERE user_id = ? AND reason != '' ORDER BY created_at DESC LIMIT ?`
       )
-      .all(userId) as unknown as Array<{ name: string; artist: string; reason: string }>
+      .all(userId, RECENT_RAW_LIMIT) as unknown as Array<{ name: string; artist: string; reason: string }>
   )
-    .map(r => `- ${r.name} - ${r.artist}：${r.reason.slice(0, 60)}`)
+    .map(r => `- ${r.name} - ${r.artist}：${r.reason.replace(/^\[审核打回\]\s*/, '').slice(0, 60)}`)
     .join('\n');
   // 用户前端操作（不喜欢/收藏）：全流权重最高的上下文
   const userActions = (
@@ -215,7 +234,7 @@ const briefFor = (userId: number): {
     .map(a => `${a.name}(${a.count})`)
     .join('、');
 
-  return { anchorArtists, artists, recent, rejections, userActions: userActionsText, favCount };
+  return { userId, anchorArtists, artists, recent, rejections, userActions: userActionsText, favCount };
 };
 
 /** 从池里按剩余名额跑一批（15 首），并把用掉的 id / 名额返回 */
@@ -342,6 +361,8 @@ export async function runDailyFlow(
   let refilledTotal = 0;
   let shortfallHit = false;
   let poolRound = 0;
+  /** 本轮生成中复核不可用（一旦出现，整次生成不落地） */
+  let reviewFailure: { kind: AiFailureKind; message: string } | null = null;
 
   /**
    * 池子循环（2026-09-20 用户拍板）。
@@ -480,14 +501,32 @@ export async function runDailyFlow(
       listNo: 1,
       reason: p.reason,
     }));
-    const review = await reviewPicks(freshItems, { lines: passHistory }, {
-      collectionHint: collectionHintFor(userId),
-      memory,
-      userActions,
-    }).catch(err => {
-      log.warn(`审核异常，降级放行：${(err as Error).message}`);
-      return { rejects: new Map<string, string>() };
-    });
+    let review: ReviewOutcome;
+    try {
+      review = await reviewPicks(freshItems, { lines: passHistory }, {
+        collectionHint: collectionHintFor(userId),
+        memory,
+        userActions,
+      });
+    } catch (err) {
+      // reviewPicks 内部已把失败收成三态；这里只兜"未预期异常"，且**绝不放行**
+      const f = classifyAiFailure(err);
+      review = { status: 'unavailable', reason: f.kind, message: f.message };
+    }
+
+    if (review.status === 'unavailable') {
+      /**
+       * 复核不可用 = 这批歌没拿到"通过"结论，不能当"全部通过"落地。
+       * 用户拍板的动作：记下失败原因、停止本轮生成、**保留旧歌单**（见 ⑥.5）。
+       */
+      reviewFailure = { kind: review.reason, message: review.message };
+      recordAiFailure(review.reason, review.message);
+      log.warn(
+        `复核不可用（${review.reason}）：${review.message} → 停止生成，本次不覆盖旧歌单`
+      );
+      break;
+    }
+    recordAiSuccess();
 
     if (review.rejects.size > 0) {
       /**
@@ -537,6 +576,35 @@ export async function runDailyFlow(
       log.warn(`第 ${poolRound} 轮没有新增通过审核的曲目，停止补选`);
       break;
     }
+  }
+
+  // ⑤.4 打回理由摘要（压缩上下文）：放在循环之后，本轮的打回记录已经落库（上面 ④ 写 ai_passed）。
+  // 内部按阈值判断 —— 新增 < ${NEW_REJECTIONS_THRESHOLD} 条且距上次不足 7 天就什么都不做；
+  // 它永不抛异常，失败只 warn 并保留旧摘要，不会影响今天的歌单。
+  await maybeRefreshDigest(userId);
+
+  /**
+   * ⑤.5 复核失败 → **不写 `ai.daily.active`**（用户拍板：别用一批没审过的歌覆盖旧歌单）。
+   *
+   * 放在落地判定之前：失败态比"数据不足"更能说明问题，绝不能让下游把它当成
+   * "曲库不足、明天再来"。也已经记录到 ai.health（管理端与每日接口都读它）。
+   */
+  if (reviewFailure) {
+    log.warn(
+      `本次生成复核不可用（${reviewFailure.kind}）：${reviewFailure.message} → ` +
+        `保留旧歌单，已选 ${picks.length} 首不落地`
+    );
+    return {
+      greeting: '',
+      welcomePhrase: '',
+      lists: [{ listNo: 1, picks }],
+      rejected: rejectedTotal,
+      refilled: refilledTotal,
+      counts: [picks.length],
+      landed: false,
+      shortfall: false,
+      reviewFailure,
+    };
   }
 
   // ⑥ 落地判定：累计 ≥ LAND_MIN 才装填（用户拍板）
