@@ -103,6 +103,13 @@ export interface HomeData {
   welcomePhrase?: string;
 }
 
+export interface DirectLink {
+  id: string;
+  url: string;
+  headers: Record<string, string>;
+  expiresAt: number;
+}
+
 export interface ResolveResponse {
   trackId: string;
   ok: boolean;
@@ -111,6 +118,12 @@ export interface ResolveResponse {
   score: number;
   source: string;
   streamUrl?: string;
+  /** 直链通道：设备直接向 CDN 取流（不经过服务端）。null = 服务端关闭了直链 */
+  directUrl?: string;
+  /** 直连必须带的头（B 站 CDN 校验 Referer；此处**不含 Cookie**） */
+  directHeaders?: Record<string, string>;
+  /** 直链剩余有效期（秒）；到期前应重新解析，播放中失效则回退 streamUrl */
+  directExpiresInSec?: number;
   streamTokenExpiresInSec: number;
   track?: Track;
   coverUrl?: string;

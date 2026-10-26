@@ -21,7 +21,7 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
-import { Track, artistLine, ResolveResponse } from './Models';
+import { Track, artistLine, ResolveResponse, DirectLink } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
 import { Notifier } from '../common/Notifier';
@@ -115,6 +115,13 @@ export class MediaPlayerCore {
   private pendingSeekMs: number = -1;
   /** 当前流地址（仅用于日志排查） */
   private currentUrl: string = '';
+  /** 当前曲的直链信息（服务端 /api/resolve 下发）；null = 走代理 */
+  private direct: DirectLink | null = null;
+  /** 本曲是否已因直链失败回退过代理（避免无限重试） */
+  private proxyFallbackUsed: boolean = false;
+  /** 上次装载的曲目 id：只在这个值变化时重置直链回退状态 */
+  private fallbackTrackId: string = '';
+
   /** 连续装载失败次数（成功起播即清零）。对齐 Web 端 networkFailStreak 的语义 */
   private failStreak: number = 0;
   /** 本次装载的失败是否已归口：prepare 拒绝与 error 事件常为同一失败的双报，防 failStreak 双计 */
@@ -825,6 +832,12 @@ export class MediaPlayerCore {
   private async loadCurrent(autoplay: boolean): Promise<void> {
     const track = this.current;
     if (track === null) { return; }
+    // 换曲才重置「直链回退」状态；同一首内部重载（回退重试）不得重置，否则会无限循环
+    if (track.id !== this.fallbackTrackId) {
+      this.fallbackTrackId = track.id;
+      this.proxyFallbackUsed = false;
+      this.direct = null;
+    }
     const mySeq = ++this.seq;
     this.failHandled = false;
     // 重新装载即撤销挂起的失败（重试 / 跳过 / 锚定后重装都走这里）
@@ -877,7 +890,24 @@ export class MediaPlayerCore {
         this.pendingFile = null;
       }
       this.currentUrl = url;
-      p.url = url;
+      // 直链优先：设备直接向 CDN 取流，服务端只做解析（省上行带宽、少一跳）。
+      // 失败一律回退代理：代理是兜命通道，永不删。
+      const direct = this.proxyFallbackUsed ? null : await this.resolveDirect(track);
+      let usedDirect = false;
+      if (direct !== null) {
+        try {
+          const ms = media.createMediaSourceWithUrl(direct.url, direct.headers);
+          await p.setMediaSource(ms);
+          usedDirect = true;
+          hilog.info(DOMAIN, TAG, '直链装载 track=%{public}s exp=%{public}dms',
+            track.id, direct.expiresAt - Date.now());
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, '直链装载失败，回退代理: %{public}s', JSON.stringify(e));
+        }
+      }
+      if (!usedDirect) {
+        p.url = url;
+      }
     } catch (e) {
       this.fail('赋流地址', e);
     }
@@ -926,9 +956,56 @@ export class MediaPlayerCore {
    * `below_threshold`（B 站搜不到，置信度 0 分）→ `/api/stream` 回 503 →
    * AVPlayer 报 5411004 "IO Network Unavailable"。对用户来说这只是"这首没有音源"。
    */
+  /**
+   * 取当前曲的直链（服务端 `/api/resolve` 下发）。
+   *
+   * 约束：**最多等 1.2 秒**（起播不能被解析拖住）——超时直接回 proxy；
+   * 结果按 id 缓存，同一首只问一次；服务端关掉直链时返回 null。
+   */
+  private async resolveDirect(track: Track): Promise<DirectLink | null> {
+    const cached = this.direct;
+    if (cached !== null && cached.id === track.id && cached.expiresAt > Date.now() + 60_000) {
+      return cached;
+    }
+    try {
+      const r = await Promise.race([
+        APIClient.shared().resolve(track.id),
+        new Promise<ResolveResponse | null>((resolve) => {
+          // 800ms：服务端 resolve 命中缓存通常 <50ms；不能让解析拖慢起播
+          setTimeout(() => { resolve(null); }, 800);
+        }),
+      ]);
+      if (r === null || r.ok !== true || r.directUrl === undefined || r.directUrl.length === 0) {
+        this.direct = null;
+        return null;
+      }
+      const expiresAt = Date.now() + Math.max(0, (r.directExpiresInSec ?? 0)) * 1000;
+      const item: DirectLink = { id: track.id, url: r.directUrl, headers: r.directHeaders ?? {}, expiresAt };
+      this.direct = item;
+      return item;
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '直链解析失败，回退代理: %{public}s', JSON.stringify(e));
+      this.direct = null;
+      return null;
+    }
+  }
+
   private fail(step: string, e: Object): void {
     const code = JSON.stringify(e);
     hilog.error(DOMAIN, TAG, '装载失败于[%{public}s]: %{public}s', step, code);
+    // 直链失效（过期/CDN 403/防盗链收紧）→ **先回退代理重试一次**，再报失败。
+    // 代理是兜命通道：直链只是优先通道，不允许因为直链问题让用户听不了。
+    if (!this.proxyFallbackUsed && this.direct !== null && this.current !== null) {
+      this.proxyFallbackUsed = true;
+      this.direct = null;
+      this.failHandled = false;
+      hilog.warn(DOMAIN, TAG, '直链播放失败（step=%{public}s），回退代理重载当前曲', step);
+      const target = this.current;
+      setTimeout(() => { void this.loadCurrent(false).catch((err: Object) => {
+        hilog.error(DOMAIN, TAG, '代理重载失败: %{public}s', JSON.stringify(err));
+      }); }, 0);
+      return;
+    }
     if (this.failHandled) {
       hilog.warn(DOMAIN, TAG, 'fail 被 failHandled 挡下（step=%{public}s）—— 本次装载已记过一次失败', step);
       return;
