@@ -13,6 +13,7 @@
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { fetchKugouStatus, startKugouQr, pollKugouQr, logoutKugou } from '@/api/kugou.ts';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -327,9 +328,11 @@ const biliName = ref('');
 const neteaseName = ref('');
 const biliOn = ref(false);
 const neteaseOn = ref(false);
+const kugouOn = ref(false);
+const kugouName = ref('');
 
 // ---------------------------------------------------------------- 音源授权
-type SourceKind = 'bilibili' | 'netease';
+type SourceKind = 'bilibili' | 'netease' | 'kugou';
 const qrSource = ref<SourceKind>('bilibili');
 const qrImage = ref<string | null>(null);
 const qrKey = ref('');
@@ -353,11 +356,17 @@ function closeQr(): void {
 }
 
 async function pollOnce(): Promise<void> {
-  if (!qrKey.value) return;
+  if (!qrKey.value && qrSource.value !== 'kugou') return;
   try {
     const res = qrSource.value === 'bilibili'
       ? await pollBilibiliQr(qrKey.value)
-      : await pollNeteaseQr(qrKey.value);
+      : qrSource.value === 'kugou'
+        ? await (async () => {
+            const r = await pollKugouQr();
+            // 服务端三态 → 页面统一的 state/message
+            return { state: r.state, message: r.state === 'confirmed' ? '已授权' : r.state === 'expired' ? '二维码已过期' : '等待扫码' };
+          })()
+        : await pollNeteaseQr(qrKey.value);
     qrMsg.value = res.message;
     if (res.state === 'confirmed') {
       stopQrPolling();
@@ -382,6 +391,15 @@ async function openQr(source: SourceKind): Promise<void> {
   qrMsg.value = '正在获取二维码…';
   sheet.value = 'auth';
   try {
+    if (source === 'kugou') {
+      const res = await startKugouQr();
+      qrImage.value = res.pngBase64;
+      qrKey.value = '';   // 酷狗：key 在服务端会话里，poll 不需要 key
+      qrMsg.value = '等待扫码（用酷狗概念版 App）';
+      stopQrPolling();
+      qrTimer = setInterval(() => void pollOnce(), 2000);
+      return;
+    }
     const res = source === 'bilibili' ? await startBilibiliQr() : await startNeteaseQr();
     qrImage.value = res.qrImage;
     qrKey.value = res.qrcodeKey;
@@ -398,6 +416,7 @@ async function openQr(source: SourceKind): Promise<void> {
 async function logoutSource(source: SourceKind): Promise<void> {
   try {
     if (source === 'bilibili') await logoutBilibili();
+    else if (source === 'kugou') await logoutKugou();
     else await logoutNetease();
     ui.ok('已退出授权');
     await loadSources();
@@ -421,6 +440,13 @@ async function loadSources(): Promise<void> {
     neteaseName.value = st.account?.name || '';
   } catch {
     neteaseOn.value = false;
+  }
+  try {
+    const st = await fetchKugouStatus();
+    kugouOn.value = !!st.present;
+    kugouName.value = st.userid ? ('uid ' + st.userid) : '';
+  } catch {
+    kugouOn.value = false;
   }
 }
 
@@ -626,6 +652,14 @@ onBeforeUnmount(() => {
               <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('netease')">退出</NeuButton>
             </template>
           </div>
+          <div class="row">
+            <span class="row-name">酷狗（概念版）</span>
+            <span class="row-val">{{ kugouOn ? kugouName || '已授权' : '未授权' }}</span>
+            <template v-if="isWebPanel && session.user?.role === 'admin'">
+              <NeuButton v-if="!kugouOn" size="sm" @click="openQr('kugou')">授权</NeuButton>
+              <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('kugou')">退出</NeuButton>
+            </template>
+          </div>
         </div>
       </section>
 
@@ -756,7 +790,7 @@ onBeforeUnmount(() => {
         <img v-if="qrImage" :src="qrImage" alt="登录二维码" class="qr-img" />
         <p class="qr-msg">{{ qrMsg }}</p>
         <p class="qr-hint">
-          用 {{ qrSource === 'bilibili' ? '哔哩哔哩' : '网易云音乐' }} App 扫码
+          用 {{ qrSource === 'bilibili' ? '哔哩哔哩' : qrSource === 'kugou' ? '酷狗概念版' : '网易云音乐' }} App 扫码
         </p>
       </div>
     </Sheet>

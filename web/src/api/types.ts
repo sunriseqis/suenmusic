@@ -455,6 +455,32 @@ export interface BilibiliQrPoll {
 }
 
 // ---------------------------------------------------------------------------
+// 酷狗音源账号（概念版 VIP；与 B 站/网易同构，全站共用）
+// ---------------------------------------------------------------------------
+
+export type KugouQrState = 'waiting' | 'confirmed' | 'expired' | 'failed';
+
+export interface KugouStatus {
+  present: boolean;
+  savedAt?: number;
+  userid?: string;
+}
+
+export interface KugouQrSession {
+  ok: boolean;
+  /** dataURL（image/png），管理页 <img> 直接用 */
+  pngBase64: string;
+  expiresInSec: number;
+}
+
+export interface KugouQrPoll {
+  ok: boolean;
+  state: KugouQrState;
+  token?: string;
+  userid?: string;
+}
+
+// ---------------------------------------------------------------------------
 // 网易云音源账号（服务端持有的凭证；与 B 站同构，全站共用）
 // ---------------------------------------------------------------------------
 
