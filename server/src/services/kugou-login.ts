@@ -108,7 +108,8 @@ function signedWeb(p: Record<string, string>): URLSearchParams {
 export async function startKugouQrLogin(): Promise<KugouQrSession> {
   const dfid = await ensureDfid();
   const params = {
-    appid: '1014',
+    // 出码用 1001（参考实现口径）；**token 归属由 check 的 appid 决定**，见 pollKugouQrLogin
+    appid: '1001',
     type: '1',
     plat: '4',
     qrcode_txt: 'https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=3116&',
@@ -153,8 +154,10 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
   const dfid = await ensureDfid();
   // ⚠️ 轮询接口也必须带**全套公共参数** + 酷狗内部头（2026-10-26 实测：只带 plat/appid/srcappid/qrcode/dev
   //    会 `20010`，加上 commonParams + kgHeaders 后 → status=1/data.status=1 正常返回）。
+  // ⚠️ **appid 决定 token 归属**：写 1014 拿到的是网页 token，tracker 侧 /v1/user_verify 直接回
+  //    「token invalid (35005)」、取流回 20018。概念版取流必须用 appid=3116 + clientver 11440 查询。
   const params: Record<string, string> = {
-    plat: '4', appid: '1014', srcappid: '2919', qrcode: sess.key, dev: guid,
+    plat: '4', appid: '3116', srcappid: '2919', qrcode: sess.key, dev: guid,
     ...commonParams(dfid),
   };
   const res = await fetch(`https://login-user.kugou.com/v2/get_userinfo_qrcode?${signedWeb(params)}`, {
