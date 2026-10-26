@@ -20,6 +20,7 @@ import {
   adaptQQTracks, adaptQQAlbum, adaptQQSong, adaptQQToplist, toPlainText,
 } from './adapter.ts';
 import type { Album, ToplistInfo, Track } from './adapter.ts';
+import { getTracks, upsertTracks } from '../../db/repo/tracks.ts';
 
 const log = createLogger('qq:home');
 
@@ -218,8 +219,26 @@ export async function getPlaylistDetail(
 }
 
 /** 单曲真实元数据。曲目缓存 miss 时用它兜底。 */
-export async function getSongDetail(mid: string): Promise<Track | null> {
+/**
+ * 单曲详情（**读穿缓存**）。
+ *
+ * 此前直接裸打上游：`routes/catalog.ts:314`、`favorites.ts:94`、`resolve.ts:130`、`stream.ts:379`、
+ * `daily-recommend.ts:218` 五个调用点各自打一次，而 `tracks` 表里本来就存着这些曲目 —— 
+ * 等于同一首歌的元数据被反复请求（并直接抬高 QQ 2001 的触发率）。
+ *
+ * 现在先查 `tracks`（`upsertTracks` 写入的那份），命中即返回；未命中才打上游并顺手落库。
+ * 需要强制刷新时传 `{ bypassCache: true }`。QQ 侧元数据变动很少，默认信任缓存。
+ */
+export async function getSongDetail(
+  mid: string,
+  opts: { bypassCache?: boolean } = {}
+): Promise<Track | null> {
   if (!mid) return null;
+
+  if (!opts.bypassCache) {
+    const cached = getTracks([`qq_${mid}`])[0];
+    if (cached) return cached;
+  }
 
   try {
     const res = await requestQQMusic<any>(
@@ -234,7 +253,10 @@ export async function getSongDetail(mid: string): Promise<Track | null> {
     );
 
     const trackInfo = res?.songinfo?.data?.track_info;
-    return trackInfo ? adaptQQSong(trackInfo) : null;
+    if (!trackInfo) return null;
+    const track = adaptQQSong(trackInfo);
+    upsertTracks([track]);   // 顺手落库，下次直接命中
+    return track;
   } catch (err) {
     log.warn(`单曲详情失败 mid=${mid}: ${(err as Error)?.message ?? err}`);
     return null;
