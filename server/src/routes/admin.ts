@@ -437,6 +437,36 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     return { ok: true, ...r };
   });
 
+  /**
+   * 直接导入酷狗凭据（供外部登录态使用）。
+   *
+   * 为什么需要：扫码/手机号登录只下发 `token`，**拿不到 `vip_token`** ——
+   * 没有 vip_token 时酷狗只给 60 秒试听片段（实测：每首直链都是 ~960KB@128k）。
+   * 概念版客户端自己的登录态里带 vip_token，把那份 cookie 灌进来即可拿到完整音频。
+   *
+   * body: { token, userid, vipToken?, t1?, nickname? }
+   */
+  app.post('/api/admin/kugou/credentials/import', async req => {
+    const body = (req.body ?? {}) as { token?: string; userid?: unknown; vipToken?: string; t1?: string; nickname?: string };
+    const token = String(body.token ?? '').trim();
+    const userid = String(body.userid ?? '').trim();
+    if (!token || !userid) throw badRequest('token 与 userid 必填', 'invalid_param');
+    setSetting(
+      'kugou.credentials',
+      JSON.stringify({
+        token,
+        userid,
+        vipToken: String(body.vipToken ?? ''),
+        t1: String(body.t1 ?? ''),
+        nickname: String(body.nickname ?? ''),
+        savedAt: Date.now(),
+      })
+    );
+    deleteSetting('kugou.credentialsInvalidAt');
+    log.info(`酷狗凭据已导入：userid=${userid} vip_token=${body.vipToken ? '有' : '无'}`);
+    return { ok: true, ...(await readKugouLoginState()) };
+  });
+
   app.get('/api/admin/kugou/credentials', async () => {
     return { ok: true, ...readKugouCredentialStatus() };
   });
