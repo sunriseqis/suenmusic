@@ -175,6 +175,15 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
     // **保存完整凭据**：vip_token / vip_type 决定能不能拿 VIP 音质；
     // t1 是 /login/token 续期必需（缺了就只能重新扫码）。
     // 只进 settings（管理员通道），不进代码库。
+    // 落库前先看清楚上游到底给了哪些字段：
+    // KuGouMusicApi 的 login_qr_check 只转发了 token，vip_token 是存在的但被丢掉的 ——
+    // 我们之前同样只取 token/userid，导致「有会员却只拿 60 秒试听」。
+    const keys = Object.keys(d);
+    const tokenKeys = keys.filter(k => k.toLowerCase().includes('token') || k.toLowerCase().includes('vip'));
+    log.info(
+      `酷狗扫码成功：字段 ${keys.length} 个，含 token/vip 的字段：` +
+        tokenKeys.map(k => `${k}=${String(d[k] ?? '').length > 0 ? '有(' + String(d[k]).length + ')' : '空'}`).join(' '),
+    );
     const creds = {
       token,
       userid,

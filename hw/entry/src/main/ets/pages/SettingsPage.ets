@@ -125,6 +125,8 @@ export struct SettingsPage {
   @State cardHelpOpen: boolean = false;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
+  /** 酷狗登录态文案（服务端四态 label：未登录 / 登录已失效 / 会员到期 / 正常） */
+  @State kugouLabel: string = '未登录';
 
   onOpenServers: () => void = () => {};
   onOpenCache: () => void = () => {};
@@ -741,6 +743,13 @@ export struct SettingsPage {
         : (st.configured ? '已授权' : '未授权');
     } catch (e) {
       this.neteaseLabel = '未授权';
+    }
+    try {
+      const kg = await APIClient.shared().kugouStatus();
+      // 文案完全用服务端下发：会员到期 / 登录失效是两种不同故障，端侧不自己拼
+      this.kugouLabel = kg.label.length > 0 ? kg.label : '未登录';
+    } catch (e) {
+      this.kugouLabel = '未登录';
     }
   }
 
@@ -1683,6 +1692,7 @@ export struct SettingsPage {
             Column() {
               this.rowStatic('bilibili', this.biliLabel, true)
               this.rowStatic('网易云', this.neteaseLabel, false)
+              this.rowStatic('酷狗（概念版）', this.kugouLabel, false)
             }
             .width('100%')
             .backgroundColor(Tokens.panel)

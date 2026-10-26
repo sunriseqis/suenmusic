@@ -110,6 +110,23 @@ export interface DirectLink {
   expiresAt: number;
 }
 
+/**
+ * 酷狗登录态（服务端统一判定，四态）：
+ * logged_out 未登录 / invalid 登录已失效 / vip_expired 已登录·会员到期 / ok 已登录·会员有效。
+ * label 直接用服务端给的文案，端的侧不再自己拼。
+ */
+export interface KugouLoginState {
+  ok: boolean;
+  state: string;
+  label: string;
+  userid: string;
+  nickname: string;
+  vipEndTime: string;
+  vipRemainingMs: number;
+  savedAt: number;
+  invalidReason: string;
+}
+
 /** 各源可用性（锚定页三态） */
 export interface AvailabilityItem {
   ok: boolean;

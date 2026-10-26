@@ -16,7 +16,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import {
   AuthConfig, AuthSession, FavoritePage, HomeData, PublicUser,
-  ResolveResponse, AvailabilityResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
+  ResolveResponse, AvailabilityResponse, KugouLoginState, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
   SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
   DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
@@ -516,6 +516,12 @@ export class APIClient {
 
   async resolve(trackId: string): Promise<ResolveResponse> {
     return this.request<ResolveResponse>('/api/resolve/' + encodeURIComponent(trackId),
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 酷狗登录态（四态，label 直接用服务端文案） */
+  async kugouStatus(): Promise<KugouLoginState> {
+    return this.request<KugouLoginState>('/api/admin/kugou/status',
       http.RequestMethod.GET, '', true, false);
   }
 
