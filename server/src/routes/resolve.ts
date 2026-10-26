@@ -20,6 +20,7 @@ import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { getTrack, upsertTracks } from '../db/repo/tracks.ts';
 import { getSongDetail } from '../sources/qq/home.ts';
 import {
+  audioHeadersFor,
   buildQuery,
   searchCandidates,
 } from '../sources/bilibili/stream.ts';
@@ -29,6 +30,16 @@ import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
 
 const log = createLogger('routes:resolve');
+
+/**
+ * 直链通道开关（默认开）。
+ *
+ * 设 SUENMUSIC_DIRECT_LINK=off 即回退「纯服务端代理」，无需发版 —— 防盗链策略变化时用这个开关兜命。
+ * 注意：代理（streamUrl）永远保留，直链只是**优先通道**。
+ */
+function directEnabled(): boolean {
+  return (process.env.SUENMUSIC_DIRECT_LINK ?? 'on').toLowerCase() !== 'off';
+}
 
 /** BVID 形如 BV + 10 位字母数字 */
 const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
@@ -77,6 +88,25 @@ function shape(outcome: ResolveOutcome, meta: TrackMeta = null): Record<string, 
      * 不要自己去取 B 站地址，那条路必然 403。
      */
     streamUrl: outcome.ok ? buildStreamUrl(outcome.trackId) : null,
+    /**
+     * **直链通道**（设备直接向 CDN 取流，不经过服务端）。
+     *
+     * 为什么要有它：服务端代理意味着每次播放都占服务端上行带宽（历史上还被限速 40KB/s 拖过），
+     * 而设备本来就是全程联网的。直链让服务端只做「解析 + 令牌」，容量模型从按带宽变成按 QPS。
+     *
+     * ⚠️ 客户端**必须**带上 directHeaders 再去取，否则 B 站 CDN 403（这是它防盗链的全部要求）。
+     * ⚠️ 链接会过期（B 站约 2 小时）：请在 directExpiresInSec 前 X 分钟重新解析；
+     *    播放中遇到 403/失败，**回退到 streamUrl**（代理兜底），不要直接报错。
+     * ⚠️ 可用 SUENMUSIC_DIRECT_LINK=off 一键关闭（回退纯代理，无需发版）。
+     */
+    directUrl: directEnabled() && outcome.ok ? (row?.audioUrl || outcome.sourceUrl || null) : null,
+    directHeaders:
+      directEnabled() && outcome.ok
+        ? audioHeadersFor((row?.source ?? outcome.source ?? 'bilibili') as 'bilibili' | 'netease')
+        : null,
+    /** 直链剩余有效期（秒）：与音源缓存同口径，到期必须重新解析 */
+    directExpiresInSec:
+      directEnabled() && row ? Math.max(0, Math.round((row.expiresAt - Date.now()) / 1000)) : 0,
     /** 令牌有效期（秒），客户端可据此在过期前重新解析 */
     streamTokenExpiresInSec: outcome.ok
       ? Math.round(STREAM_TOKEN_TTL_MS / 1000)

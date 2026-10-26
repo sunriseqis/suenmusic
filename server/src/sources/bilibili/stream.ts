@@ -27,7 +27,7 @@ const log = createLogger('bilibili');
 
 const BILI_API = 'https://api.bilibili.com';
 
-const BROWSER_UA =
+export const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
   '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
@@ -124,6 +124,20 @@ export interface ResolveInput {
   bvid?: string;
   /** 曲目已有 Q 音专辑封面时为 true —— 网易云路径据此跳过封面兜底请求 */
   hasAlbumCover?: boolean;
+}
+
+/**
+ * 取音频直链时**必须**带的请求头（客户端直连 CDN 时也要照抄这一份）。
+ *
+ * B 站 CDN 校验 Referer（实测：带 Referer 206 / 不带 403，且不同节点严格程度不同）；
+ * 网易云反过来 —— 带了 B 站 Referer 反而可能被拒，只该带干净浏览器 UA。
+ */
+export function audioHeadersFor(source: 'bilibili' | 'netease'): Record<string, string> {
+  // ⚠️ **绝不能带 Cookie**：`biliHeaders()` 里那份是账号登录凭据（SESSDATA/DedeUserID…），
+  //    它只用于服务端调 API；CDN 播放只校验 Referer。把 Cookie 下发给客户端等于泄露账号。
+  return source === 'netease'
+    ? { 'User-Agent': BROWSER_UA }
+    : { 'User-Agent': BROWSER_UA, Referer: 'https://www.bilibili.com' };
 }
 
 function biliHeaders(): Record<string, string> {
