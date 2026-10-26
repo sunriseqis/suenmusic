@@ -44,10 +44,13 @@ const route = useRoute();
 const track = computed(() => player.currentTrack);
 const cover = computed(() => coverUrl(track.value?.al?.picUrl, 500));
 
-/** 来源状态灯（不显示文字，颜色即语义：红=网易云 / 粉=B站） */
-const sourceTitle = computed(() =>
-  player.currentSource === 'netease' ? '音源：网易云' : '音源：B站'
-);
+/** 来源状态灯（不显示文字，颜色即语义：红=网易云 / 粉=B站 / 蓝=酷狗） */
+const sourceTitle = computed(() => {
+  const s = player.currentSource;
+  if (s === 'netease') return '音源：网易云';
+  if (s === 'kugou') return '音源：酷狗';
+  return '音源：B站';
+});
 
 const queueOpen = ref(false);
 const dislikeMenuOpen = ref(false);
@@ -461,6 +464,11 @@ onBeforeUnmount(() => {
 .src-dot.src-bilibili {
   background: #fb7299;
   box-shadow: 0 0 7px rgba(251, 114, 153, 0.7);
+}
+/* 酷狗：蓝色（用户 2026-10-26：三源必须可区分，否则看不出走的是酷狗） */
+.src-dot.src-kugou {
+  background: #2f7bff;
+  box-shadow: 0 0 7px rgba(47, 123, 255, 0.7);
 }
 
 /* ---- 主体：左视线中心 + 右歌词 ---- */

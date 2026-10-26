@@ -24,7 +24,7 @@ import {
   K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
-import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo } from '../core/Models';
+import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, BiliTop, AvailabilityItem, AvailabilityResponse } from '../core/Models';
 import { OfflineCache } from '../core/OfflineCache';
 import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
@@ -78,6 +78,13 @@ export struct PlayerPage {
 
   // 修正音源 / 手动锚定（web AnchorDialog：候选搜索 → 试听 → 锚定；已有锚点可解除）
   @State anchorKeyword: string = '';
+  // ---- 各源可用性 + 源钉（锚定弹窗三态展示 / 用户指定只用某源）----
+  @State availKugou: AvailabilityItem | null = null;
+  @State availNetease: AvailabilityItem | null = null;
+  // B 站不进「音源检查」（用户标准语义）：它走下方搜索锚定，所以不保留在场字段
+  @State availLoading: boolean = false;
+  @State pinnedSource: string = '';
+  @State pinBusy: boolean = false;
   @State anchorCandidates: BiliCandidate[] = [];
   @State anchorMeta: AnchorTrackMeta | null = null;
   @State anchorSearching: boolean = false;
@@ -217,16 +224,66 @@ export struct PlayerPage {
    */
   private sourceLabel(): string {
     if (this.npSource === 'bilibili') {
-      return 'bilibili';
+      return '哔哩哔哩';
     }
     if (this.npSource === 'netease') {
       return '网易云';
+    }
+    if (this.npSource === 'kugou') {
+      return '酷狗';
     }
     // 兜底：解析还没回来/失败但已手动锚定 —— 锚点必然是 bilibili
     if (this.npSource.length === 0 && this.anchorInfo !== null) {
       return 'bilibili';
     }
     return '未匹配';
+  }
+
+  /** 各源可用性加载（锚定弹窗打开时触发；失败静默，区块显示「查询失败」） */
+  private loadAvailability(trackId: string): void {
+    this.availLoading = true;
+    this.availKugou = null;
+    this.availNetease = null;
+    APIClient.shared().sourceAvailability(trackId)
+      .then((r: AvailabilityResponse) => {
+        this.availKugou = r.kugou;
+        this.availNetease = r.netease;
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.availLoading = false;
+      });
+  }
+
+  /** 钉/解钉源（源钉优先于默认链） */
+  private togglePin(source: string): void {
+    if (this.pinBusy) { return; }
+    this.pinBusy = true;
+    const isPinned = this.pinnedSource === source;
+    const trackId = this.trackId;
+    const op = isPinned
+      ? APIClient.shared().unpinSource(trackId)
+      : APIClient.shared().pinSource(trackId, source);
+    op.then(() => {
+      this.pinnedSource = isPinned ? '' : source;
+      AppToast.show(isPinned ? '已恢复自动匹配' : '已指定只用该源');
+    }).catch(() => {
+      AppToast.show('操作失败，请稍后重试');
+    }).finally(() => {
+      this.pinBusy = false;
+      if (this.trackId !== '') { this.loadAvailability(this.trackId); }
+    });
+  }
+
+  /** 可用性文案（查询中 / 无音源 / 音源可用） */
+  private availText(item: AvailabilityItem | null): string {
+    if (item === null) { return '查询中'; }
+    return item.ok ? '音源可用' : '无音源';
+  }
+
+  /** 是否有可用音源（决定锚定按钮是否可点） */
+  private availOk(item: AvailabilityItem | null): boolean {
+    return item !== null && item.ok;
   }
 
   private currentAnchorText(): string {
@@ -258,6 +315,7 @@ export struct PlayerPage {
     this.stopPreview(true);
     const first = t.ar.length > 0 ? t.ar[0].name : '';
     this.anchorKeyword = (t.name + ' ' + first).trim();
+    this.loadAvailability(t.id);
     this.anchorCandidates = [];
     this.anchorMeta = null;
     this.anchorNote = '';
@@ -1044,7 +1102,14 @@ export struct PlayerPage {
         .width('100%')
         .alignItems(VerticalAlign.Center)
 
-        // 音源行已删（用户 2026-10-23：锚定弹窗里不要这行 —— 音源信息在「更多」菜单里已经有了）
+        // 当前音源（用户 2026-10-26 标准语义：锚定弹窗第一行就是它）
+        Row({ space: Dim.s2 }) {
+          Text('当前音源').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('72')
+          Text(this.sourceLabel())
+            .fontSize(Dim.fsBody)
+            .fontColor(Tokens.text1)
+            .layoutWeight(1)
+        }.width('100%')
 
         // 已有锚点：回显 + 可解除（锚错了随时推翻重来）
         if (this.anchorInfo !== null) {
@@ -1071,6 +1136,44 @@ export struct PlayerPage {
           .border({ width: Dim.hairline, color: Tokens.line })
           .backgroundColor(Tokens.panel2)
         }
+
+        // 音源检查（用户 2026-10-26 标准语义）：只有酷狗与网易云两行；
+        // 每行 = 源名 + 可用性文案 + 锚定按钮（无音源时按钮灰）。B 站不在此列（走下方搜索锚定）。
+        Column({ space: Dim.s2 }) {
+          Text('音源检查').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%')
+          Row({ space: Dim.s2 }) {
+            Text('酷狗').fontSize(Dim.fsBody).fontColor(Tokens.text1).width('72')
+            Text(this.availText(this.availKugou))
+              .fontSize(Dim.fsMinor)
+              .fontColor(this.availOk(this.availKugou) ? Tokens.accent : Tokens.text2)
+              .layoutWeight(1)
+            WebButton({
+              labelStr: this.pinnedSource === 'kugou' ? '已锚定' : '锚定',
+              sizeKind: NeuBtnSize.SM,
+              disabledFlag: this.pinBusy || !this.availOk(this.availKugou),
+              onTap: () => {
+                this.togglePin('kugou');
+              }
+            })
+          }.width('100%')
+          Row({ space: Dim.s2 }) {
+            Text('网易云').fontSize(Dim.fsBody).fontColor(Tokens.text1).width('72')
+            Text(this.availText(this.availNetease))
+              .fontSize(Dim.fsMinor)
+              .fontColor(this.availOk(this.availNetease) ? Tokens.accent : Tokens.text2)
+              .layoutWeight(1)
+            WebButton({
+              labelStr: this.pinnedSource === 'netease' ? '已锚定' : '锚定',
+              sizeKind: NeuBtnSize.SM,
+              disabledFlag: this.pinBusy || !this.availOk(this.availNetease),
+              onTap: () => {
+                this.togglePin('netease');
+              }
+            })
+          }.width('100%')
+        }.width('100%').padding(Dim.s2)
+        .borderRadius(Dim.radiusSm).border({ width: Dim.hairline, color: Tokens.line })
+        .backgroundColor(Tokens.panel2)
 
         // 搜索行：关键词默认「歌名 + 主歌手」，可改后重搜
         Row({ space: Dim.s2 }) {

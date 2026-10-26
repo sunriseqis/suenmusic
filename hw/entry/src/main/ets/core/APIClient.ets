@@ -16,7 +16,7 @@ import { preferences } from '@kit.ArkData';
 import { common } from '@kit.AbilityKit';
 import {
   AuthConfig, AuthSession, FavoritePage, HomeData, PublicUser,
-  ResolveResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
+  ResolveResponse, AvailabilityResponse, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
   SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
   DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
@@ -517,6 +517,23 @@ export class APIClient {
   async resolve(trackId: string): Promise<ResolveResponse> {
     return this.request<ResolveResponse>('/api/resolve/' + encodeURIComponent(trackId),
       http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 各音源可用性（锚定页三态展示）。并发查三源，服务端可能较慢（B 站搜索） */
+  async sourceAvailability(trackId: string): Promise<AvailabilityResponse> {
+    return this.request<AvailabilityResponse>('/api/resolve/' + encodeURIComponent(trackId) + '/availability',
+      http.RequestMethod.GET, '', true, false);
+  }
+
+  /** 源钉：指定该曲只用某源（kugou / netease） */
+  async pinSource(trackId: string, source: string): Promise<Object> {
+    return this.request<Object>('/api/tracks/' + encodeURIComponent(trackId) + '/pin-source',
+      http.RequestMethod.PUT, JSON.stringify({ source }), true, false);
+  }
+
+  async unpinSource(trackId: string): Promise<Object> {
+    return this.request<Object>('/api/tracks/' + encodeURIComponent(trackId) + '/pin-source',
+      http.RequestMethod.DELETE, '', true, false);
   }
 
   async streamSessionToken(): Promise<StreamSessionToken> {

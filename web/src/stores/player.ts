@@ -190,7 +190,7 @@ export const usePlayerStore = defineStore('player', () => {
   const mode = ref<PlaybackMode>(readMode());
 
   /** 当前音源来源（resolve 响应的 source）。播放条/详情页的音源角标用它 */
-  const currentSource = ref<'bilibili' | 'netease' | null>(null);
+  const currentSource = ref<'bilibili' | 'netease' | 'kugou' | null>(null);
   /**
    * 上一行那个 source 属于哪首曲目。
    *

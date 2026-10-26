@@ -110,6 +110,32 @@ export interface DirectLink {
   expiresAt: number;
 }
 
+/** 各源可用性（锚定页三态） */
+export interface AvailabilityItem {
+  ok: boolean;
+  title?: string;
+  author?: string;
+  message?: string;
+}
+
+export interface AvailabilityResponse {
+  kugou: AvailabilityItem;
+  netease: AvailabilityItem;
+  bilibili: AvailabilityBilibili;
+}
+
+export interface BiliTop {
+  bvid: string;
+  title: string;
+  author: string;
+}
+
+export interface AvailabilityBilibili {
+  ok: boolean;
+  count: number;
+  top?: BiliTop;
+}
+
 export interface ResolveResponse {
   trackId: string;
   ok: boolean;

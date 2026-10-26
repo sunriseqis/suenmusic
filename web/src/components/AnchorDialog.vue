@@ -284,64 +284,7 @@ onBeforeUnmount(stopPreview);
           <span class="src-v">{{ currentSourceLabel }}</span>
         </div>
 
-        <!-- 各源可用性：酷狗 / 网易云 / B 站各自「有无音源」，一键钉源 -->
-        <div class="avail" data-role="source-availability">
-          <div class="avail-head">
-            <span class="src-k">各源可用性</span>
-            <NeuButton v-if="pinnedSource" size="sm" variant="ghost" :loading="pinBusy" @click="setPinSource(null)">
-              恢复自动匹配
-            </NeuButton>
-          </div>
-          <p v-if="availLoading" class="avail-note neu-t2">正在查询各源…</p>
-          <template v-else-if="avail">
-            <div class="avail-row">
-              <span class="avail-name">酷狗</span>
-              <span class="avail-state" :class="avail.kugou.ok ? 'ok' : 'bad'">
-                {{ avail.kugou.ok ? '有匹配音源' : '无音源' }}
-              </span>
-              <span class="neu-t2 neu-ellipsis avail-detail">
-                {{ avail.kugou.ok ? (avail.kugou.title + ' · ' + avail.kugou.author) : (avail.kugou.message ?? '') }}
-              </span>
-              <NeuButton
-                size="sm"
-                :variant="pinnedSource === 'kugou' ? 'default' : 'ghost'"
-                :loading="pinBusy && pinnedSource === 'kugou'"
-                @click="setPinSource(pinnedSource === 'kugou' ? null : 'kugou')"
-              >
-                {{ pinnedSource === 'kugou' ? '已钉' : '只用酷狗' }}
-              </NeuButton>
-            </div>
-            <div class="avail-row">
-              <span class="avail-name">网易云</span>
-              <span class="avail-state" :class="avail.netease.ok ? 'ok' : 'bad'">
-                {{ avail.netease.ok ? '有匹配音源' : '无音源' }}
-              </span>
-              <span class="neu-t2 neu-ellipsis avail-detail">
-                {{ avail.netease.ok ? (avail.netease.title + ' · ' + avail.netease.author) : (avail.netease.message ?? '') }}
-              </span>
-              <NeuButton
-                size="sm"
-                :variant="pinnedSource === 'netease' ? 'default' : 'ghost'"
-                :loading="pinBusy && pinnedSource === 'netease'"
-                @click="setPinSource(pinnedSource === 'netease' ? null : 'netease')"
-              >
-                {{ pinnedSource === 'netease' ? '已钉' : '只用网易云' }}
-              </NeuButton>
-            </div>
-            <div class="avail-row">
-              <span class="avail-name">B 站</span>
-              <span class="avail-state" :class="avail.bilibili.ok ? 'ok' : 'bad'">
-                {{ avail.bilibili.ok ? '有匹配音源' : '无音源' }}
-              </span>
-              <span class="neu-t2 neu-ellipsis avail-detail">
-                {{ avail.bilibili.top ? (avail.bilibili.top.title + ' · ' + avail.bilibili.top.author) : '' }}
-              </span>
-              <span class="neu-t2">候选 {{ avail.bilibili.count }} 条（下方可试听/锚定）</span>
-            </div>
-          </template>
-        </div>
-
-        <!-- 已有锚点：回显并可解除（锚错了随时推翻重来） -->
+        <!-- 已有 B 站锚点：回显并可解除（锚错了随时推翻重来） -->
         <div v-if="currentAnchor" class="cur-anchor" data-role="cur-anchor">
           <span class="neu-t2 neu-ellipsis">
             当前锚点：{{ currentAnchor.title || currentAnchor.bvid }}
@@ -350,6 +293,48 @@ onBeforeUnmount(stopPreview);
           <NeuButton variant="ghost" :loading="removingAnchor" @click="removeCurrentAnchor">
             解除锚定
           </NeuButton>
+        </div>
+
+        <!-- 音源检查（用户 2026-10-26 标准语义）：只有酷狗与网易云两行；B 站走下方搜索锚定 -->
+        <div class="avail" data-role="source-availability">
+          <div class="avail-head">
+            <span class="src-k">音源检查</span>
+            <NeuButton v-if="pinnedSource" size="sm" variant="ghost" :loading="pinBusy" @click="setPinSource(null)">
+              恢复自动
+            </NeuButton>
+          </div>
+          <div class="avail-row">
+            <span class="avail-name">酷狗</span>
+            <span class="avail-dot" :class="avail && avail.kugou.ok ? 'dot-ok dot-kugou' : 'dot-bad'" />
+            <span class="avail-state" :class="avail && avail.kugou.ok ? 'ok' : 'bad'">
+              {{ !avail ? '查询中' : (avail.kugou.ok ? '音源可用' : '无音源') }}
+            </span>
+            <NeuButton
+              size="sm"
+              :variant="pinnedSource === 'kugou' ? 'default' : 'ghost'"
+              :disabled="!avail || !avail.kugou.ok"
+              :loading="pinBusy && pinnedSource === 'kugou'"
+              @click="setPinSource(pinnedSource === 'kugou' ? null : 'kugou')"
+            >
+              {{ pinnedSource === 'kugou' ? '已锚定' : '锚定' }}
+            </NeuButton>
+          </div>
+          <div class="avail-row">
+            <span class="avail-name">网易云</span>
+            <span class="avail-dot" :class="avail && avail.netease.ok ? 'dot-ok dot-netease' : 'dot-bad'" />
+            <span class="avail-state" :class="avail && avail.netease.ok ? 'ok' : 'bad'">
+              {{ !avail ? '查询中' : (avail.netease.ok ? '音源可用' : '无音源') }}
+            </span>
+            <NeuButton
+              size="sm"
+              :variant="pinnedSource === 'netease' ? 'default' : 'ghost'"
+              :disabled="!avail || !avail.netease.ok"
+              :loading="pinBusy && pinnedSource === 'netease'"
+              @click="setPinSource(pinnedSource === 'netease' ? null : 'netease')"
+            >
+              {{ pinnedSource === 'netease' ? '已锚定' : '锚定' }}
+            </NeuButton>
+          </div>
         </div>
 
         <div class="search-row">
@@ -491,13 +476,31 @@ onBeforeUnmount(stopPreview);
   gap: var(--sp-2);
   min-width: 0;
 }
+/* 状态灯：颜色即语义（酷狗蓝 / 网易云红 / 无音源灰） */
+.avail-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.dot-kugou {
+  background: #2f7bff;
+  box-shadow: 0 0 6px rgba(47, 123, 255, 0.7);
+}
+.dot-netease {
+  background: #e60026;
+  box-shadow: 0 0 6px rgba(230, 0, 38, 0.7);
+}
+.dot-bad {
+  background: var(--line);
+}
 .avail-name {
   flex: 0 0 4.5em;
   font-size: var(--fs-md);
   color: var(--t1);
 }
 .avail-state {
-  flex: 0 0 6em;
+  flex: 0 0 5em;
   font-size: var(--fs-sm);
 }
 .avail-state.ok {
