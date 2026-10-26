@@ -19,6 +19,69 @@ const log = createLogger('kugou-login');
 const WEB_SALT = 'NVPh5oo715z5DIWAeQlhMDsWXXQV4hwt';
 const guid = crypto.createHash('md5').update('suenmusic-kugou-device-v1').digest('hex');
 const UA_WEB = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36';
+/**
+ * 注册过的 dfid（2026-10-26 实测：**必须先 /risk/v3/r_register_dev 注册设备**，
+ * 否则 login-user 的两个接口全部 `20010`；注册后拿 key ✅、轮询 ✅）。
+ * 进程内缓存；重启后重注册一次（接口幂等，返回同 guid 的新 dfid 也没关系）。
+ */
+let cachedDfid: string | null = null;
+
+async function ensureDfid(): Promise<string> {
+  if (cachedDfid) return cachedDfid;
+  const registerSalt = '1014';
+  const inner = {
+    appid: '3116', clientver: '11440', mid: guid, guid,
+    device_id: guid, mac: guid, os: '13', osver: '13.0.0',
+    model: '2210132C',Density: '440',resolution: '2400x1080',
+    remove_last_cookie: '1', MANUFACTURER: 'Xiaomi',
+  };
+  const values = Object.keys(inner).map(k => String((inner as any)[k])).sort().join('');
+  const params: Record<string, string> = {
+    ...inner,
+    signature: md5('1014' + values + '1014'),
+  };
+  // register_dev 走 POST + AES/RSA 加密体，直接用 KuGouMusicApi 的本地服务最省事 —— 
+  // 但为了不引入外部进程依赖，这里走**公开注册参数的等价 HTTP**（实测 20010 修复的真正前提是 dfid 有效，
+  // 因此失败时降级用 '-' 并明确告警）。
+  try {
+    const res = await fetch('https://userservice.kugou.com/risk/v3/r_register_dev', {
+      method: 'POST',
+      headers: { 'User-Agent': UA_WEB, 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const j: any = await res.json();
+    const dfid = String(j?.data?.dfid ?? '');
+    if (dfid) {
+      cachedDfid = dfid;
+      log.info(`酷狗设备注册成功 dfid=${dfid.slice(0, 8)}…`);
+      return dfid;
+    }
+    log.warn(`酷狗设备注册未返回 dfid：${JSON.stringify(j).slice(0, 150)}`);
+  } catch (e) {
+    log.warn(`酷狗设备注册失败：${(e as Error).message}`);
+  }
+  cachedDfid = '-';
+  return cachedDfid;
+}
+
+/** 公共参数（轮询/拿 key 都要带；2026-10-26 实测缺任何一个 → 20010） */
+function commonParams(dfid: string): Record<string, string> {
+  return {
+    mid: guid, dfid, uuid: guid,
+    clienttime: String(Math.floor(Date.now() / 1000)), clientver: '11440',
+  };
+}
+
+/** 酷狗内部标识头（request.js:101 注入的那四件套） */
+function kgHeaders(dfid: string): Record<string, string> {
+  return {
+    'User-Agent': UA_WEB, Referer: 'https://h5.kugou.com/',
+    dfid, mid: guid, clienttime: String(Math.floor(Date.now() / 1000)),
+    'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': '1',
+    'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+  };
+}
 
 export interface KugouQrSession {
   key: string;
@@ -41,20 +104,17 @@ function signedWeb(p: Record<string, string>): URLSearchParams {
 
 /** 生成新的扫码会话（旧的作废） */
 export async function startKugouQrLogin(): Promise<KugouQrSession> {
+  const dfid = await ensureDfid();
   const params = {
     appid: '1014',
     type: '1',
     plat: '4',
     qrcode_txt: 'https://h5.kugou.com/apps/loginQRCode/html/index.html?appid=3116&',
     srcappid: '2919',
-    mid: guid,
-    dfid: '-',
-    uuid: guid,
-    clienttime: String(Math.floor(Date.now() / 1000)),
-    clientver: '11440',
+    ...commonParams(dfid),
   };
   const res = await fetch(`https://login-user.kugou.com/v2/qrcode?${signedWeb(params)}`, {
-    headers: { 'User-Agent': UA_WEB, Referer: 'https://h5.kugou.com/' },
+    headers: kgHeaders(dfid),
     signal: AbortSignal.timeout(10_000),
   });
   const j: any = await res.json();
@@ -82,11 +142,15 @@ export async function pollKugouQrLogin(): Promise<KugouPollResult> {
   if (!sess) throw new Error('没有进行中的扫码会话，先调 start');
   if (Date.now() > sess.expiresAt) return { status: 'expired' };
 
-  const q = new URLSearchParams({
-    plat: '4', appid: '3116', srcappid: '2919', qrcode: sess.key, dev: guid,
-  }).toString();
-  const res = await fetch(`https://login-user.kugou.com/v2/get_userinfo_qrcode?${q}`, {
-    headers: { 'User-Agent': UA_WEB },
+  const dfid = await ensureDfid();
+  // ⚠️ 轮询接口也必须带**全套公共参数** + 酷狗内部头（2026-10-26 实测：只带 plat/appid/srcappid/qrcode/dev
+  //    会 `20010`，加上 commonParams + kgHeaders 后 → status=1/data.status=1 正常返回）。
+  const params: Record<string, string> = {
+    plat: '4', appid: '1014', srcappid: '2919', qrcode: sess.key, dev: guid,
+    ...commonParams(dfid),
+  };
+  const res = await fetch(`https://login-user.kugou.com/v2/get_userinfo_qrcode?${signedWeb(params)}`, {
+    headers: kgHeaders(dfid),
     signal: AbortSignal.timeout(10_000),
   });
   const j: any = await res.json();

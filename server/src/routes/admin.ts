@@ -7,7 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { DatabaseSync } from 'node:sqlite';
 import { requireWebAdmin } from '../http/require-auth.ts';
-import { setSetting } from '../db/repo/settings.ts';
+import { setSetting, deleteSetting } from '../db/repo/settings.ts';
 import {
   createUser,
   findUserById,
@@ -437,5 +437,12 @@ export function registerAdminRoutes(app: FastifyInstance): void {
 
   app.get('/api/admin/kugou/credentials', async () => {
     return { ok: true, ...readKugouCredentialStatus() };
+  });
+
+  /** 退出授权：清掉 kugou.credentials（对齐 B 站 DELETE /api/bilibili/account 的语义） */
+  app.delete('/api/admin/kugou/credentials', async () => {
+    deleteSetting('kugou.credentials');
+    log.info('酷狗授权已退出（凭据清除）');
+    return { ok: true };
   });
 }
