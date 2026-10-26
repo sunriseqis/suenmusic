@@ -58,7 +58,7 @@ class CoverCell {
  */
 @Component
 export struct SearchPage {
-  @State keyword: string = '';
+  @State @Watch('onKeywordChange') keyword: string = '';
   /** 0 = 单曲 / 1 = 专辑 / 2 = 歌手 / 3 = 歌单 */
   @State activeSlice: number = 0;
   @State searched: boolean = false;
@@ -88,7 +88,35 @@ export struct SearchPage {
   private cooldownUntil: number = 0;
   private pref: preferences.Preferences | null = null;
 
-  aboutToAppear(): void { this.loadRecent(); }
+  aboutToAppear(): void {
+    this.loadRecent();
+  }
+
+  /** 搜索框内容变更监听：清空搜索框即回到最近搜索历史并清空结果 */
+  private onKeywordChange(): void {
+    if (this.keyword.trim().length === 0) {
+      this.clearSearchState();
+    }
+  }
+
+  /** 重置搜索状态与结果，返回「最近搜索」页 */
+  private clearSearchState(): void {
+    this.reqSeq++;
+    this.searched = false;
+    this.searching = false;
+    this.loadingMore = false;
+    this.songs = [];
+    this.albums = [];
+    this.artists = [];
+    this.playlists = [];
+    this.hasMore = [false, false, false, false];
+    this.page = 1;
+    this.err = '';
+    this.degradedText = '';
+    this.lastQuery = '';
+    this.syncSongRows();
+    this.loadRecent();
+  }
 
   // ---------------- 最近搜索（本地 preferences，上限 10 条按 q 去重） ----------------
 
@@ -184,7 +212,10 @@ export struct SearchPage {
 
   private async doSearch(query: string, targetPage: number): Promise<void> {
     const q = query.trim();
-    if (q.length === 0) { return; }
+    if (q.length === 0) {
+      this.clearSearchState();
+      return;
+    }
     const now = Date.now();
     if (now < this.cooldownUntil) {
       // 冷却期节流：不打服务端（Lead 实测 60s 冷却里连发 27 次无反馈），

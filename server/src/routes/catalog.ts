@@ -116,7 +116,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       hasMore: {
         song: slices.includes('song') && result.songs.length >= limit,
         album: slices.includes('album') && result.albums.length >= limit,
-        artist: slices.includes('singer') && result.artists.length >= limit,
+        artist: slices.includes('singer') && result.artists.length >= Math.min(limit, 30),
         playlist: slices.includes('songlist') && result.playlists.length >= limit,
       },
       degraded: result.degraded,

@@ -117,7 +117,10 @@ export async function fetchSearchSlice(
   limit = 20
 ): Promise<SliceOutcome> {
   const searchType = QQ_SEARCH_TYPE[slice];
-  const pageNum = Math.floor(offset / limit) + 1;
+  // QQ 音乐 search_type=1 (singer) 上游当 num_per_page > 40 时会静默返回空数组 list: []，
+  // 导致客户端 PAGE_LIMIT=50 时歌手搜索恒为空。必须对 singer 限制上限为 30。
+  const effectiveLimit = slice === 'singer' ? Math.min(limit, 30) : limit;
+  const pageNum = Math.floor(offset / effectiveLimit) + 1;
 
   const res = await requestQQMusic<any>(
     {
@@ -126,7 +129,7 @@ export async function fetchSearchSlice(
         method: 'DoSearchForQQMusicDesktop',
         param: {
           query: keywords,
-          num_per_page: limit,
+          num_per_page: effectiveLimit,
           page_num: pageNum,
           search_type: searchType,
         },

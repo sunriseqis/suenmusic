@@ -23,6 +23,8 @@ const props = withDefaults(
     hint?: string;
     /** 是否显示明文切换（仅 password 有效） */
     revealable?: boolean;
+    /** 是否可清空（有内容时显示清空按钮；type=search 默认开） */
+    clearable?: boolean;
   }>(),
   {
     type: 'text',
@@ -30,6 +32,7 @@ const props = withDefaults(
     error: '',
     hint: '',
     revealable: true,
+    clearable: undefined,
   }
 );
 
@@ -40,6 +43,11 @@ const emit = defineEmits<{
 
 const uid = useId();
 const revealed = ref(false);
+
+const isClearable = computed(() => {
+  if (props.clearable !== undefined) return props.clearable;
+  return props.type === 'search';
+});
 
 const actualType = computed(() => {
   if (props.type === 'password') return revealed.value ? 'text' : 'password';
@@ -73,6 +81,17 @@ function onInput(ev: Event) {
         @input="onInput"
         @keydown.enter.prevent="emit('enter')"
       />
+
+      <button
+        v-if="isClearable && modelValue.length > 0"
+        type="button"
+        class="clear-btn neu-focusable"
+        aria-label="清空输入"
+        title="清空"
+        @click="emit('update:modelValue', '')"
+      >
+        <NeuIcon name="close" :size="15" />
+      </button>
 
       <button
         v-if="type === 'password' && revealable"
@@ -156,6 +175,23 @@ function onInput(ev: Event) {
 .inp::placeholder {
   color: var(--t2);
   opacity: 0.72;
+}
+
+.clear-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--t2);
+  padding: var(--sp-1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  line-height: 1;
+}
+.clear-btn:hover {
+  color: var(--t1);
 }
 
 .reveal {

@@ -98,6 +98,48 @@ function goPage(dir: number) {
 /** 已发过请求的标记：初始状态不显示"无结果"，只有搜过之后才显示 */
 const searched = ref(false);
 
+const RECENT_KEY = 'recent_search';
+const RECENT_MAX = 10;
+const recent = ref<string[]>(loadRecent());
+
+function loadRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    return raw ? (JSON.parse(raw) as string[]).slice(0, RECENT_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecent(keyword: string) {
+  const q = keyword.trim();
+  if (!q) return;
+  const list = [q, ...recent.value.filter(item => item !== q)].slice(0, RECENT_MAX);
+  recent.value = list;
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+  } catch {}
+}
+
+function removeRecent(item: string) {
+  recent.value = recent.value.filter(q => q !== item);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value));
+  } catch {}
+}
+
+function clearRecent() {
+  recent.value = [];
+  try {
+    localStorage.removeItem(RECENT_KEY);
+  } catch {}
+}
+
+function applyRecent(item: string) {
+  query.value = item;
+  onSearch();
+}
+
 let abort: AbortController | null = null;
 
 async function run() {
@@ -120,6 +162,7 @@ async function run() {
     const res = await search({ q, type: type.value, page: page.value, signal: abort.signal });
     result.value = res;
     searched.value = true;
+    saveRecent(q);
 
     // 空结果 + degraded 才是限流；有结果时不必打扰用户
     const sliceCount =
@@ -161,6 +204,21 @@ function buildDegradedText(retryAfterMs?: number): string {
   }
   return 'QQ 音乐检索被限流，通常约 1 分钟后自动恢复。稍等一下再试即可，不是搜索坏了。';
 }
+
+/** 搜索词被清空时（如点击输入框右侧清空按钮或退格清空）：立即重置结果并回到最近搜索历史 */
+watch(query, (newVal) => {
+  if (!newVal.trim()) {
+    result.value = null;
+    searched.value = false;
+    errorText.value = '';
+    degradedText.value = '';
+    abort?.abort();
+    void router.replace({
+      name: 'search',
+      query: { ...(type.value !== 'song' ? { type: type.value } : {}) },
+    });
+  }
+});
 
 /** 切分片时重新请求 —— 服务端每个分片是一次独立的上游调用。换条件要回到第 1 页 */
 watch(type, () => {
@@ -281,7 +339,31 @@ function openPlaylist(tid: string | number | undefined) {
 
     <!-- 还没搜过 -->
     <div v-else-if="!searched" class="state plain">
-      <p class="state-msg neu-t2">
+      <div v-if="recent.length > 0" class="recent-box">
+        <div class="recent-head">
+          <span class="recent-title neu-t2">最近搜索</span>
+          <button type="button" class="recent-clear neu-t2" @click="clearRecent">清空</button>
+        </div>
+        <div class="recent-chips">
+          <div
+            v-for="item in recent"
+            :key="item"
+            class="recent-chip"
+          >
+            <span class="recent-text" @click="applyRecent(item)">{{ item }}</span>
+            <button
+              type="button"
+              class="recent-del"
+              title="删除"
+              aria-label="删除"
+              @click.stop="removeRecent(item)"
+            >
+              <NeuIcon name="close" :size="12" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <p v-else class="state-msg neu-t2">
         输入关键词后按回车。搜索会消耗上游配额，所以不做输入即搜。
       </p>
     </div>
@@ -509,6 +591,73 @@ function openPlaylist(tid: string | number | undefined) {
 /* 歌手网格用圆形头像，列可以密一点 */
 .artists {
   grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+}
+
+.recent-box {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  text-align: left;
+}
+.recent-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.recent-title {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.1em;
+  font-weight: var(--fw-medium);
+}
+.recent-clear {
+  background: none;
+  border: none;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  padding: var(--sp-1) var(--sp-2);
+}
+.recent-clear:hover {
+  color: var(--accent);
+}
+.recent-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 6px 12px;
+  border-radius: var(--r-full, 9999px);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-size: var(--fs-sm);
+  color: var(--t1);
+  box-shadow: inset 0 1px 0 var(--hi);
+}
+.recent-text {
+  cursor: pointer;
+  user-select: none;
+}
+.recent-text:hover {
+  color: var(--accent);
+}
+.recent-del {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--t2);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 50%;
+  line-height: 1;
+}
+.recent-del:hover {
+  color: var(--danger, #ff4d4f);
 }
 
 .state {
