@@ -28,6 +28,7 @@ import {
 } from '../db/repo/sources.ts';
 import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { biliCooldown, resolveTrackSource } from '../sources/bilibili/stream.ts';
+import { resolveKugouSource } from '../sources/kugou/stream.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveInput, ResolveResult } from '../sources/bilibili/stream.ts';
 
@@ -261,8 +262,18 @@ export function resolveTrack(
         );
         return neteaseResult;
       }
-      log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转 B 站`);
-      // B 站自己有冷却闸（biliCooldown），这里不重复判——进 B 站解析由它自管
+      log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
+      // 酷狗（概念版 VIP）：有凭据才进链（resolveKugouSource 内部自判，无凭据返回 below_threshold）；
+      // 音质 FLAC/320 优先于 B 站视频转音频。B 站仍是最终兜底（它自己有冷却闸，不重复判）。
+      const kugouResult = await resolveKugouSource(input);
+      if (kugouResult.ok) {
+        log.info(
+          `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
+            ` 时长差=${kugouResult.durationDiff ?? 0}s`
+        );
+        return kugouResult;
+      }
+      log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
       return resolveTrackSource(input);
     })
     .then((result): ResolveOutcome => {

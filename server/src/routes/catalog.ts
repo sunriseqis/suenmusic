@@ -28,6 +28,8 @@ import {
 import { getQQLyric } from '../sources/qq/lyric.ts';
 import { getLyricForTrack } from '../services/lyric-fallback.ts';
 import { QQ_SEARCH_ALL_SLICES, QQ_SEARCH_TYPE, searchQQ } from '../sources/qq/search.ts';
+import { kugouSearchSongs } from '../sources/kugou/source.ts';
+import { getKugouCreds } from '../sources/kugou/stream.ts';
 import type { QQSearchSlice } from '../sources/qq/search.ts';
 import { badRequest, notFound } from '../http/errors.ts';
 import { parseId, parseIdWithFallback } from '../http/ids.ts';
@@ -119,6 +121,22 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       },
       degraded: result.degraded,
     };
+  });
+
+  /**
+   * 酷狗搜索（独立端点，探索用）。
+   *
+   * 为什么不直接并进 /api/search：酷狗曲目 id 是 `kg_<albumAudioId>`，与全站
+   * `qq_<songmid>` 路由约定不同——硬塞进同一响应需要三端改 id 语义（风险大）。
+   * 独立端点先服务「QQ 搜不到时的探索」，后续做 id 双向映射后再聚合。
+   */
+  app.get('/api/search/kugou', async req => {
+    requireUser(req);
+    const query = requiredParam((req.query as any)?.q, 'q');
+    const limit = intParam((req.query as any)?.limit, 30, { min: 1, max: 50 });
+    const creds = getKugouCreds();
+    const songs = await kugouSearchSongs(query, limit, creds ?? undefined);
+    return { query, songs };
   });
 
   /** 榜单详情。id 接受 `qq_top_26` 或裸 `26`。 */
@@ -311,7 +329,12 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     const cached = getTrack(parsed.raw);
     if (cached) return { track: cached, source: 'cache' };
 
-    const fetched = await getSongDetail(parsed.value);
+    let fetched = await getSongDetail(parsed.value);
+    // QQ 查不到（版权下架/地区限制/接口抖动）→ **酷狗元数据兜底**：
+    // 以 id 里的关键词不存在——这里按 trackId 无语义，只能靠搜索。
+    // 但回源请求方（stream/resolve/favorites）拿到的只是 id，没有歌名，无法搜酷狗。
+    // 所以这里的兜底仅当调用方能提供 query 时才可能 —— 单曲回源场景没有，跳过。
+    // （真正的酷狗元数据兜底在搜索聚合与每日推荐快照，不在单曲回源。）
     if (!fetched) throw notFound('曲目不存在');
 
     upsertTracks([fetched]);

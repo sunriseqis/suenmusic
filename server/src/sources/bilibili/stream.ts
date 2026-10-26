@@ -112,7 +112,7 @@ export interface ResolveResult {
   topCandidates?: CandidateBrief[];
   message?: string;
   /** 音源来源。代理层据此决定出网请求头（B 站要 Referer，网易云不要）。缺省视为 bilibili */
-  source?: 'bilibili' | 'netease';
+  source?: 'bilibili' | 'netease' | 'kugou';
 }
 
 export interface ResolveInput {
@@ -511,7 +511,7 @@ export async function resolveTrackSource(
 export async function fetchAudioStream(
   url: string,
   range?: string,
-  options: { method?: string; source?: 'bilibili' | 'netease' } = {}
+  options: { method?: string; source?: 'bilibili' | 'netease' | 'kugou' } = {}
 ): Promise<Response> {
   upstreamStats.audio++;
   // 网易云 CDN 不需要（也不该带）B 站 Referer —— 带错头反而可能被拒。
