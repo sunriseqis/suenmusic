@@ -33,6 +33,7 @@ import {
   adaptQQSong,
 } from './adapter.ts';
 import type { Album, Artist, Playlist, QQRecord, Track } from './adapter.ts';
+import { cacheGet, cachePut } from '../../services/upstream-cache.ts';
 
 const log = createLogger('qq:search');
 
@@ -150,6 +151,25 @@ export async function fetchSearchSlice(
 }
 
 /**
+ * 搜索缓存 TTL = 10 分钟。
+ *
+ * 宁可短不可长：搜索结果是"最新上架"类数据的入口，缓存需要定期维护，
+ * 只能靠短 TTL 兜住时效性。不新建表，复用通用 upstream_cache。
+ */
+const QQ_SEARCH_CACHE_TTL_MS = 10 * 60_000;
+const QQ_SEARCH_CACHE_KIND = 'qq_search';
+
+/** 缓存 key：query 归一化（trim + 小写）+ 分片集合 + 分页参数。 */
+function searchCacheKey(
+  query: string,
+  slices: QQSearchSlice[],
+  offset: number,
+  limit: number
+): string {
+  return `${query.trim().toLowerCase()}|${slices.join('+')}|${offset}|${limit}`;
+}
+
+/**
  * QQ 音乐搜索。
  *
  * @param keywords 搜索关键字
@@ -174,6 +194,15 @@ export async function searchQQ(
 
   const wanted = slices.filter(s => QQ_SEARCH_TYPE[s] !== undefined);
   if (!wanted.length) return empty;
+
+  // 先查表：命中直接返回，完全不打上游（冷却期内同样生效，因为它不产生请求）。
+  // 按 wanted 而不是入参 slices 拼 key，非法分片名不会分裂出额外的 key。
+  const cacheKey = searchCacheKey(keywords, wanted, offset, limit);
+  const cached = cacheGet<QQSearchResult>(QQ_SEARCH_CACHE_KIND, cacheKey, QQ_SEARCH_CACHE_TTL_MS);
+  if (cached) {
+    log.info(`搜索缓存命中: ${cacheKey}`);
+    return cached;
+  }
 
   // 冷却窗口内直接返回，不打上游。code 沿用 2001 让客户端能识别。
   if (qqCooldown.active()) {
@@ -244,6 +273,18 @@ export async function searchQQ(
   } else if (out.degraded.code === QQ_RISK_CONTROL_CODE) {
     out.degraded.message = 'QQ 音乐搜索被限流，请稍后重试';
     out.degraded.retryAfterMs = qqCooldown.remainingMs();
+  }
+
+  // 只缓存"正常结果"：有分片降级（风控/抽风）或所有分片全空时都不写，
+  // 否则一次上游抽风会被固化整整 10 分钟。
+  const hasAny =
+    out.songs.length > 0 ||
+    out.albums.length > 0 ||
+    out.artists.length > 0 ||
+    out.playlists.length > 0 ||
+    out.mvs.length > 0;
+  if (out.degraded.slices.length === 0 && hasAny) {
+    cachePut(QQ_SEARCH_CACHE_KIND, cacheKey, out);
   }
 
   return out;
