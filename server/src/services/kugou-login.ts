@@ -57,7 +57,9 @@ async function ensureDfid(): Promise<string> {
       log.info(`酷狗设备注册成功 dfid=${dfid.slice(0, 8)}…`);
       return dfid;
     }
-    log.warn(`酷狗设备注册未返回 dfid：${JSON.stringify(j).slice(0, 150)}`);
+    // 注册失败不阻塞扫码登录（实测 2026-10-26：注册 20006 时扫码仍成功）。
+    // '-' 只是轮询可能拿不到状态，登录成功与否取决于 App 侧确认。
+    log.warn(`酷狗设备注册未返回 dfid（${JSON.stringify(j).slice(0, 120)}）——扫码流程继续，轮询可能受限`);
   } catch (e) {
     log.warn(`酷狗设备注册失败：${(e as Error).message}`);
   }
@@ -138,8 +140,14 @@ export interface KugouPollResult {
 
 /** 轮询扫码状态；status=4 时把凭据写进 settings（kugou 专用键） */
 export async function pollKugouQrLogin(): Promise<KugouPollResult> {
+  // 会话已确认清空（或服务重启）时**优雅返回**：凭据已在库 → confirmed；否则 expired。
+  // 之前直接 throw → 前端在「确认成功后最后一轮轮询」会收到 500（用户看到「服务端内部错误」，
+  // 而实际登录是成功的——凭据已落库，2026-10-26 实测 userid=2302235937 就是这么丢的提示）。
   const sess = current;
-  if (!sess) throw new Error('没有进行中的扫码会话，先调 start');
+  if (!sess) {
+    const st = readKugouCredentialStatus();
+    return st.present ? { status: 'confirmed' } : { status: 'expired' };
+  }
   if (Date.now() > sess.expiresAt) return { status: 'expired' };
 
   const dfid = await ensureDfid();
