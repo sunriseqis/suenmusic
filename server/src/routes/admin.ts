@@ -23,6 +23,7 @@ import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '
 import { invalidateKugouStatusCache, readKugouLoginState } from '../services/kugou-status.ts';
 import { readKugouCheckinState, runKugouCheckin } from '../services/kugou-checkin.ts';
 import { countAnchors, deleteAutoAnchors } from '../db/repo/anchors.ts';
+import { fetchArtistSongsMulti } from '../services/artist-songs-multi.ts';
 
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
@@ -490,6 +491,41 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       log.warn(`导入凭据后自动签到失败：${(err as Error)?.message ?? String(err)}`),
     );
     return { ok: true, ...(await readKugouLoginState()) };
+  });
+
+  /**
+   * 建库 dry-run：只跑多源拉取、**不写库**，用于上线前评估命中率与请求量。
+   *
+   * 参数 `names`（逗号分隔的歌手名，最多 5 个）。返回每位歌手的命中数与消耗的上游请求数，
+   * 以及前 5 首曲目名，便于判断「酷狗为主」是否真的够用、要不要退到网易云/QQ。
+   */
+  app.post('/api/admin/library/dry-run', async req => {
+    const body = (req.body ?? {}) as { names?: unknown };
+    const raw = Array.isArray(body.names)
+      ? body.names.map(x => String(x ?? '').trim()).filter(Boolean).slice(0, 5)
+      : String(body.names ?? '')
+          .split(/[,，;；]/)
+          .map(s => s.trim())
+          .filter(Boolean)
+          .slice(0, 5);
+    if (raw.length === 0) throw badRequest('缺少 names', 'missing_param');
+
+    const results = [];
+    for (const name of raw) {
+      // 串行 + 间隔：dry-run 也是真实上游请求，别把风控打出来
+      const r = await fetchArtistSongsMulti(name, 30, { stopWhenEnough: true });
+      results.push({
+        name,
+        source: r.source,
+        requests: r.requests,
+        counts: r.detail,
+        total: r.songs.length,
+        sample: r.songs.slice(0, 5).map(s => `${s.name} - ${(s.ar ?? []).map(a => a.name).join('/')}`),
+      });
+      await new Promise(resolve => setTimeout(resolve, 800));
+    }
+    log.info(`建库 dry-run 完成：${results.map(r => `${r.name}=${r.total}(${r.source})`).join(' ')}`);
+    return { ok: true, results };
   });
 
   /** 锚点概况（自动 / 手动条数），面板展示与确认文案用 */

@@ -28,6 +28,7 @@ import {
 } from '../db/repo/library.ts';
 import { getDislikeSets } from '../db/repo/library.ts';
 import { getArtistSongs } from '../sources/qq/artist.ts';
+import { fetchArtistSongsMulti } from './artist-songs-multi.ts';
 import { fetchSearchSlice, qqCooldown } from '../sources/qq/search.ts';
 import { findLocalArtist, findLocalTracksForArtist } from './local-catalog.ts';
 
@@ -296,10 +297,19 @@ async function fetchArtistSongs(job: BuildJob): Promise<{ resolvedLocally: boole
     throw new Error('QQ 冷却中，暂停外部歌曲搜索');
   }
 
-  const { songs, degradedCode } = await getArtistSongs(mid, name || mid, 30, 1);
-  if (degradedCode === 2001) {
-    throw new Error(`QQ 2001 限流（歌曲搜索 ${name}）`);
-  }
+  /**
+   * 多源拉取（用户 2026-10-26 定稿）：**酷狗为主 → 网易云为辅 → QQ 兜底**。
+   *
+   * 逐级回退而不是三源齐发：建库是批量任务，一次齐发会把三个上游都打一遍。
+   * 夜间窗口与配额守卫在 runLoop 里，这里只负责「按顺序要数据」。
+   */
+  const multi = await fetchArtistSongsMulti(name || mid, 30);
+  const songs = multi.songs;
+  log.info(
+    `[多源建库] 歌手「${name}」(${mid}) 命中 ${songs.length} 首` +
+      ` 源=${multi.source} 请求=${multi.requests} ` +
+      `(酷狗${multi.detail.kugou}/网易云${multi.detail.netease}/QQ${multi.detail.qq})`,
+  );
 
   if (songs.length === 0) {
     upsertLibraryArtist(mid, name);
