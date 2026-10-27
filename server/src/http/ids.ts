@@ -19,21 +19,36 @@
 
 export type EntityKind = 'track' | 'album' | 'artist' | 'playlist' | 'toplist';
 
+/** 路由键来源。多源聚合后同一首歌可能来自不同上游，取流链要据此分流 */
+export type IdSource = 'qq' | 'kg' | 'ne';
+
 export interface ParsedId {
   kind: EntityKind;
+  /** 来源源（qq / kg 酷狗 / ne 网易云）。默认 qq —— 历史数据全是 qq_ 前缀 */
+  source: IdSource;
   /** 去掉前缀后的原始标识：歌/专辑/歌手的 mid，歌单与榜单的数字 id */
   value: string;
   /** 原样传回的路由键 */
   raw: string;
 }
 
-/** 顺序敏感：长前缀必须排在 `qq_` 之前 */
-const PREFIXES: Array<[string, EntityKind]> = [
-  ['qq_al_', 'album'],
-  ['qq_ar_', 'artist'],
-  ['qq_pl_', 'playlist'],
-  ['qq_top_', 'toplist'],
-  ['qq_', 'track'],
+/**
+ * 顺序敏感：长前缀必须排在短前缀之前（否则 `kg_al_x` 会被 `kg_` 抢先吃掉）。
+ * 多源聚合后新增 `kg_`（酷狗）与 `ne_`（网易云）两套前缀；`qq_` 保持原状兼容历史数据。
+ */
+const PREFIXES: Array<[string, EntityKind, IdSource]> = [
+  ['qq_al_', 'album', 'qq'],
+  ['qq_ar_', 'artist', 'qq'],
+  ['qq_pl_', 'playlist', 'qq'],
+  ['qq_top_', 'toplist', 'qq'],
+  ['qq_', 'track', 'qq'],
+  ['kg_al_', 'album', 'kg'],
+  ['kg_ar_', 'artist', 'kg'],
+  ['kg_', 'track', 'kg'],
+  ['ne_al_', 'album', 'ne'],
+  ['ne_ar_', 'artist', 'ne'],
+  ['ne_pl_', 'playlist', 'ne'],
+  ['ne_', 'track', 'ne'],
 ];
 
 export function parseId(raw: string | undefined): ParsedId | null {
@@ -41,11 +56,11 @@ export function parseId(raw: string | undefined): ParsedId | null {
   const value = raw.trim();
   if (!value) return null;
 
-  for (const [prefix, kind] of PREFIXES) {
+  for (const [prefix, kind, source] of PREFIXES) {
     if (value.startsWith(prefix)) {
       const rest = value.slice(prefix.length);
       if (!rest) return null;
-      return { kind, value: rest, raw: value };
+      return { kind, source, value: rest, raw: value };
     }
   }
 
@@ -71,12 +86,14 @@ export function parseIdWithFallback(
   if (/^\d+$/.test(value)) {
     return {
       kind: fallbackKind === 'playlist' || fallbackKind === 'toplist' ? fallbackKind : 'playlist',
+      source: 'qq',
       value,
       raw: value,
     };
   }
 
-  return { kind: fallbackKind, value, raw: value };
+  // 裸 mid 默认按 QQ（历史行为：`/api/albums/:mid` 这类端点只用 bare mid）
+  return { kind: fallbackKind, source: 'qq', value, raw: value };
 }
 
 export function trackId(mid: string): string {

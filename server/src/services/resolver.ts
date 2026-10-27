@@ -28,12 +28,35 @@ import {
 } from '../db/repo/sources.ts';
 import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { biliCooldown, resolveTrackSource } from '../sources/bilibili/stream.ts';
-import { resolveKugouSource } from '../sources/kugou/stream.ts';
+import { resolveKugouDirect, resolveKugouSource, type KugouStoredMeta } from '../sources/kugou/stream.ts';
 import { getPin } from '../db/repo/pins.ts';
+import { getTracks } from '../db/repo/tracks.ts';
+import { parseId } from '../http/ids.ts';
+import { getNeteaseStatus } from './netease-account.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveInput, ResolveResult } from '../sources/bilibili/stream.ts';
 
 const log = createLogger('resolver');
+
+/**
+ * 读取曲目里预存的酷狗播放凭证（搜索时随元数据落库）。
+ *
+ * 有它就是「元数据即播放源」：点播 0 次二次搜索，直接走授权链取流。
+ * 现在多源搜索还没写这个字段，所以多数曲目返回 null —— 调用方会退化成按名搜一次，
+ * 行为与改造前一致（Step2 写入后自动变成直取）。
+ */
+function readKugouMeta(trackId: string): KugouStoredMeta | null {
+  try {
+    const t = getTracks([trackId])[0] as unknown as
+      | { kugouMeta?: KugouStoredMeta; payload?: { kugouMeta?: KugouStoredMeta } }
+      | undefined;
+    const meta = t?.kugouMeta ?? t?.payload?.kugouMeta;
+    if (!meta || !meta.hash || !meta.albumAudioId) return null;
+    return meta;
+  } catch {
+    return null;
+  }
+}
 
 /** 内存缓存条目上限。超出后按插入顺序淘汰最旧的（Map 保序即 LRU）。 */
 export const MEMORY_LIMIT = 500;
@@ -271,32 +294,81 @@ export function resolveTrack(
 
   // 钉外的源（含 B 站兜底）全部跳过；钉的源失败就按失败处理，不落回别的源
   // —— 用户的指令就是「只用它」，落回等于悄悄违背。
+  /**
+   * 按路由键前缀分流（多源聚合后的行为）：
+   *   kg_  酷狗曲目：元数据里带 hash 就**直取流（0 次搜索）**，否则按名搜一次；失败回退 B 站
+   *   ne_  网易云独有原唱：有黑胶 VIP 才走网易云，否则**直接 B 站**（跳过注定失败的网易云与酷狗重搜）
+   *   qq_  首页/榜单/歌单/历史：保持原链 网易云 → 酷狗 → B 站（历史数据全在这条路上，不能改行为）
+   * 源钉优先级最高，覆盖以上全部分流。
+   */
+  const source = parseId(String(input.id ?? ''))?.source ?? 'qq';
+
+  const kgChain = async (): Promise<ResolveResult> => {
+    const meta = readKugouMeta(key);
+    if (meta) {
+      const direct = await resolveKugouDirect(meta);
+      if (direct.ok) {
+        log.info(`音源链 kg → 酷狗直取 ${key} 「${direct.matchedTitle}」 时长差=${direct.durationDiff ?? 0}s`);
+        return direct;
+      }
+      log.debug(`酷狗直取未命中 ${key}：${direct.message ?? ''}，按名搜一次`);
+    }
+    const searched = await resolveKugouSource(input);
+    if (searched.ok) {
+      log.info(`音源链 kg → 酷狗搜索命中 ${key} 「${searched.matchedTitle}」 时长差=${searched.durationDiff ?? 0}s`);
+      return searched;
+    }
+    log.debug(`酷狗未命中 ${key}：${searched.message ?? ''}，转 B 站`);
+    return resolveTrackSource(input);
+  };
+
+  const neChain = async (): Promise<ResolveResult> => {
+    const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
+    if (!vip) {
+      log.info(`音源链 ne → 网易云无黑胶 VIP，跳过直取，走 B 站 ${key}`);
+      return resolveTrackSource(input);
+    }
+    const ne = await resolveNeteaseSource(input);
+    if (ne.ok) {
+      log.info(`音源链 ne → 网易云命中 ${key} 「${ne.matchedTitle}」 时长差=${ne.durationDiff ?? 0}s`);
+      return ne;
+    }
+    log.debug(`网易云未命中 ${key}：${ne.message ?? ''}，转 B 站`);
+    return resolveTrackSource(input);
+  };
+
+  const qqChain = async (): Promise<ResolveResult> => {
+    const neteaseResult = await resolveNeteaseSource(input);
+    if (neteaseResult.ok) {
+      log.info(
+        `音源链 qq → 网易云命中 ${key} 「${neteaseResult.matchedTitle}」` +
+          ` 时长差=${neteaseResult.durationDiff ?? 0}s`,
+      );
+      return neteaseResult;
+    }
+    log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
+    const kugouResult = await resolveKugouSource(input);
+    if (kugouResult.ok) {
+      log.info(
+        `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
+          ` 时长差=${kugouResult.durationDiff ?? 0}s`,
+      );
+      return kugouResult;
+    }
+    log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
+    return resolveTrackSource(input);
+  };
+
   const baseChain: Promise<ResolveResult> = pin
     ? (async (): Promise<ResolveResult> => {
         log.info(`源钉 ${key} → 只走 ${pin.source}`);
         return pin.source === 'kugou' ? resolveKugouSource(input) : resolveNeteaseSource(input);
       })()
-    : resolveNeteaseSource(input)
-      .then(async (neteaseResult): Promise<ResolveResult> => {
-        if (neteaseResult.ok) {
-          log.info(
-            `音源链 qq → 网易云命中 ${key} 「${neteaseResult.matchedTitle}」` +
-              ` 时长差=${neteaseResult.durationDiff ?? 0}s`
-          );
-          return neteaseResult;
-        }
-        log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
-        const kugouResult = await resolveKugouSource(input);
-        if (kugouResult.ok) {
-          log.info(
-            `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
-              ` 时长差=${kugouResult.durationDiff ?? 0}s`
-          );
-          return kugouResult;
-        }
-        log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
-        return resolveTrackSource(input);
-      });
+    : source === 'kg'
+      ? kgChain()
+      : source === 'ne'
+        ? neChain()
+        : qqChain();
 
   const promise = baseChain
     .then((result): ResolveOutcome => {

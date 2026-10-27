@@ -353,6 +353,129 @@ async function fetchPlayUrlWithAuth(
  */
 const QUALITY_ORDER = ['flac', 'high', '320', '128'] as const;
 
+
+/** 已落库的酷狗播放凭证（搜索时随元数据一起存下，点播时直接取流，0 次二次搜索） */
+export interface KugouStoredMeta {
+  name: string;
+  artists?: string[];
+  hash: string;
+  qualityHashes?: { hq?: string; sq?: string; super?: string };
+  albumId?: string;
+  albumAudioId: string;
+  durationSec?: number;
+  coverTemplate?: string;
+}
+
+/**
+ * 直取流：元数据里已经带着 hash / albumId / albumAudioId 时，跳过搜索直接走授权链。
+ *
+ * 为什么值得单独一条路：酷狗搜索结果本身带齐播放凭证，只要搜索时把它存进 tracks，
+ * 点播就不必再按「歌名+歌手」搜一次 —— 少一次上游请求，也少一次错配机会。
+ * 取流判定（试听片段识别、音质降级、封面兜底）复用 streamFirstPlayable，只有一份实现。
+ */
+export async function resolveKugouDirect(meta: KugouStoredMeta): Promise<ResolveResult> {
+  const creds = readCreds();
+  if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
+  if (!meta.hash || !meta.albumAudioId) return fail('no_candidates', '缺少酷狗播放凭证');
+
+  const cand: KugouTrack = {
+    id: 'kg_' + String(meta.albumAudioId),
+    hash: meta.hash,
+    albumAudioId: String(meta.albumAudioId),
+    albumId: String(meta.albumId ?? '0'),
+    name: meta.name,
+    singers: (meta.artists ?? []).map((n: string) => ({ name: n })),
+    albumName: '',
+    durationSec: meta.durationSec ?? 0,
+    qualityHashes: meta.qualityHashes ?? {},
+    privilege: 0,
+    payType: 0,
+    coverTemplate: meta.coverTemplate ?? '',
+  };
+
+  const dfid = await ensureDfid();
+  let userAuth: string;
+  try {
+    userAuth = await fetchUserVerifyAuth(creds, dfid);
+  } catch (err) {
+    return fail('rejected', (err as Error).message);
+  }
+
+  const hit = await streamFirstPlayable([cand], cand.durationSec, creds, dfid, userAuth);
+  return hit ?? fail('below_threshold', '酷狗直取无可播音质');
+}
+
+/**
+ * 依次尝试候选，返回第一个能拿到「非试听片段」直链的结果。
+ *
+ * 抽成独立函数是为了让**直取流**（已存 hash，跳过搜索）复用同一段判定逻辑 ——
+ * 试听片段识别、音质降级顺序、封面兜底都只在这里维护一份。
+ */
+async function streamFirstPlayable(
+  candidates: KugouTrack[],
+  durTarget: number,
+  creds: KugouCreds,
+  dfid: string,
+  userAuth: string,
+): Promise<ResolveResult | null> {
+  for (const cand of candidates) {
+    const priv = await fetchPrivilegeInfo(cand, creds, dfid);
+
+    for (const quality of QUALITY_ORDER) {
+      const goods = priv.goodsByQuality.get(quality);
+      if (!goods || !goods.hash) continue;
+
+      try {
+        const { url, bitrate, timeLength } = await fetchPlayUrlWithAuth(
+          goods.hash,
+          priv.albumId,
+          priv.albumAudioId,
+          quality,
+          userAuth,
+          creds,
+          dfid,
+        );
+        if (!url) continue;
+
+        // 校验是否为试听片段：优先用 tracker 返回的 timeLength，缺失时用 HEAD Content-Length 兜底
+        const expectedSec = cand.durationSec > 0 ? cand.durationSec : durTarget;
+        if (expectedSec > 90 && timeLength > 0 && timeLength < expectedSec * 0.7) {
+          log.warn(`酷狗仅返回试听片段（${cand.id}/${quality} timeLength=${timeLength}s < ${expectedSec}s），跳过`);
+          continue;
+        }
+        if (timeLength <= 0) {
+          const covered = await estimateCoverage(url, bitrate || goods.bitrate, expectedSec);
+          if (!covered) {
+            log.warn(`酷狗仅返回试听片段（${cand.id}/${quality}），跳过`);
+            continue;
+          }
+        }
+
+        const actualSec = timeLength > 0 ? timeLength : cand.durationSec;
+        log.info(
+          `酷狗命中 ${cand.id} 「${cand.name}」${quality}@${bitrate || goods.bitrate}kbps ` +
+            `时长=${actualSec}s 时长差=${durTarget > 0 ? Math.abs(actualSec - durTarget) : 0}s`,
+        );
+        return {
+          ok: true,
+          bvid: null,
+          sourceUrl: url,
+          score: 100,
+          source: 'kugou',
+          matchedTitle: cand.name,
+          matchedAuthor: cand.singers.map(s => s.name).join('/'),
+          matchedDurationSec: actualSec,
+          durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
+          coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
+        };
+      } catch (err) {
+        log.warn(`取流失败 ${cand.id}/${quality}：${(err as Error).message}`);
+      }
+    }
+  }
+  return null;
+}
+
 export async function resolveKugouSource(track: ResolveInput): Promise<ResolveResult> {
   const creds = readCreds();
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
@@ -420,61 +543,12 @@ export async function resolveKugouSource(track: ResolveInput): Promise<ResolveRe
     return fail('rejected', (err as Error).message);
   }
 
-  for (const entry of scored.slice(0, 6)) {
-    const cand = entry.r;
-    const priv = await fetchPrivilegeInfo(cand, creds, dfid);
-
-    for (const quality of QUALITY_ORDER) {
-      const goods = priv.goodsByQuality.get(quality);
-      if (!goods || !goods.hash) continue;
-
-      try {
-        const { url, bitrate, timeLength } = await fetchPlayUrlWithAuth(
-          goods.hash,
-          priv.albumId,
-          priv.albumAudioId,
-          quality,
-          userAuth,
-          creds,
-          dfid,
-        );
-        if (!url) continue;
-
-        // 校验是否为 60s 试听片段：优先用 tracker 返回的 timeLength 判定，缺失时用 HEAD Content-Length 兜底
-        const expectedSec = cand.durationSec > 0 ? cand.durationSec : durTarget;
-        if (expectedSec > 90 && timeLength > 0 && timeLength < expectedSec * 0.7) {
-          log.warn(`酷狗仅返回试听片段（${cand.id}/${quality} timeLength=${timeLength}s < ${expectedSec}s），跳过`);
-          continue;
-        }
-        if (timeLength <= 0) {
-          const covered = await estimateCoverage(url, bitrate || goods.bitrate, expectedSec);
-          if (!covered) {
-            log.warn(`酷狗仅返回试听片段（${cand.id}/${quality}），跳过`);
-            continue;
-          }
-        }
-
-        const actualSec = timeLength > 0 ? timeLength : cand.durationSec;
-        log.info(
-          `酷狗命中 ${cand.id} 「${cand.name}」${quality}@${bitrate || goods.bitrate}kbps ` +
-            `时长=${actualSec}s 时长差=${durTarget > 0 ? Math.abs(actualSec - durTarget) : 0}s`
-        );
-        return {
-          ok: true,
-          bvid: null,
-          sourceUrl: url,
-          score: 100,
-          source: 'kugou',
-          matchedTitle: cand.name,
-          matchedAuthor: cand.singers.map(s => s.name).join('/'),
-          matchedDurationSec: actualSec,
-          durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
-          coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
-        };
-      } catch (err) {
-        log.warn(`取流失败 ${cand.id}/${quality}：${(err as Error).message}`);
-      }
-    }
-  }
-  return fail('below_threshold', '候选均无可播音质');
+  const hit = await streamFirstPlayable(
+    scored.slice(0, 6).map(e => e.r),
+    durTarget,
+    creds,
+    dfid,
+    userAuth,
+  );
+  return hit ?? fail('below_threshold', '候选均无可播音质');
 }
