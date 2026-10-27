@@ -25,6 +25,7 @@ const { getXeapiPublicKey } = require('../../vendors/netease/util/xeapiKey.js');
 const modSearch = require('../../vendors/netease/module/search.js');
 const modCloudsearch = require('../../vendors/netease/module/cloudsearch.js');
 const modSimiArtist = require('../../vendors/netease/module/simi_artist.js');
+const modArtistSongs = require('../../vendors/netease/module/artist_songs.js');
 const modLyricNew = require('../../vendors/netease/module/lyric_new.js');
 const modAlbum = require('../../vendors/netease/module/album.js');
 const modSongUrlV1 = require('../../vendors/netease/module/song_url_v1.js');
@@ -58,6 +59,8 @@ export const netease = {
   /** 云搜索：返回 originCoverType（官方原唱认证），零翻唱过滤靠它 */
   cloudsearch: modCloudsearch as NeteaseModule,
   simiArtist: modSimiArtist as NeteaseModule,
+  /** 歌手歌曲（/api/v1/artist/songs）—— 网易云独有原唱的歌手页靠它 */
+  artistSongs: modArtistSongs as NeteaseModule,
   lyricNew: modLyricNew as NeteaseModule,
   album: modAlbum as NeteaseModule,
   songUrlV1: modSongUrlV1 as NeteaseModule,

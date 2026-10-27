@@ -30,6 +30,8 @@ import { getLyricForTrack } from '../services/lyric-fallback.ts';
 import { QQ_SEARCH_ALL_SLICES, QQ_SEARCH_TYPE, searchQQ } from '../sources/qq/search.ts';
 import { kugouSearchSongs } from '../sources/kugou/source.ts';
 import { searchSongsMulti } from '../services/multi-search.ts';
+import { netease, neteaseRequest } from '../sources/netease/vendor.ts';
+import { currentNeteaseCookie } from '../services/netease-account.ts';
 import { getKugouCreds } from '../sources/kugou/stream.ts';
 import type { QQSearchSlice } from '../sources/qq/search.ts';
 import { badRequest, notFound } from '../http/errors.ts';
@@ -224,11 +226,85 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       throw badRequest(`这不是歌手 id：${raw}`, 'invalid_id');
     }
 
+    // 多源：kg_ar_ / ne_ar_ 上游没有可用的「歌手详情」接口，
+    // 用客户端带来的 name 组一个最小对象，避免点进歌手页直接 404。
+    // picUrl 留给客户端用搜索结果里的歌手图（或首字母占位）。
+    if (parsed.source !== 'qq') {
+      const name = strParam((req.query as any)?.name);
+      if (!name) throw notFound('歌手不存在（该源需要带 name 参数）');
+      return {
+        artist: {
+          id: raw,
+          mid: parsed.value,
+          name,
+          picUrl: strParam((req.query as any)?.picUrl) || '',
+          img1v1Url: '',
+          alias: [],
+          albumSize: 0,
+          musicSize: 0,
+          mvSize: 0,
+          briefDesc: '',
+        },
+      };
+    }
+
     const artist = await getArtistDetail(parsed.value);
     if (!artist) throw notFound('歌手不存在');
 
     return { artist };
   });
+
+  /** 名称归一（歌手过滤用）：去空白/括号/小写 */
+  const normName = (s: string): string => {
+    let out = String(s ?? '').toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
+    // 异体字归一：否则「夏日入侵企划」匹配不到「夏日入侵企画」（与 multi-search 同口径）
+    out = out.replace(/企画/g, '企划').replace(/計画/g, '计划');
+    return out;
+  };
+
+  /** 网易云歌手歌曲 → ne_ Track[] */
+  const getNeteaseArtistSongs = async (artistId: string, limit: number, page: number) => {
+    try {
+      const res: any = await netease.artistSongs(
+        { id: Number(artistId), limit, offset: (page - 1) * limit, order: 'hot', cookie: currentNeteaseCookie() },
+        neteaseRequest,
+      );
+      const rows = res?.body?.songs ?? [];
+      return (rows as Array<Record<string, any>>).map(s => {
+        const ar = ((s.ar ?? []) as Array<Record<string, any>>).map(a => ({
+          id: 'ne_ar_' + String(a.id ?? ''),
+          mid: String(a.id ?? ''),
+          name: String(a.name ?? ''),
+          picUrl: '',
+        }));
+        const al = (s.al ?? {}) as Record<string, any>;
+        const dt = Number(s.dt ?? 0);
+        const album = {
+          id: 'ne_al_' + String(al.id ?? '0'),
+          mid: String(al.id ?? '0'),
+          name: String(al.name ?? ''),
+          picUrl: String(al.picUrl ?? ''),
+        };
+        return {
+          id: 'ne_' + String(s.id),
+          mid: String(s.id),
+          name: String(s.name ?? ''),
+          ar,
+          artists: ar,
+          al: album,
+          album,
+          dt,
+          duration: Math.round(dt / 1000),
+          playable: true,
+          matched: true,
+          privilege: { playMaxbr: 0, maxbr: 0, freeTrialPrivilege: { resConsumable: false } },
+        };
+      });
+    } catch (err) {
+      log.warn(`网易云歌手歌曲失败：${(err as Error).message}`);
+      return [];
+    }
+  };
 
   /** 歌手热门歌曲 */
   app.get('/api/artists/:id/songs', async req => {
@@ -244,6 +320,41 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     // 上限 20 页是为了给风控兜底 —— 每次翻页都是一次真实的 QQ 搜索请求。
     const page = intParam((req.query as any)?.page, 1, { min: 1, max: 20 });
     const name = strParam((req.query as any)?.name);
+
+    // ---- 多源分流：kg_ar_ / ne_ar_ 走各自上游，qq_ar_ 保持原实现 ----
+    if (parsed.source === 'ne') {
+      const songs = await getNeteaseArtistSongs(parsed.value, limit, page);
+      if (songs.length > 0) upsertTracks(songs);
+      return {
+        id: `ne_ar_${parsed.value}`,
+        name,
+        page,
+        songs,
+        hasMore: songs.length >= limit,
+        degraded: null,
+      };
+    }
+    if (parsed.source === 'kg') {
+      // 酷狗没有稳定的「按 singerId 取歌」接口，改用聚合搜索后按歌手过滤：
+      // 结果同样带 kg_ 前缀与 kugouMeta，点播可直取流。
+      if (!name) throw notFound('酷狗歌手页需要带 name 参数');
+      const agg = await searchSongsMulti(name, limit);
+      const target = normName(name);
+      const songs = agg.songs.filter(t =>
+        (t.ar ?? []).some(a => {
+          const n = normName(a.name);
+          return n.length > 0 && (n.includes(target) || target.includes(n));
+        })
+      );
+      return {
+        id: `kg_ar_${parsed.value}`,
+        name,
+        page,
+        songs,
+        hasMore: false,
+        degraded: null,
+      };
+    }
 
     // 拿不到名字就没法用搜索召回，先取详情
     const artist = name ? null : await getArtistDetail(parsed.value);
