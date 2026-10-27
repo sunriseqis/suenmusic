@@ -22,6 +22,7 @@ import { readAiHealthView } from '../services/ai-health.ts';
 import { startKugouQrLogin, pollKugouQrLogin, readKugouCredentialStatus } from '../services/kugou-login.ts';
 import { invalidateKugouStatusCache, readKugouLoginState } from '../services/kugou-status.ts';
 import { readKugouCheckinState, runKugouCheckin } from '../services/kugou-checkin.ts';
+import { countAnchors, deleteAutoAnchors } from '../db/repo/anchors.ts';
 
 import { invalidateLocalCatalogCache } from '../services/local-catalog.ts';
 import { createLogger } from '../logger.ts';
@@ -489,6 +490,23 @@ export function registerAdminRoutes(app: FastifyInstance): void {
       log.warn(`导入凭据后自动签到失败：${(err as Error)?.message ?? String(err)}`),
     );
     return { ok: true, ...(await readKugouLoginState()) };
+  });
+
+  /** 锚点概况（自动 / 手动条数），面板展示与确认文案用 */
+  app.get('/api/admin/anchors', async () => {
+    return { ok: true, ...countAnchors() };
+  });
+
+  /**
+   * 清理**自动沉淀**锚点（pinned = 0）。手动锚定一条都不动。
+   *
+   * 多源改造后「酷狗为主」的收益会被历史 B 站自动锚点吃掉（锚点优先于取流链），
+   * 这个开关让用户可以随时把自动锚点清空重算，而不必逐个解锚。
+   */
+  app.post('/api/admin/anchors/purge-auto', async () => {
+    const removed = deleteAutoAnchors();
+    log.info(`管理员清理自动锚点：${removed} 条`);
+    return { ok: true, removed, ...countAnchors() };
   });
 
   app.get('/api/admin/kugou/credentials', async () => {

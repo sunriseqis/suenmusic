@@ -33,6 +33,7 @@ import {
   setBluetoothLyricsEnabled,
 } from '@/native/audio.ts';
 import { useUiStore } from '@/stores/ui.ts';
+import { http, ApiError } from '@/api/client.ts';
 import { hasBackend } from '@/api/client.ts';
 import { useSessionStore } from '@/stores/session.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
@@ -330,6 +331,33 @@ const biliOn = ref(false);
 const neteaseOn = ref(false);
 const kugouOn = ref(false);
 const kugouName = ref('');
+// ---------------------------------------------------------------- 音源锚点
+/** 锚点概况：自动沉淀的会压过取流链，手动锚定永远最高优先 */
+const anchorStats = ref<{ auto: number; manual: number }>({ auto: 0, manual: 0 });
+const purging = ref(false);
+
+async function loadAnchorStats(): Promise<void> {
+  try {
+    anchorStats.value = await http.get<{ auto: number; manual: number }>('/api/admin/anchors');
+  } catch {
+    // 非管理员或接口不可用：保持 0，不打扰
+  }
+}
+
+async function purgeAutoAnchors(): Promise<void> {
+  if (purging.value) return;
+  purging.value = true;
+  try {
+    const r = await http.post<{ removed: number; auto: number; manual: number }>('/api/admin/anchors/purge-auto', {});
+    anchorStats.value = { auto: r.auto, manual: r.manual };
+    ui.ok(`已清理 ${r.removed} 条自动锚点，手动锚定保留 ${r.manual} 条`);
+  } catch (e) {
+    ui.err(e instanceof ApiError ? e.message : '清理失败，请稍后重试');
+  } finally {
+    purging.value = false;
+  }
+}
+
 /** 酷狗登录态（服务端统一给 label：未登录 / 已失效 / 会员到期 / 正常） */
 const kugouState = ref<KugouState>('logged_out');
 const kugouLabel = ref('未登录');
@@ -475,6 +503,8 @@ async function loadServerData(): Promise<void> {
   void loadSources();
   if (session.isLoggedIn) {
     void loadPersona();
+    // 锚点统计只在管理员面板可见；非管理员 403 时静默
+    if (isWebPanel && session.user?.role === 'admin') void loadAnchorStats();
   }
 }
 
@@ -698,20 +728,24 @@ onBeforeUnmount(() => {
         <AdminUpdateChannel />
       </section>
 
-      <section v-if="isWebPanel" class="sec">
-        <h2 class="label">运行情况</h2>
+      <!-- 音源锚点：自动沉淀的 B 站锚点会压过取流链，这里给一个一键清理口子 -->
+      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
+        <h2 class="label">音源锚点</h2>
         <div class="panel">
           <div class="row">
-            <span class="row-name">注册</span>
-            <span class="row-val">{{ session.authConfig?.registrationOpen ? '开放' : '关闭' }}</span>
+            <span class="row-name">自动锚点</span>
+            <span class="row-val">{{ anchorStats.auto }} 条（优先于取流链）</span>
           </div>
           <div class="row">
-            <span class="row-name">已有账号</span>
-            <span class="row-val">{{ session.authConfig?.hasUsers ? '是' : '否' }}</span>
+            <span class="row-name">手动锚定</span>
+            <span class="row-val">{{ anchorStats.manual }} 条（永远最高优先，清理不会动）</span>
           </div>
           <div class="row">
-            <span class="row-name">口令最短</span>
-            <span class="row-val">{{ session.authConfig?.passwordMinLength ?? '—' }}</span>
+            <span class="row-name">清理自动锚点</span>
+            <span class="row-val">清空后这些曲目回到自动判定（酷狗 → B 站）</span>
+            <NeuButton size="sm" :loading="purging" :disabled="anchorStats.auto === 0" @click="purgeAutoAnchors">
+              清理
+            </NeuButton>
           </div>
         </div>
       </section>

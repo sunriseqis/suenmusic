@@ -95,6 +95,27 @@ export function saveAnchor(
   }
 }
 
+/**
+ * 批量删除**自动沉淀**的锚点（pinned = 0），返回删除条数。
+ *
+ * 为什么要它：多源改造后「酷狗为主」的收益会被历史 B 站自动锚点吃掉 ——
+ * 锚点优先级高于取流链，老歌永远走 B 站。用户手动锚定（pinned = 1）必须保留，
+ * 所以这里只清自动沉淀的那批，随时可重算。
+ */
+export function deleteAutoAnchors(): number {
+  const info = getDatabase().prepare('DELETE FROM track_anchors WHERE pinned = 0').run();
+  return Number(info.changes ?? 0);
+}
+
+/** 自动锚点条数（面板展示/确认文案用） */
+export function countAnchors(): { auto: number; manual: number } {
+  const db = getDatabase();
+  const row = db
+    .prepare('SELECT SUM(CASE WHEN pinned = 0 THEN 1 ELSE 0 END) a, SUM(CASE WHEN pinned = 1 THEN 1 ELSE 0 END) m FROM track_anchors')
+    .get() as { a: number | null; m: number | null } | undefined;
+  return { auto: Number(row?.a ?? 0), manual: Number(row?.m ?? 0) };
+}
+
 export function deleteAnchor(trackId: string): void {
   if (!trackId) return;
   getDatabase().prepare('DELETE FROM track_anchors WHERE track_id = ?').run(trackId);
