@@ -210,12 +210,36 @@ export async function searchSongsMulti(query: string, limit = 20): Promise<Multi
   );
   const tier2 = keptQQ.filter(t => exact(t) === 1);
 
+  /**
+   * 封面/专辑名兜底：酷狗的召回行偶尔没有封面（`Image` 为空），
+   * 而同曲在另一个源里是有的 —— 按去重键互为补齐，避免列表里出现空白封面。
+   */
+  const coverByKey = new Map<string, { picUrl: string; albumName: string }>();
+  for (const t of [...keptKugou, ...keptNetease, ...keptQQ]) {
+    const k = dedupeKey(t);
+    const pic = t.al?.picUrl ?? '';
+    const albumName = t.al?.name ?? '';
+    const prev = coverByKey.get(k);
+    if (!prev || (!prev.picUrl && pic)) {
+      coverByKey.set(k, { picUrl: pic || prev?.picUrl || '', albumName: albumName || prev?.albumName || '' });
+    }
+  }
+
   const seen = new Set<string>();
   const songs: Track[] = [];
   for (const t of [...tier0, ...tier1, ...tier2]) {
     const k = dedupeKey(t);
     if (seen.has(k)) continue;
     seen.add(k);
+    const cover = coverByKey.get(k);
+    if (cover && t.al) {
+      if (!t.al.picUrl && cover.picUrl) t.al.picUrl = cover.picUrl;
+      if (!t.al.name && cover.albumName) t.al.name = cover.albumName;
+      if (t.album) {
+        if (!t.album.picUrl && cover.picUrl) t.album.picUrl = cover.picUrl;
+        if (!t.album.name && cover.albumName) t.album.name = cover.albumName;
+      }
+    }
     songs.push(t);
     if (songs.length >= limit) break;
   }

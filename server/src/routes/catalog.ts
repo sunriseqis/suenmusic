@@ -31,6 +31,8 @@ import { QQ_SEARCH_ALL_SLICES, QQ_SEARCH_TYPE, searchQQ } from '../sources/qq/se
 import { kugouSearchSongs } from '../sources/kugou/source.ts';
 import { searchSongsMulti } from '../services/multi-search.ts';
 import { netease, neteaseRequest } from '../sources/netease/vendor.ts';
+import type { Track } from '../sources/qq/adapter.ts';
+import { getDatabase } from '../db/index.ts';
 import { currentNeteaseCookie } from '../services/netease-account.ts';
 import { getKugouCreds } from '../sources/kugou/stream.ts';
 import type { QQSearchSlice } from '../sources/qq/search.ts';
@@ -254,6 +256,49 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     return { artist };
   });
 
+  /**
+   * 封面兜底：库里同一首歌若已有封面（多源别的条目带过），直接补上。
+   *
+   * QQ 歌手页的召回行有相当比例不带专辑封面（实测「夏日入侵企划」27 条里 14 条空封面），
+   * 而同一首歌在酷狗/网易云侧是有图的 —— 用「歌名 + 主歌手」在本地库回填，零额外上游请求。
+   */
+  const backfillCovers = (songs: Track[]): Track[] => {
+    if (songs.length === 0) return songs;
+    const missing = songs.filter(s => !s.al?.picUrl);
+    if (missing.length === 0) return songs;
+    try {
+      const rows = getDatabase()
+        .prepare("SELECT name, artists_json, cover_url FROM tracks WHERE cover_url <> '' ")
+        .all() as Array<{ name: string; artists_json: string; cover_url: string }>;
+      const keyOf = (name: string, artistsJson: string): string => {
+        let ar: Array<{ name?: string }> = [];
+        try {
+          ar = JSON.parse(artistsJson || '[]');
+        } catch {
+          ar = [];
+        }
+        const artists = ar.map(a => normName(a?.name ?? '')).filter(Boolean).sort().join('/');
+        const n = normName(name);
+        return n && artists ? `${n}|${artists}` : '';
+      };
+      const coverByKey = new Map<string, string>();
+      for (const r of rows) {
+        const k = keyOf(r.name, r.artists_json);
+        if (k && !coverByKey.has(k)) coverByKey.set(k, r.cover_url);
+      }
+      for (const s of missing) {
+        const artistsJson = JSON.stringify((s.ar ?? []).map(a => ({ name: a.name })));
+        const k = keyOf(s.name, artistsJson);
+        const cover = k ? coverByKey.get(k) : undefined;
+        if (cover && s.al) s.al.picUrl = cover;
+        if (cover && s.album && !s.album.picUrl) s.album.picUrl = cover;
+      }
+    } catch {
+      // 兜底失败不挡主流程
+    }
+    return songs;
+  };
+
   /** 名称归一（歌手过滤用）：去空白/括号/小写 */
   const normName = (s: string): string => {
     let out = String(s ?? '').toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
@@ -323,7 +368,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     // ---- 多源分流：kg_ar_ / ne_ar_ 走各自上游，qq_ar_ 保持原实现 ----
     if (parsed.source === 'ne') {
-      const songs = await getNeteaseArtistSongs(parsed.value, limit, page);
+      const songs = backfillCovers(await getNeteaseArtistSongs(parsed.value, limit, page));
       if (songs.length > 0) upsertTracks(songs);
       return {
         id: `ne_ar_${parsed.value}`,
@@ -340,11 +385,13 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       if (!name) throw notFound('酷狗歌手页需要带 name 参数');
       const agg = await searchSongsMulti(name, limit);
       const target = normName(name);
-      const songs = agg.songs.filter(t =>
-        (t.ar ?? []).some(a => {
-          const n = normName(a.name);
-          return n.length > 0 && (n.includes(target) || target.includes(n));
-        })
+      const songs = backfillCovers(
+        agg.songs.filter(t =>
+          (t.ar ?? []).some(a => {
+            const n = normName(a.name);
+            return n.length > 0 && (n.includes(target) || target.includes(n));
+          })
+        )
       );
       return {
         id: `kg_ar_${parsed.value}`,
@@ -363,6 +410,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     const result = await getArtistSongs(parsed.value, singerName, limit, page);
     upsertTracks(result.songs);
+    backfillCovers(result.songs);
 
     return {
       id: `qq_ar_${parsed.value}`,

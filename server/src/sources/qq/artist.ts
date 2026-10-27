@@ -130,6 +130,15 @@ export interface ArtistSongsResult {
  * 曲目 `ar` 里确实包含该歌手 mid 的条目；全被过滤光时退回原始结果
  * （宁可多给几首，也不要给出空列表）。
  */
+/** 歌手名归一：去空白/括号/异体字，用于「无 mid 行」的名字兜底判定 */
+function normArtist(s: string): string {
+  return String(s ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[()（）[\]【】]/g, '')
+    .replace(/企画/g, '企划');
+}
+
 export async function getArtistSongs(
   singerMid: string,
   singerName: string,
@@ -159,13 +168,33 @@ export async function getArtistSongs(
     const hasMore = list.length >= limit;
     if (!singerMid) return { songs, hasMore };
 
+    /**
+     * 归属判定：先看歌手 mid，**没有 mid 的召回行必须回落名字比对**。
+     *
+     * 旧实现是「没有 mid 就放行」，于是搜索里的野鸡条目整批混进歌手页 ——
+     * 实测「夏日入侵企划」页混入 3 条：
+     *   · 夏日入～侵企画-极恶～都市 / 超凡先锋馒头
+     *   · 730. 夏日入侵企畫(沒有名字的夜晚…) / 香水百合
+     *   · 夏日入侵企画的救赎（版本1） / 叮当
+     * 它们的歌手名与目标歌手完全不符，因此名字兜底能干净地挡掉。
+     */
+    const target = normArtist(singerName);
     const owned = songs.filter(song => {
-      const mids = (song.ar || []).map(a => a.mid).filter(Boolean);
-      if (!mids.length) return true;
-      return mids.includes(singerMid);
+      const artists = song.ar || [];
+      const mids = artists.map(a => a.mid).filter(Boolean);
+      if (mids.length > 0 && mids.includes(singerMid)) return true;
+      const byName = artists.some(a => {
+        const n = normArtist(a.name);
+        return n.length > 0 && (n.includes(target) || target.includes(n));
+      });
+      // 有 mid 但既不含目标 mid、名字也对不上 → 明确不是这位歌手
+      if (mids.length > 0) return byName;
+      return byName;
     });
 
-    const result: ArtistSongsResult = { songs: owned.length ? owned : songs, hasMore };
+    // 不能「owned 为空就退回全部」：那等于把过滤关掉，野鸡条目会整批回到歌手页。
+    // 真空就回空列表 —— 客户端会显示「暂无」，比混入翻唱干净。
+    const result: ArtistSongsResult = { songs: owned, hasMore };
     cachePut('artist_songs', cacheKey, result);
     return result;
   } catch (err) {
