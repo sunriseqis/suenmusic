@@ -23,6 +23,7 @@ const createRequest = require('../../vendors/netease/util/request.js');
 const { cookieToJson, generateRandomChineseIP } = require('../../vendors/netease/util/index.js');
 const { getXeapiPublicKey } = require('../../vendors/netease/util/xeapiKey.js');
 const modSearch = require('../../vendors/netease/module/search.js');
+const modCloudsearch = require('../../vendors/netease/module/cloudsearch.js');
 const modSimiArtist = require('../../vendors/netease/module/simi_artist.js');
 const modLyricNew = require('../../vendors/netease/module/lyric_new.js');
 const modAlbum = require('../../vendors/netease/module/album.js');
@@ -54,6 +55,8 @@ export const neteaseRequest = createRequest as unknown;
 /** vendor 各模块（已绑 request 形状） */
 export const netease = {
   search: modSearch as NeteaseModule,
+  /** 云搜索：返回 originCoverType（官方原唱认证），零翻唱过滤靠它 */
+  cloudsearch: modCloudsearch as NeteaseModule,
   simiArtist: modSimiArtist as NeteaseModule,
   lyricNew: modLyricNew as NeteaseModule,
   album: modAlbum as NeteaseModule,
