@@ -211,6 +211,20 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     }
 
     const limit = intParam((req.query as any)?.limit, 100, { min: 1, max: 200 });
+
+    // ---- 多源专辑页 ----
+    if (parsed.source === 'ne') {
+      const detail = await getNeteaseAlbumDetail(parsed.value, limit);
+      if (!detail) throw notFound('网易云专辑不存在');
+      if (detail.songs.length > 0) upsertTracks(detail.songs);
+      return { album: detail.album, songs: backfillCovers(detail.songs), notice: null };
+    }
+    if (parsed.source === 'kg') {
+      const detail = await getKugouAlbumDetail(parsed.value, limit, strParam((req.query as any)?.name));
+      if (!detail) throw notFound('酷狗专辑不存在（本地库无该专辑曲目，且未提供 name 无法回源）');
+      return { album: detail.album, songs: backfillCovers(detail.songs), notice: null };
+    }
+
     const detail = await getAlbumDetail(parsed.value, limit);
     if (!detail) throw notFound('专辑不存在');
 
@@ -255,6 +269,124 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     return { artist };
   });
+
+  /** 网易云专辑详情 + 曲目（/api/v1/album/{id} 一次返回 album 与 songs） */
+  const getNeteaseAlbumDetail = async (albumId: string, limit: number) => {
+    try {
+      const res: any = await netease.album(
+        { id: Number(albumId), cookie: currentNeteaseCookie() },
+        neteaseRequest,
+      );
+      const body = res?.body ?? {};
+      const al = body.album ?? {};
+      if (body.code !== 200 || !al.id) return null;
+      const songs = ((body.songs ?? []) as Array<Record<string, any>>).slice(0, limit).map(s => {
+        const ar = ((s.ar ?? []) as Array<Record<string, any>>).map(a => ({
+          id: 'ne_ar_' + String(a.id ?? ''),
+          mid: String(a.id ?? ''),
+          name: String(a.name ?? ''),
+          picUrl: '',
+        }));
+        const sal = (s.al ?? {}) as Record<string, any>;
+        const dt = Number(s.dt ?? 0);
+        const album = {
+          id: 'ne_al_' + String(sal.id ?? '0'),
+          mid: String(sal.id ?? '0'),
+          name: String(sal.name ?? ''),
+          picUrl: String(sal.picUrl ?? '').replace(/^http:/, 'https:'),
+        };
+        return {
+          id: 'ne_' + String(s.id),
+          mid: String(s.id),
+          name: String(s.name ?? ''),
+          ar,
+          artists: ar,
+          al: album,
+          album,
+          dt,
+          duration: Math.round(dt / 1000),
+          playable: true,
+          matched: true,
+          privilege: { playMaxbr: 0, maxbr: 0, freeTrialPrivilege: { resConsumable: false } },
+        };
+      });
+      return {
+        album: {
+          id: 'ne_al_' + String(al.id),
+          mid: String(al.id),
+          name: String(al.name ?? ''),
+          picUrl: String(al.picUrl ?? '').replace(/^http:/, 'https:'),
+          publishTime: String(al.publishTime ?? ''),
+          description: String(al.description ?? ''),
+          company: String(al.company ?? ''),
+          type: '',
+          size: Number(al.size ?? songs.length),
+          artists: ((al.artists ?? []) as Array<Record<string, any>>).map(a => ({
+            id: 'ne_ar_' + String(a.id ?? ''),
+            mid: String(a.id ?? ''),
+            name: String(a.name ?? ''),
+            picUrl: '',
+          })),
+          artist: { name: String(((al.artist ?? {}) as Record<string, any>).name ?? '') },
+        },
+        songs,
+      };
+    } catch (err) {
+      log.warn(`网易云专辑详情失败 id=${albumId}: ${(err as Error).message}`);
+      return null;
+    }
+  };
+
+  /**
+   * 酷狗专辑详情。
+   *
+   * 酷狗没有稳定的「按 albumId 取整张专辑」接口，所以走两步：
+   *   ① 本地库已有该专辑的曲目（搜索阶段落过库）→ 直接用；
+   *   ② 库里没有 → 用 name 回源聚合搜索，再按 al.mid 过滤。
+   * 两者都不成返回 null（路由给出明确提示）。
+   */
+  const getKugouAlbumDetail = async (albumId: string, limit: number, name?: string) => {
+    const albumRouteId = `kg_al_${albumId}`;
+    const collect = (rows: Track[]) =>
+      rows
+        .filter(t => String(t.al?.id ?? '') === albumRouteId)
+        .slice(0, limit);
+
+    try {
+      const local = getDatabase()
+        .prepare("SELECT payload_json FROM tracks WHERE payload_json LIKE ? LIMIT 200")
+        .all(`%"id":"${albumRouteId}"%`) as Array<{ payload_json: string }>;
+      const localTracks = local
+        .map(r => JSON.parse(r.payload_json) as unknown as Track)
+        .filter(t => String(t.al?.id ?? '') === albumRouteId);
+      let songs = localTracks;
+      if (songs.length === 0 && name) {
+        const agg = await searchSongsMulti(name, limit + 10);
+        songs = collect(agg.songs);
+      }
+      if (songs.length === 0) return null;
+      const first = songs[0];
+      return {
+        album: {
+          id: albumRouteId,
+          mid: albumId,
+          name: String(first.al?.name ?? ''),
+          picUrl: String(first.al?.picUrl ?? ''),
+          publishTime: '',
+          description: '',
+          company: '',
+          type: '',
+          size: songs.length,
+          artists: first.ar ?? [],
+          artist: { name: String((first.ar ?? [])[0]?.name ?? '') },
+        },
+        songs,
+      };
+    } catch (err) {
+      log.warn(`酷狗专辑详情失败 id=${albumId}: ${(err as Error).message}`);
+      return null;
+    }
+  };
 
   /**
    * 详情回源补专辑/封面。
