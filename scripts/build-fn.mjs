@@ -103,20 +103,36 @@ async function injectManifestVersion(semver) {
 
 async function updateIconAssets() {
   log('2/6 校验并更新官方图标资产...');
+  const icon256 = join(FN_DIR, 'ICON_256.PNG');
+  const icon64 = join(FN_DIR, 'ICON.PNG');
+  const uiIcon256 = join(APP_DIR, 'ui/images/icon_256.png');
+  const uiIcon64 = join(APP_DIR, 'ui/images/icon_64.png');
+
+  // 如果四个产物都已存在且有效，直接确保同步到 ui 目录，避免 CI 缺少 PIL 依赖中断
+  if (existsSync(icon256) && existsSync(icon64)) {
+    await mkdir(join(APP_DIR, 'ui/images'), { recursive: true });
+    await cp(icon256, uiIcon256);
+    await cp(icon64, uiIcon64);
+    log('已复用套件已有的高清图标资产 (256x256 / 64x64)');
+    return;
+  }
+
   const masterIcon = join(ROOT, 'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png');
   if (!existsSync(masterIcon)) {
     fail(`找不到高清母版图标: ${masterIcon}`);
   }
 
-  // 使用 Python PIL 从 1024x1024 母版精确下采样生成
   const pyCode = `
-from PIL import Image
-src = '${masterIcon}'
-im = Image.open(src)
-im.resize((256, 256), Image.Resampling.LANCZOS).save('${join(FN_DIR, 'ICON_256.PNG')}', format='PNG')
-im.resize((256, 256), Image.Resampling.LANCZOS).save('${join(APP_DIR, 'ui/images/icon_256.png')}', format='PNG')
-im.resize((64, 64), Image.Resampling.LANCZOS).save('${join(FN_DIR, 'ICON.PNG')}', format='PNG')
-im.resize((64, 64), Image.Resampling.LANCZOS).save('${join(APP_DIR, 'ui/images/icon_64.png')}', format='PNG')
+try:
+    from PIL import Image
+    src = '${masterIcon}'
+    im = Image.open(src)
+    im.resize((256, 256), Image.Resampling.LANCZOS).save('${icon256}', format='PNG')
+    im.resize((256, 256), Image.Resampling.LANCZOS).save('${uiIcon256}', format='PNG')
+    im.resize((64, 64), Image.Resampling.LANCZOS).save('${icon64}', format='PNG')
+    im.resize((64, 64), Image.Resampling.LANCZOS).save('${uiIcon64}', format='PNG')
+except Exception as e:
+    print('WARN: PIL resize failed:', e)
 `;
   run('python3', ['-c', pyCode]);
 }
