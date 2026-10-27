@@ -77,6 +77,8 @@ async function setPinSource(source: 'kugou' | 'netease' | null): Promise<void> {
     if (source === null) await unpinSource(t.id);
     else await pinSource(t.id, source);
     pinnedSource.value = source;
+    // 源钉改变了解析结果：立刻刷新角标，别让用户以为没生效
+    void player.refreshCurrentSource();
     ui.ok(source === null ? '已恢复自动匹配' : `已指定只用${source === 'kugou' ? '酷狗' : '网易云'}`);
   } catch (e) {
     ui.err(e instanceof Error ? e.message : '操作失败');
@@ -183,6 +185,8 @@ async function doAnchor(c: BiliCandidate): Promise<void> {
       durationSec: c.durationSec,
     });
     stopPreview();
+    // 锚定后必须重解析：服务端已清缓存，角标要跟着变
+    void player.refreshCurrentSource();
     ui.ok('已锚定，开始播放');
     // 服务端锚定时已清解析缓存，这里直接重装当前曲目
     await player.retryAfterAnchor(t);
@@ -255,6 +259,7 @@ async function removeCurrentAnchor(): Promise<void> {
   try {
     await unanchorTrack(t.id);
     currentAnchor.value = null;
+    void player.refreshCurrentSource();
     ui.ok('已解除锚定，该曲目回到自动匹配');
   } catch (e) {
     ui.err(e instanceof Error ? e.message : '解除失败，请稍后重试');

@@ -191,6 +191,33 @@ export const usePlayerStore = defineStore('player', () => {
 
   /** 当前音源来源（resolve 响应的 source）。播放条/详情页的音源角标用它 */
   const currentSource = ref<'bilibili' | 'netease' | 'kugou' | null>(null);
+
+  /**
+   * 重新解析当前曲目并刷新「音源角标」。
+   *
+   * 为什么需要：`currentSource` 只在**起播装载**时被赋值（见下方 start 流程），
+   * 而锚定/源钉/清理锚点都是在服务端改缓存 —— 改完角标还是旧值，
+   * 用户必须手动刷新页面才看得到变化（用户 2026-10-26 报的就是这个）。
+   *
+   * force=1：必须绕过服务端解析缓存，否则拿回来的还是改动前那条结果。
+   */
+  async function refreshCurrentSource(): Promise<void> {
+    const t = currentTrack.value;
+    if (!t?.id) {
+      currentSource.value = null;
+      currentSourceTrackId.value = null;
+      return;
+    }
+    try {
+      const r = await playbackApi.resolveTrack(t.id, true);
+      // 解析期间用户可能又切歌了：按 id 对齐，别把别的歌的音源贴过来
+      if (currentTrack.value?.id !== t.id) return;
+      currentSource.value = r.ok ? r.source : null;
+      currentSourceTrackId.value = t.id;
+    } catch {
+      // 刷新失败保持原值：总比把角标清空好
+    }
+  }
   /**
    * 上一行那个 source 属于哪首曲目。
    *
@@ -2150,6 +2177,7 @@ export const usePlayerStore = defineStore('player', () => {
     mode,
     currentSource,
     currentSourceTrackId,
+    refreshCurrentSource,
     errorMessage,
     headStatus,
     anchorCandidate,

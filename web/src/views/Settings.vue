@@ -33,6 +33,7 @@ import {
   setBluetoothLyricsEnabled,
 } from '@/native/audio.ts';
 import { useUiStore } from '@/stores/ui.ts';
+import { usePlayerStore } from '@/stores/player.ts';
 import { http, ApiError } from '@/api/client.ts';
 import { hasBackend } from '@/api/client.ts';
 import { useSessionStore } from '@/stores/session.ts';
@@ -63,6 +64,7 @@ const session = useSessionStore();
 const favorites = useFavoritesStore();
 const dislikes = useDislikesStore();
 const update = useUpdateStore();
+const player = usePlayerStore();
 
 type SheetName = 'login' | 'dislikes' | 'import' | 'dedupe' | 'backup' | 'theme' | 'cache' | 'auth';
 const sheet = ref<SheetName | null>(null);
@@ -350,6 +352,8 @@ async function purgeAutoAnchors(): Promise<void> {
   try {
     const r = await http.post<{ removed: number; auto: number; manual: number }>('/api/admin/anchors/purge-auto', {});
     anchorStats.value = { auto: r.auto, manual: r.manual };
+    // 批量清锚点会改变正在播这首的解析结果 → 角标跟着刷新
+    void player.refreshCurrentSource();
     ui.ok(`已清理 ${r.removed} 条自动锚点，手动锚定保留 ${r.manual} 条`);
   } catch (e) {
     ui.err(e instanceof ApiError ? e.message : '清理失败，请稍后重试');
