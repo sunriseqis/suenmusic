@@ -1463,27 +1463,6 @@ export struct SettingsPage {
               }
               .width('100%')
               .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
-
-              Column() {
-                Row() {
-                  Text('数据备份')
-                    .fontSize(Dim.fsBody)
-                    .fontColor(Tokens.text1)
-                    .layoutWeight(1)
-                  Text('文件 · WebDAV')
-                    .fontSize(Dim.fsMinor)
-                    .fontColor(Tokens.text2)
-                }
-                .width('100%')
-                .height(Dim.touchMin)
-                .padding({ left: Dim.s4, right: Dim.s4 })
-                .accessibilityText('打开数据备份')
-                .onClick(() => {
-                  this.sheet = 'backup';
-                })
-              }
-              .width('100%')
-              .border({ width: { top: Dim.hairline }, color: { top: Tokens.line } })
             }
             .width('100%')
             .backgroundColor(Tokens.panel)

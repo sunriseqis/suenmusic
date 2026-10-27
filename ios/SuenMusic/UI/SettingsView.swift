@@ -135,8 +135,6 @@ struct SettingsView: View {
                 // 行本身即触发点：点击直接预检并开弹层
                 rowButton("去重", value: "本机收藏") { sheet = .dedupe }
                     .accessibilityLabel("打开去重")
-                rowButton("数据备份", value: "文件 · WebDAV") { sheet = .backup }
-                    .accessibilityLabel("打开数据备份")
             }
 
             secLabel("账号")

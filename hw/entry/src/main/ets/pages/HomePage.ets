@@ -365,8 +365,8 @@ export struct HomePage {
               ListItem() {
                 Column({ space: Dim.s0 }) {
                   Text(this.userDisplay.length > 0 ? this.userDisplay : this.userName)
-                    .fontSize(Dim.fsBrand)
-                    .fontWeight(FontWeight.Bold)
+                    .fontSize(Dim.fsDisplay)
+                    .fontWeight(FontWeight.Medium)
                     .fontColor(Tokens.text1)
                     .maxLines(1)
                     .textOverflow({ overflow: TextOverflow.Ellipsis })

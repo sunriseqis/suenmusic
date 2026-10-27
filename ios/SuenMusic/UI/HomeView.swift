@@ -146,7 +146,7 @@ struct HomeView: View {
             let name = display.isEmpty ? (app.user?.username ?? "") : display
             VStack(alignment: .leading, spacing: Dim.s0) {
                 Text(name)
-                    .font(.system(size: Dim.fsBrand, weight: .bold))
+                    .font(.system(size: Dim.fsDisplay, weight: .medium))
                     .foregroundStyle(p.text1)
                     .lineLimit(1)
                     .truncationMode(.tail)

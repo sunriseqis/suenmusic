@@ -241,8 +241,8 @@ export struct DailyPage {
         // 专属推荐语：greeting 首逗号前的短语作主标题、其后作副题小字（web `.head-info` 同构）
         Column({ space: Dim.s1 }) {
           Text(this.headerTitle())
-            .fontSize(Dim.fsBrand)
-            .fontWeight(FontWeight.Bold)
+            .fontSize(Dim.fsDisplay)
+            .fontWeight(FontWeight.Medium)
             .fontColor(Tokens.text1)
             .maxLines(1)
             .textOverflow({ overflow: TextOverflow.Ellipsis })

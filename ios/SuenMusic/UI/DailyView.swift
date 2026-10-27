@@ -171,7 +171,7 @@ struct DailyView: View {
         )
         return VStack(alignment: .leading, spacing: Dim.s1) {
             Text(head.title)
-                .font(.system(size: Dim.fsBrand, weight: .bold))
+                .font(.system(size: Dim.fsDisplay, weight: .medium))
                 .foregroundStyle(p.text1)
                 .lineLimit(1)
                 .truncationMode(.tail)
