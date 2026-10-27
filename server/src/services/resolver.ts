@@ -32,7 +32,6 @@ import { resolveKugouDirect, resolveKugouSource, type KugouStoredMeta } from '..
 import { getPin } from '../db/repo/pins.ts';
 import { getTracks } from '../db/repo/tracks.ts';
 import { parseId } from '../http/ids.ts';
-import { getNeteaseStatus } from './netease-account.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveInput, ResolveResult } from '../sources/bilibili/stream.ts';
 
@@ -322,12 +321,14 @@ export function resolveTrack(
     return resolveTrackSource(input);
   };
 
+  /**
+   * ne_：先走网易云。
+   *
+   * 用户裁定（2026-10-26）：**不再因为「没有黑胶 VIP」整段跳过** ——
+   * 无 VIP 也先试，`fetchPlayableUrl` 会逐档跳过试听（freeTrialInfo），
+   * 拿不到完整地址才落 B 站。很多歌其实是免费可听的，跳过等于白丢一条源。
+   */
   const neChain = async (): Promise<ResolveResult> => {
-    const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
-    if (!vip) {
-      log.info(`音源链 ne → 网易云无黑胶 VIP，跳过直取，走 B 站 ${key}`);
-      return resolveTrackSource(input);
-    }
     const ne = await resolveNeteaseSource(input);
     if (ne.ok) {
       log.info(`音源链 ne → 网易云命中 ${key} 「${ne.matchedTitle}」 时长差=${ne.durationDiff ?? 0}s`);
@@ -337,16 +338,14 @@ export function resolveTrack(
     return resolveTrackSource(input);
   };
 
+  /**
+   * qq_：按用户裁定的新顺序 —— **酷狗 → B 站**，不再经网易云。
+   *
+   * 理由：QQ 侧的曲目（首页/榜单/歌单/历史）以酷狗为第一顺位取流，
+   * 网易云只服务于「网易云独有原唱」（那些曲目会以 ne_ 前缀进来），
+   * 在 qq_ 上再试一次网易云只是多打一次上游、多一次错配机会。
+   */
   const qqChain = async (): Promise<ResolveResult> => {
-    const neteaseResult = await resolveNeteaseSource(input);
-    if (neteaseResult.ok) {
-      log.info(
-        `音源链 qq → 网易云命中 ${key} 「${neteaseResult.matchedTitle}」` +
-          ` 时长差=${neteaseResult.durationDiff ?? 0}s`,
-      );
-      return neteaseResult;
-    }
-    log.debug(`网易云未命中 ${key}：${neteaseResult.message ?? ''}，转酷狗`);
     const kugouResult = await resolveKugouSource(input);
     if (kugouResult.ok) {
       log.info(
