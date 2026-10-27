@@ -176,6 +176,19 @@ async function listReleases(): Promise<GithubRelease[]> {
   return list.filter(r => !r.draft && Array.isArray(r.assets));
 }
 
+function isAssetMatch(assetName: string, versionName: string, platform: UpdatePlatform): boolean {
+  const ext = EXTENSIONS[platform];
+  const name = assetName.toLowerCase();
+  const v = versionName.toLowerCase();
+  const candidates = [
+    `suenmusic-${v}.${ext}`,
+    `suenmusic-v${v}.${ext}`,
+    `suenmusic-${v}-release.${ext}`,
+    `suenmusic-v${v}-release.${ext}`,
+  ];
+  return candidates.includes(name);
+}
+
 /** 在 release 列表里找该平台**版本最高**的产物 */
 function pickAsset(
   releases: GithubRelease[],
@@ -185,9 +198,8 @@ function pickAsset(
   for (const release of releases) {
     const versionName = versionFromTag(release.tag_name ?? '');
     if (!versionName) continue;
-    const expected = artifactName(versionName, platform);
     const asset = (release.assets ?? []).find(
-      a => typeof a.name === 'string' && a.name.toLowerCase() === expected.toLowerCase()
+      a => typeof a.name === 'string' && isAssetMatch(a.name, versionName, platform)
     );
     if (!asset || typeof asset.browser_download_url !== 'string') continue;
     if (!best || compareSemver(versionName, best.versionName) > 0) {
@@ -203,7 +215,7 @@ async function pruneOldFiles(platform: UpdatePlatform, keep: string): Promise<vo
   try {
     for (const name of await readdir(dir)) {
       if (name === keep || name === 'latest.json') continue;
-      if (!/^SuenMusic-v.+\.(hap|ipa|apk)$/i.test(name)) continue;
+      if (!/^(?:suenmusic|SuenMusic)-.+\.(hap|ipa|apk)$/i.test(name)) continue;
       rmSync(join(dir, name), { force: true });
     }
   } catch (err) {
@@ -239,7 +251,15 @@ export async function refreshPlatform(
   const target = join(dir, fileName);
   const temp = `${target}.part`;
 
-  const res = await fetch(picked.asset.browser_download_url!, {
+  let downloadUrl = picked.asset.browser_download_url!;
+  if (config.updateGithubProxy) {
+    const prefix = config.updateGithubProxy.endsWith('/')
+      ? config.updateGithubProxy
+      : `${config.updateGithubProxy}/`;
+    downloadUrl = `${prefix}${downloadUrl}`;
+  }
+
+  const res = await fetch(downloadUrl, {
     headers: githubHeaders(),
     dispatcher: proxyDispatcher(),
   } as never);

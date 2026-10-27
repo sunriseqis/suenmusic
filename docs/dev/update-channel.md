@@ -15,13 +15,14 @@
 
 ### 环境变量（部署层）
 
-> ⚠️ **仓库是私有的**（匿名访问 404）—— `SUENMUSIC_UPDATE_GITHUB_TOKEN` 是**必填项**
-> （需 repo 读权限），没有它 Releases API 一律 404。这是"检查不到更新"的最常见原因。
+> 发行产物统一发布在公开仓库 `sunriseqis/suenapp`，匿名即可访问 Releases API（60次/小时）。
+> 配置 `SUENMUSIC_UPDATE_GITHUB_TOKEN` 可提额到 5000/小时。
 
 ```ini
-SUENMUSIC_UPDATE_GITHUB_REPO=owner/repo   # 缺省 sunriseqis/suenmusic（公开仓库）
+SUENMUSIC_UPDATE_GITHUB_REPO=owner/repo   # 缺省 sunriseqis/suenapp（公开仓库）
 SUENMUSIC_UPDATE_GITHUB_TOKEN=            # 可选：60/h → 5000/h
 SUENMUSIC_UPDATE_GITHUB_API_BASE=         # 可选：API 反代（部署层决策），默认官方
+SUENMUSIC_UPDATE_GITHUB_PROXY=            # 可选：下载代理前缀（如 https://gh-proxy.com/）
 SUENMUSIC_UPDATE_CACHE_DIR=./data/updates # 持久化
 SUENMUSIC_UPDATE_POLL_MINUTES=30          # 0 = 只手点时核对
 ```

@@ -250,11 +250,10 @@ export const config: Config = {
   loginWindowMs: envNum('SUENMUSIC_LOGIN_WINDOW_MS', 5 * 60 * 1000),
   updateSource: envUpdateSource('SUENMUSIC_UPDATE_SOURCE'),
   /**
-   * GitHub 仓库（`owner/repo`）。缺省即本项目的私有仓库 —— **私有仓库的 Releases
-   * API 必须带 token**，匿名访问一律 404。所以 `SUENMUSIC_UPDATE_GITHUB_TOKEN`
-   * 实际上是**必填项**（除非用户在 Web 设置页把来源关掉）。
+   * GitHub 仓库（`owner/repo`）。缺省为公开的安装包发布仓库 `sunriseqis/suenapp`。
+   * 公开仓库的 Releases API 匿名即可访问（60次/小时）；配 token 可提额到 5000/小时。
    */
-  updateGithubRepo: envStr('SUENMUSIC_UPDATE_GITHUB_REPO', 'sunriseqis/suenmusic').trim(),
+  updateGithubRepo: envStr('SUENMUSIC_UPDATE_GITHUB_REPO', 'sunriseqis/suenapp').trim(),
   updateGithubToken: envStr('SUENMUSIC_UPDATE_GITHUB_TOKEN', '').trim(),
   updateGithubApiBase: envStr('SUENMUSIC_UPDATE_GITHUB_API_BASE', 'https://api.github.com').trim().replace(/\/+$/, ''),
   updateGithubProxy: envStr('SUENMUSIC_UPDATE_GITHUB_PROXY', '').trim(),
