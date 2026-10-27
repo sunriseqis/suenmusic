@@ -29,6 +29,7 @@ import { getQQLyric } from '../sources/qq/lyric.ts';
 import { getLyricForTrack } from '../services/lyric-fallback.ts';
 import { QQ_SEARCH_ALL_SLICES, QQ_SEARCH_TYPE, searchQQ } from '../sources/qq/search.ts';
 import { kugouSearchSongs } from '../sources/kugou/source.ts';
+import { searchSongsMulti } from '../services/multi-search.ts';
 import { getKugouCreds } from '../sources/kugou/stream.ts';
 import type { QQSearchSlice } from '../sources/qq/search.ts';
 import { badRequest, notFound } from '../http/errors.ts';
@@ -90,8 +91,25 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     }
 
     const offset = (page - 1) * limit;
-    const result = await searchQQ(query, { offset, limit, slices });
-    upsertTracks(result.songs);
+
+    /**
+     * 单曲分片走多源聚合（酷狗为主 + QQ 兜底，带零翻唱过滤）。
+     *
+     * 只在第一页生效：酷狗搜索没有可靠的翻页游标，翻页仍交给 QQ 保持行为可预期。
+     * 其余分片（专辑/歌手/歌单/MV）维持 QQ —— 那是门面数据，权威度更高。
+     */
+    const multi = slices.includes('song') && page === 1 ? await searchSongsMulti(query, limit) : null;
+    const qqSlices = multi ? slices.filter(s => s !== 'song') : slices;
+    const result = await searchQQ(query, { offset, limit, slices: qqSlices });
+    log.debug(
+      `多源搜索 q=${query} page=${page} multi=${multi ? multi.songs.length + '/' + multi.sources.join(',') : 'null'}`,
+    );
+    if (multi) {
+      result.songs = multi.songs;
+      result.degraded = result.degraded || multi.degraded;
+    } else {
+      upsertTracks(result.songs);
+    }
 
     reply.header('Cache-Control', 'private, max-age=60');
 

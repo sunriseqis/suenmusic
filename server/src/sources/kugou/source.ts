@@ -16,6 +16,7 @@
 import { createLogger } from '../../logger.ts';
 import * as crypto from 'node:crypto';
 import { getKugouDevice } from '../../services/kugou-login.ts';
+import type { Track } from '../qq/adapter.ts';
 
 const log = createLogger('kugou');
 
@@ -57,6 +58,10 @@ export interface KugouTrack {
   privilege: number;
   payType: number;
   coverTemplate: string;
+  /** 酷狗官方原唱标记（IsOriginal===1）。零翻唱过滤的第一道硬门槛 */
+  isOriginal: boolean;
+  /** 歌手 id（SingerId），拼成 kg_ar_<id> 供歌手页跳转 */
+  singerIds: string[];
 }
 
 function md5(s: string): string {
@@ -136,10 +141,60 @@ function adaptSearchRow(r: Record<string, any>): KugouTrack {
     privilege: Number(r.Privilege ?? 0),
     payType: Number(r.PayType ?? 0),
     coverTemplate: String(r.Image ?? ''),
+    // IsOriginal: 1=原唱 0=翻唱/非原唱。实测《知我》前 5 条翻唱全为 0、
+    // 周杰伦《晴天》[叶惠美] 为 1 —— 这是零翻唱过滤最可靠的一道硬门槛。
+    isOriginal: Number(r.IsOriginal ?? 0) === 1,
+    singerIds: String(r.SingerId ?? '')
+      .split(/[、,，/]/)
+      .map((s: string) => s.trim())
+      .filter((s: string) => s.length > 0),
   };
 }
 
 /** 封面模板 → 定尺寸 URL（酷狗封面是 {size} 占位） */
+/**
+ * 酷狗条目 → 统一 Track（`kg_` 前缀）。
+ *
+ * 关键点：把 `kugouMeta`（hash / qualityHashes / albumId / albumAudioId）一起塞进 Track，
+ * 随 `upsertTracks` 落进 tracks.payload_json —— 点播时 resolver 读到它就直接取流，
+ * **0 次二次搜索**（这正是「元数据即播放源」的落点）。
+ */
+export function kugouTrackToTrack(t: KugouTrack): Track {
+  const ar = t.singers.map((s: { name: string }, i: number) => ({
+    id: 'kg_ar_' + (t.singerIds[i] ?? String(i)),
+    name: s.name,
+    mid: t.singerIds[i] ?? String(i),
+    picUrl: '',
+  }));
+  const cover = t.coverTemplate ? kugouCoverUrl(t.coverTemplate) : '';
+  const albumId = 'kg_al_' + (t.albumId || '0');
+  const dt = t.durationSec * 1000;
+  return {
+    id: t.id,
+    mid: t.albumAudioId,
+    name: t.name,
+    ar,
+    artists: ar,
+    al: { id: albumId, mid: t.albumId || '0', name: t.albumName, picUrl: cover },
+    album: { id: albumId, mid: t.albumId || '0', name: t.albumName, picUrl: cover },
+    dt,
+    duration: t.durationSec,
+    playable: true,
+    matched: t.isOriginal,
+    privilege: { playMaxbr: 0, maxbr: 0, freeTrialPrivilege: { resConsumable: false } },
+    kugouMeta: {
+      name: t.name,
+      artists: t.singers.map((s: { name: string }) => s.name),
+      hash: t.hash,
+      qualityHashes: t.qualityHashes,
+      albumId: t.albumId,
+      albumAudioId: t.albumAudioId,
+      durationSec: t.durationSec,
+      coverTemplate: t.coverTemplate,
+    },
+  } as Track;
+}
+
 export function kugouCoverUrl(template: string, size = 480): string {
   return template.replace('{size}', String(size));
 }

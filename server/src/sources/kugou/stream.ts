@@ -391,6 +391,9 @@ export async function resolveKugouDirect(meta: KugouStoredMeta): Promise<Resolve
     privilege: 0,
     payType: 0,
     coverTemplate: meta.coverTemplate ?? '',
+    // 直取路径不参与零翻唱过滤（曲目已落库，说明搜索阶段已通过）
+    isOriginal: true,
+    singerIds: [],
   };
 
   const dfid = await ensureDfid();
