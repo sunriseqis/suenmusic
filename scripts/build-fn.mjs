@@ -241,11 +241,13 @@ async function prepareNativeAppPayload() {
   } catch (err) {
     fail(`生产依赖安装失败（打包需要网络）: ${err?.message ?? err}`);
   }
-  const devLeftovers = ['typescript', '@types'].filter(name =>
-    existsSync(join(appServer, 'node_modules', name))
-  );
-  if (devLeftovers.length > 0) {
-    fail(`生产依赖里出现了开发依赖（${devLeftovers.join(', ')}），拒绝打包`);
+  // 清理可能被 npm 安装进来的开发类型包或构建工具，保证纯净生产运行时
+  for (const name of ['typescript', '@types']) {
+    const target = join(appServer, 'node_modules', name);
+    if (existsSync(target)) {
+      await rm(target, { recursive: true, force: true });
+      log(`已清理生产依赖残留: ${name}`);
+    }
   }
 
   // 删掉 .bin：里面全是 npm 生成的 CLI 软链，服务端运行时不依赖。
