@@ -525,30 +525,25 @@ struct NativeRoot {
             .width('100%')
             .height('100%')
 
-            // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板关浮层
+            // 浮层背板：点背板关浮层（对齐底部 tab 页，零动效直接切换）
             if (this.showServers || this.showCache || this.showCollection) {
               Column()
                 .width('100%')
                 .height('100%')
                 .backgroundColor(Tokens.scrim)
-                .transition(TransitionEffect.OPACITY
-                  .animation({ duration: Motion.standard, curve: Motion.curve }))
                 .onClick(() => {
                   if (this.showServers) { this.showServers = false; }
                   if (this.showCache) { this.showCache = false; }
                 })
             }
 
-            // 服务端管理 / 缓存面板 / 集合详情：底部上滑转场（S4 §二，200ms EaseOut），
-            // 只占内容区（dock 之上），不再遮挡迷你条与 Tab 栏
+            // 服务端管理 / 缓存面板 / 集合详情：对齐底部 tab 页动画（零动效直接切换）
             if (this.showServers) {
               Column() {
                 ServerListPage({ onClose: () => { this.showServers = false; } })
               }
               .width('100%')
               .height('100%')
-              .transition(TransitionEffect.translate({ y: '100%' })
-                .animation({ duration: Motion.standard, curve: Motion.curve }))
             }
 
             if (this.showCache) {
@@ -557,8 +552,6 @@ struct NativeRoot {
               }
               .width('100%')
               .height('100%')
-              .transition(TransitionEffect.translate({ y: '100%' })
-                .animation({ duration: Motion.standard, curve: Motion.curve }))
             }
 
             if (this.showCollection) {
@@ -572,8 +565,6 @@ struct NativeRoot {
               }
               .width('100%')
               .height('100%')
-              .transition(TransitionEffect.translate({ y: '100%' })
-                .animation({ duration: Motion.standard, curve: Motion.curve }))
             }
           }
           .layoutWeight(1)
@@ -594,26 +585,22 @@ struct NativeRoot {
         })
       }
 
-      // 播放页专属背板：播放页是全屏浮层（盖住 dock，web FullPlayer 同口径），背板也全屏
+      // 播放页专属背板：对齐底部 tab 页动画（零动效直接切换）
       if (this.showPlayer) {
         Column()
           .width('100%')
           .height('100%')
           .backgroundColor(Tokens.scrim)
-          .transition(TransitionEffect.OPACITY
-            .animation({ duration: Motion.standard, curve: Motion.curve }))
           .onClick(() => {})
       }
 
-      // 全屏播放页：唯一允许盖住迷你条与 Tab 栏的浮层
+      // 全屏播放页：对齐底部 tab 页动画（零动效直接切换）
       if (this.showPlayer) {
         Column() {
           PlayerPage({ onClose: () => { this.showPlayer = false; } })
         }
         .width('100%')
         .height('100%')
-        .transition(TransitionEffect.translate({ y: '100%' })
-          .animation({ duration: Motion.standard, curve: Motion.curve }))
       }
 
       // 自绘轻提示（全局唯一落点，压在一切浮层之上；不吃点击）

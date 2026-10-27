@@ -866,7 +866,7 @@ onBeforeUnmount(() => {
       <!-- 同 doLogin 里的判据：原生壳（Capacitor ∪ 鸿蒙）才需要填地址 -->
       <div v-if="isNativeShell" class="field">
         <span class="field-name">服务端</span>
-        <NeuInput v-model="loginAddr" placeholder="http://192.168.1.10:3210" />
+        <NeuInput v-model="loginAddr" placeholder="http://IP:端口 或 https://域名" />
       </div>
       <div class="field">
         <span class="field-name">账号</span>

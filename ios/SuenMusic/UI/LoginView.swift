@@ -35,7 +35,7 @@ struct LoginView: View {
             VStack(alignment: .leading, spacing: Dim.s2) {
                 fieldLabel("服务端地址")
                 input {
-                    TextField("http://192.168.1.10:3210", text: $address)
+                    TextField("http://IP:端口 或 https://域名", text: $address)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .keyboardType(.URL)

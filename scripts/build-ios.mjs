@@ -95,32 +95,6 @@ if (process.platform !== 'darwin') {
   fail(`iOS 构建只能在 macOS 上跑（当前 ${process.platform}）`);
 }
 
-if (!existsSync(join(WEB_DIR, 'node_modules'))) {
-  fail(
-    `web/node_modules 不存在（${WEB_DIR}）\n` +
-      `  web 就在本仓 web/ 目录，先跑：cd web && npm ci`
-  );
-}
-
-/**
- * vendor 里的 xcframework 是否就位。
- *
- * ⚠️ **必须在 `syncWeb()` 之后调用，不能放在文件顶部**：`*.xcframework` 被
- * .gitignore 排除、不随仓库分发，全新克隆的仓库里一开始就是缺的 —— 而
- * `syncWeb()` 的第 3 步（`scripts/fix-ios-vendor.sh`）正是负责把它们下载补上。
- * 放在顶部会让 CI / 新机器直接死在这一步，永远走不到下载。
- */
-function assertVendor() {
-  for (const name of ['Capacitor', 'Cordova']) {
-    if (!existsSync(join(VENDOR, `${name}.xcframework`))) {
-      fail(
-        `缺少 ${name}.xcframework —— 先跑 bash scripts/fix-ios-vendor.sh 把它补上\n` +
-          `  （*.xcframework 被 .gitignore 排除，不会随仓库分发）`
-      );
-    }
-  }
-}
-
 /**
  * 版本号与安卓同源。两个都校验，避免把 "1.4 " 这种带空白的内容悄悄带进产物。
  */
@@ -179,18 +153,6 @@ async function readTeamId() {
 // ---------------------------------------------------------------------------
 // 主流程
 // ---------------------------------------------------------------------------
-
-async function syncWeb() {
-  console.log('\n── 1/3 构建 Web 产物 ──');
-  run('npm', ['run', 'build'], { cwd: WEB_DIR });
-
-  console.log('\n── 2/3 同步进 iOS 工程 ──');
-  run('npx', ['cap', 'sync', 'ios'], { cwd: WEB_DIR });
-
-  console.log('\n── 3/3 还原本地 vendor 依赖 ──');
-  // cap sync 刚把 Package.swift 改回远程依赖，这里必须还原，否则 SPM 解析失败
-  run('bash', [join(ROOT, 'scripts/fix-ios-vendor.sh')], { cwd: ROOT });
-}
 
 async function buildIpa(versionName, versionCode) {
   await mkdir(IPA_DIR, { recursive: true });
@@ -278,13 +240,6 @@ console.log(
   `平台 macOS ✔　版本 ${versionName}　${teamId ? `Team ${teamId}` : '未签名导出（不需要 Team）'}`
 );
 
-await syncWeb();
-assertVendor();
-
-if (SYNC_ONLY) {
-  console.log('\n✔ Web 产物已同步进 iOS 工程，现在可以在 Xcode 里直接 Build');
-} else {
-  const { code: versionCode, source } = readVersionCode(versionName);
-  console.log(`versionCode ${versionCode}（${source}）`);
-  await buildIpa(versionName, versionCode);
-}
+const { code: versionCode, source } = readVersionCode(versionName);
+console.log(`versionCode ${versionCode}（${source}）`);
+await buildIpa(versionName, versionCode);

@@ -106,7 +106,7 @@ async function submit(): Promise<void> {
         <span class="k">服务端地址</span>
         <NeuInput
           v-model="serverAddr"
-          placeholder="http://192.168.1.100:5274"
+          placeholder="http://IP:端口 或 https://域名"
           autocomplete="url"
           @blur="onServerAddrChange"
         />

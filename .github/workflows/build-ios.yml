@@ -1,6 +1,11 @@
-name: 构建发行苹果端 (手动)
+name: 构建发行苹果端
 
 on:
+  push:
+    tags:
+      - 'v*'
+    paths:
+      - 'VERSION'
   workflow_dispatch:
     inputs:
       tag_name:
@@ -21,19 +26,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install Sub-project Dependencies
-        run: |
-          npm install --no-audit --no-fund
-          cd web && npm ci --no-audit --no-fund && cd ..
-          cd server && npm ci --no-audit --no-fund && cd ..
-
       - name: Select Xcode Version
         run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
-
-      - name: Build Web SPA & Sync Capacitor
-        run: |
-          npm run web:build
-          npm run ios:sync
 
       - name: Build Unsigned IPA
         run: |
@@ -45,7 +39,11 @@ jobs:
           RAW_VER=$(cat VERSION | tr -d '[:space:]')
           TAG="${{ github.event.inputs.tag_name }}"
           if [ -z "$TAG" ]; then
-            TAG="v${RAW_VER}"
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              TAG="${GITHUB_REF#refs/tags/}"
+            else
+              TAG="v${RAW_VER}"
+            fi
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${RAW_VER}" >> $GITHUB_OUTPUT

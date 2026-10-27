@@ -51,7 +51,7 @@ export struct LoginPage {
 
       Column({ space: Dim.s2 }) {
         Text('服务端地址').fontSize(Dim.fsMinor).fontColor(Tokens.text2).width('100%')
-        TextInput({ text: this.address, placeholder: 'http://192.168.1.10:3210' })
+        TextInput({ text: this.address, placeholder: 'http://IP:端口 或 https://域名' })
           .type(InputType.Normal)
           .onChange((v: string) => { this.address = v; })
 

@@ -168,7 +168,7 @@ async function testAll(): Promise<void> {
       >{{ i + 1 }}</span>
 
       <div class="srv-input">
-        <NeuInput v-model="item.url" placeholder="http://192.168.1.10:3210" />
+        <NeuInput v-model="item.url" placeholder="http://IP:端口 或 https://域名" />
       </div>
 
       <span

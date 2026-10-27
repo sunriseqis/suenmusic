@@ -422,7 +422,7 @@ export struct ServerListPage {
         .width('100%')
       NeuInput({ content: this.newName, placeholder: '名称（可选，如：客厅主机）' })
         .width('100%')
-      NeuInput({ content: this.newUrl, placeholder: '地址，如 http://192.168.1.10:3210' })
+      NeuInput({ content: this.newUrl, placeholder: '地址，如 http://IP:端口 或 https://域名' })
         .width('100%')
       Row({ space: Dim.s2 }) {
         Column() {

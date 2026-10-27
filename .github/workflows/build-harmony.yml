@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+    paths:
+      - 'VERSION'
   workflow_dispatch:
     inputs:
       tag_name:

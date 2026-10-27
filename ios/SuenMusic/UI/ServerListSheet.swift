@@ -640,7 +640,7 @@ struct ServerListSheet: View {
                 .foregroundStyle(p.text1)
                 .frame(maxWidth: .infinity, alignment: .leading)
             NeuInput($store.newName, placeholder: "名称（可选，如：客厅主机）")
-            NeuInput($store.newUrl, placeholder: "地址，如 http://192.168.1.10:3210")
+            NeuInput($store.newUrl, placeholder: "地址，如 http://IP:端口 或 https://域名")
             HStack(spacing: Dim.s2) {
                 WebButton("取消", size: .md, block: true) {
                     store.cancelForm()
