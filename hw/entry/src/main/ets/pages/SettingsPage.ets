@@ -22,7 +22,6 @@ import { AppToast } from '../common/AppToast';
 import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { bundleManager, common } from '@kit.AbilityKit';
-import { formProvider, formInfo } from '@kit.FormKit';
 import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
@@ -121,10 +120,6 @@ export struct SettingsPage {
   @State pwBusy: boolean = false;
   @State signOutAsk: boolean = false;
 
-  // ---- T9：桌面卡片管理 ----
-  /** 已添加的桌面卡片张数（-1 = 还没查） */
-  @State cardCount: number = -1;
-  @State cardHelpOpen: boolean = false;
   @State biliLabel: string = '未授权';
   @State neteaseLabel: string = '未授权';
   /** 酷狗登录态文案（服务端四态 label：未登录 / 登录已失效 / 会员到期 / 正常） */
@@ -290,33 +285,6 @@ export struct SettingsPage {
     }
   }
 
-
-  // ---------------- T9：桌面卡片管理 ----------------
-
-  /** 查已发布到桌面的卡片张数（拿不到就是 -1，UI 不硬编 0） */
-  private loadCardCount(): void {
-    formProvider.getPublishedRunningFormInfos()
-      .then((infos: Array<formInfo.RunningFormInfo>) => {
-        this.cardCount = infos.length;
-      })
-      .catch(() => {
-        this.cardCount = -1;
-      });
-  }
-
-  private cardCountLabel(): string {
-    if (this.cardCount < 0) {
-      return '查看';
-    }
-    return this.cardCount === 0 ? '未添加' : '已添加 ' + this.cardCount + ' 张';
-  }
-
-  private cardHelpText(): string {
-    return '在桌面长按空白处 →「服务卡片」→ 找到 SuenMusic → 选 2×2 或 2×4 拖到桌面。\n\n'
-      + '· 尺寸：2×2 只显示封面/歌名/播放键；2×4 多显示歌手与滚动歌词。\n'
-      + '· 按钮：播放/暂停、上一首、下一首，点击即生效（App 未运行时走冷启动）。\n'
-      + '· 主题：「浅色/深色」按设置里的主题走；「跟随系统」时随系统深浅切换。';
-  }
 
   /** 主题分段当前下标（跟随系统 / 浅色 / 深色） */
   private themeIndex(): number {
@@ -1654,32 +1622,6 @@ export struct SettingsPage {
             .borderRadius(Dim.radiusMd)
             .border({ width: Dim.hairline, color: Tokens.line })
 
-            // 卡片（T9）：已添加张数 + 添加/使用说明
-            this.secLabel('卡片')
-            Column() {
-              Row() {
-                Text('桌面卡片')
-                  .fontSize(Dim.fsBody)
-                  .fontColor(Tokens.text1)
-                  .layoutWeight(1)
-                Text(this.cardCountLabel())
-                  .fontSize(Dim.fsMinor)
-                  .fontColor(Tokens.text2)
-              }
-              .width('100%')
-              .height(Dim.touchMin)
-              .padding({ left: Dim.s4, right: Dim.s4 })
-              .accessibilityText('桌面卡片：' + this.cardCountLabel())
-              .onClick(() => {
-                this.loadCardCount();
-                this.cardHelpOpen = true;
-              })
-            }
-            .width('100%')
-            .backgroundColor(Tokens.panel)
-            .borderRadius(Dim.radiusMd)
-            .border({ width: Dim.hairline, color: Tokens.line })
-
             this.secLabel('多服务端')
             Column() {
               Row() {
@@ -1770,22 +1712,6 @@ export struct SettingsPage {
         })
       }
 
-
-      // T9：卡片添加/使用说明
-      if (this.cardHelpOpen) {
-        ConfirmDialog({
-          titleStr: '桌面卡片',
-          messageStr: this.cardHelpText(),
-          confirmLabel: '知道了',
-          singleFlag: true,
-          onConfirm: (): void => {
-            this.cardHelpOpen = false;
-          },
-          onCancel: (): void => {
-            this.cardHelpOpen = false;
-          }
-        })
-      }
 
       // 清空缓存二次确认（自绘哑光弹窗，不用系统 AlertDialog）
       if (this.clearCacheAsk) {

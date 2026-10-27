@@ -9,7 +9,7 @@ import SwiftUI
  *
  *   · 本机：播放（缓存用量行 + 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
  *   · 智能：画像折叠卡（summary → 分隔线 → profileLines → ledgerLines）/ 调优（guidance 输入 + 上一次回显）
- *   · 高级：检查更新（三形态）/ 桌面卡片（iOS 暂无 widget）/ 多服务端 / 音源授权（只读）
+ *   · 高级：检查更新（三形态）/ 多服务端 / 音源授权（只读）
  *
  * 五张弹层在 SettingsSheets.swift；本页只负责挂载与数据。
  * 提示统一走 ToastCenter，二次确认统一走 ConfirmDialog（不再用系统 alert）。
@@ -48,7 +48,6 @@ struct SettingsView: View {
     // 高级
     @State private var updState = ""
     @State private var checkingUpd = false
-    @State private var cardHelpOpen = false
     @AppStorage("auto_failover") private var autoFailover = true
     @State private var biliLabel = "未授权"
     @State private var neteaseLabel = "未授权"
@@ -316,15 +315,6 @@ struct SettingsView: View {
                 .accessibilityLabel("检查更新，当前 " + updateLabel)
             }
 
-            secLabel("卡片")
-            card {
-                // iOS 尚无桌面 widget：先固定「未添加」，点击给说明
-                rowButton("桌面卡片", value: "未添加", first: true) {
-                    cardHelpOpen = true
-                }
-                .accessibilityLabel("桌面卡片：未添加")
-            }
-
             secLabel("多服务端")
             card {
                 Button {
@@ -503,16 +493,6 @@ struct SettingsView: View {
                 }
             )
         }
-        if cardHelpOpen {
-            ConfirmDialog(
-                title: "桌面卡片",
-                message: SettingsView.cardHelpText,
-                confirmTitle: "知道了",
-                single: true,
-                onCancel: { cardHelpOpen = false },
-                onConfirm: { cardHelpOpen = false }
-            )
-        }
     }
 
     private func closeSheet() {
@@ -528,12 +508,6 @@ struct SettingsView: View {
         return 0
         #endif
     }
-
-    /// iOS 暂无桌面 widget 的说明文案（hw 的卡片说明是 HarmonyOS 服务卡片专属，不能照搬）
-    private static let cardHelpText = "iOS 桌面小组件还在开发中，这一版没有可添加的卡片。\n\n"
-        + "· 进度：会补 2×2 与 2×4 两种尺寸，2×2 只显示封面 / 歌名 / 播放键，2×4 多显示歌手与滚动歌词。\n"
-        + "· 按钮：播放 / 暂停、上一首、下一首，点击即生效（App 未运行时走冷启动）。\n"
-        + "· 主题：跟随设置里「主题」的浅色 / 深色；「跟随系统」时随系统深浅切换。"
 
     private var cacheQuota: Int64 {
         AudioCacheStore.maxBytes
