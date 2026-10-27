@@ -1,15 +1,11 @@
 <script setup lang="ts">
 /**
- * 管理员：更新通道设置（GitHub 源 + 下载代理）。
+ * 管理员：更新通道设置（GitHub 源 + 出站代理）。
  *
  * 后端：`GET/PATCH /api/admin/update-settings`（只认 Web cookie 会话，与其它管理操作同一渠道闸）。
- * 字段与 `server/src/services/update-settings.ts` 的 `UpdateProxySettings` 一一对应：
- *   source        github | off
- *   downloadProxy 产物下载代理前缀（拼在 browser_download_url 前）；空 = 直连
- *   apiBase       GitHub API 反代基地址；空 = 官方 api.github.com
- *
- * ⚠️ 两个代理**不能互相替代**：API_BASE 管 `/repos/.../releases` 的 JSON 请求，
- *    PROXY 管 `.hap/.ipa/.apk` 二进制下载。用文件代理前缀去套 JSON API 通常会失败。
+ * 区分部署方式：
+ *   - 飞牛原生套件（fnos）：服务端缓存最新 .fpk，提供一键下载与覆盖安装指引；
+ *   - Docker 容器（docker）：仅检测并提示新版本，引导用户更新镜像，不拉取 .fpk。
  */
 import { onMounted, ref } from 'vue';
 import { http, ApiError } from '@/api/client.ts';
@@ -24,19 +20,20 @@ interface UpdateSettings {
   /** 代理地址，如 http://127.0.0.1:7890（可含凭据） */
   proxyUrl: string;
   currentVersion?: string;
+  deployMode?: 'fnos' | 'docker';
 }
 
-interface UpdateCheckReply {
+interface ServerUpdateReply {
   available: boolean;
-  current: { versionName: string; versionCode: number };
-  latest: {
+  currentVersion: string;
+  latestVersion: string;
+  deployMode: 'fnos' | 'docker';
+  artifact: {
     fileName: string;
-    versionName: string;
-    versionCode: number;
     size: number;
+    downloadToken: string;
+    downloadPath: string;
   } | null;
-  downloadPath: string;
-  downloadToken: string;
 }
 
 const ui = useUiStore();
@@ -46,8 +43,9 @@ const source = ref<'github' | 'off'>('github');
 const proxyKind = ref<'none' | 'http'>('none');
 const proxyUrl = ref('');
 const currentVersion = ref('2.0.0');
+const deployMode = ref<'fnos' | 'docker'>('docker');
 const checking = ref(false);
-const updResult = ref<UpdateCheckReply | null>(null);
+const updResult = ref<ServerUpdateReply | null>(null);
 
 function dirty(): boolean {
   return (
@@ -74,6 +72,7 @@ async function load(): Promise<void> {
     proxyKind.value = s.proxyKind;
     proxyUrl.value = s.proxyUrl;
     if (s.currentVersion) currentVersion.value = s.currentVersion;
+    if (s.deployMode) deployMode.value = s.deployMode;
     takeSnapshot(s);
   } catch (e) {
     ui.err(e instanceof ApiError ? e.message : '读取更新通道设置失败');
@@ -82,15 +81,15 @@ async function load(): Promise<void> {
   }
 }
 
-async function checkFnUpdate(): Promise<void> {
+async function checkServerUpdate(): Promise<void> {
   checking.value = true;
   updResult.value = null;
   try {
-    const q = `?platform=fnos&version_name=${encodeURIComponent(currentVersion.value)}&version_code=0&force=1`;
-    const res = await http.get<UpdateCheckReply>(`/api/update/check${q}`);
+    const res = await http.get<ServerUpdateReply>('/api/admin/server-update?force=1');
     updResult.value = res;
+    if (res.deployMode) deployMode.value = res.deployMode;
     if (res.available) {
-      ui.ok?.(`发现新版本 v${res.latest?.versionName}`);
+      ui.ok?.(`发现新版本 v${res.latestVersion}`);
     } else {
       ui.ok?.('当前已是最新版本');
     }
@@ -102,8 +101,10 @@ async function checkFnUpdate(): Promise<void> {
 }
 
 function downloadFnPackage(): void {
-  if (!updResult.value?.downloadToken) return;
-  const url = `${updResult.value.downloadPath}?platform=fnos&token=${encodeURIComponent(updResult.value.downloadToken)}`;
+  if (!updResult.value?.artifact?.downloadToken) return;
+  const token = updResult.value.artifact.downloadToken;
+  const path = updResult.value.artifact.downloadPath || '/api/update/download';
+  const url = `${path}?platform=fnos&token=${encodeURIComponent(token)}`;
   window.open(url, '_blank');
 }
 
@@ -140,11 +141,12 @@ onMounted(load);
         <span class="row-name">当前版本</span>
         <div class="version-row">
           <span class="version-tag">v{{ currentVersion }}</span>
+          <span class="mode-tag">{{ deployMode === 'fnos' ? '飞牛套件' : 'Docker 容器' }}</span>
           <NeuButton
             v-if="source === 'github'"
             size="sm"
             :loading="checking"
-            @click="checkFnUpdate"
+            @click="checkServerUpdate"
           >
             {{ checking ? '检查中…' : '检查更新' }}
           </NeuButton>
@@ -153,25 +155,42 @@ onMounted(load);
 
       <!-- 更新结果提示区 -->
       <div v-if="updResult" class="upd-card">
-        <template v-if="updResult.available && updResult.latest">
+        <template v-if="updResult.available">
           <div class="upd-head">
             <span class="badge">发现新版本</span>
-            <span class="new-ver">v{{ updResult.latest.versionName }}</span>
-            <span class="pkg-size">({{ (updResult.latest.size / 1024 / 1024).toFixed(1) }} MB)</span>
+            <span class="new-ver">v{{ updResult.latestVersion }}</span>
+            <span v-if="updResult.artifact?.size" class="pkg-size">
+              ({{ (updResult.artifact.size / 1024 / 1024).toFixed(1) }} MB)
+            </span>
           </div>
-          <p class="upd-desc">飞牛私有云（fnOS）原生套件安装包已在服务端缓存就绪，可直接下载。</p>
-          <div class="upd-btn-row">
-            <NeuButton
-              variant="primary"
-              size="sm"
-              @click="downloadFnPackage"
-            >
-              下载飞牛套件更新包 (.fpk)
-            </NeuButton>
-          </div>
-          <p class="f-hint">
-            💡 升级方法：下载安装包后，在飞牛桌面打开「应用中心」并点击右上角「手动安装」，上传新安装包覆盖即可平滑升级。
-          </p>
+
+          <!-- 飞牛套件模式：提供直接下载与平滑覆盖安装指引 -->
+          <template v-if="updResult.deployMode === 'fnos'">
+            <p class="upd-desc">飞牛私有云（fnOS）原生套件安装包已在服务端缓存就绪，可直接下载。</p>
+            <div v-if="updResult.artifact" class="upd-btn-row">
+              <NeuButton
+                variant="primary"
+                size="sm"
+                @click="downloadFnPackage"
+              >
+                下载飞牛套件更新包 (.fpk)
+              </NeuButton>
+            </div>
+            <p class="f-hint">
+              💡 升级方法：下载安装包后，在飞牛桌面打开「应用中心」并点击右上角「手动安装」，上传新安装包覆盖即可平滑升级。
+            </p>
+          </template>
+
+          <!-- Docker 模式：仅提示更新，引导用户自行拉取最新镜像 -->
+          <template v-else>
+            <p class="upd-desc">当前运行于 Docker 容器环境。服务端检测到新版本镜像已发布，请更新 Docker 镜像完成升级。</p>
+            <div class="cmd-box">
+              <code>docker compose pull &amp;&amp; docker compose up -d</code>
+            </div>
+            <p class="f-hint">
+              💡 升级提示：若通过群晖 Container Manager、飞牛 Docker 或 1Panel 等面板管理，在容器列表中对 suenmusic 执行「拉取最新镜像」并重启容器即可。
+            </p>
+          </template>
         </template>
         <template v-else>
           <div class="upd-latest">✔ 当前已是最新版本 (v{{ currentVersion }})</div>
@@ -199,15 +218,19 @@ onMounted(load);
           v-model="proxyUrl"
           placeholder="http://127.0.0.1:7890（留空 = 直连）"
         />
-        <p class="f-hint">填写后，GitHub 的检查与下载都经由该 HTTP 代理；清空保存即恢复直连。</p>
+        <p class="f-hint">
+          仅在服务端无法直连 GitHub 时填写。支持标准 HTTP 代理（可带认证凭据，如 <code>http://user:pass@192.168.1.1:7890</code>）。
+        </p>
       </div>
 
       <div class="actions">
-        <NeuButton variant="primary" size="sm" :loading="saving" :disabled="!dirty()" @click="save">
-          {{ saving ? '保存中…' : '保存设置' }}
-        </NeuButton>
-        <NeuButton v-if="dirty()" size="sm" variant="ghost" :disabled="saving" @click="load">
-          放弃更改
+        <NeuButton
+          variant="primary"
+          :disabled="!dirty() || saving"
+          :loading="saving"
+          @click="save"
+        >
+          保存设置
         </NeuButton>
       </div>
     </template>
@@ -220,24 +243,43 @@ onMounted(load);
 .row-name { width: 96px; flex: none; font-size: 13px; color: var(--t2); }
 .version-row { display: flex; align-items: center; gap: 12px; }
 .version-tag { font-size: 13px; font-weight: 600; color: var(--t1); font-family: var(--font-mono, monospace); }
+.mode-tag {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--panel-2, rgba(0, 0, 0, 0.05));
+  color: var(--t2);
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+}
 .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
 .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
 .switch-ui {
-  width: 36px; height: 20px; border-radius: 10px;
-  background: var(--track); position: relative; transition: background 0.2s ease;
-  flex: none;
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--line);
+  transition: background 0.2s;
 }
 .switch-ui::after {
-  content: ''; position: absolute; top: 2px; left: 2px;
-  width: 16px; height: 16px; border-radius: 50%;
-  background: var(--panel); transition: transform 0.2s ease;
-  box-shadow: 0 1px 3px var(--sd);
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
 }
-.switch input:checked + .switch-ui { background: var(--accent); }
-.switch input:checked + .switch-ui::after { transform: translateX(16px); }
-.switch input:focus-visible + .switch-ui { outline: 2px solid var(--accent); outline-offset: 2px; }
-.switch-label { font-size: 13px; color: var(--t1); }
-.hint { margin: 0; font-size: 12px; color: var(--t2); line-height: 1.5; }
+.switch input:checked + .switch-ui {
+  background: var(--accent);
+}
+.switch input:checked + .switch-ui::after {
+  transform: translateX(16px);
+}
+.switch-label { font-size: 12px; color: var(--t2); }
+.hint { margin: 0; font-size: 11px; color: var(--t3); line-height: 1.5; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .f-label { font-size: 12px; color: var(--t2); }
 .f-hint { margin: 0; font-size: 11px; color: var(--t2); line-height: 1.5; }
@@ -267,5 +309,17 @@ onMounted(load);
 .pkg-size { font-size: 12px; color: var(--t2); }
 .upd-desc { margin: 0; font-size: 12px; color: var(--t1); line-height: 1.4; }
 .upd-btn-row { margin-top: 4px; display: flex; }
+.cmd-box {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--panel, #f3f4f6);
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.08));
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  color: var(--t1);
+  user-select: all;
+  display: inline-block;
+  align-self: flex-start;
+}
 .upd-latest { margin: 0; font-size: 12px; color: var(--accent, #10b981); font-weight: 500; }
 </style>

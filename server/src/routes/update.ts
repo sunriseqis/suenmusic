@@ -24,7 +24,7 @@ import {
   type UpdatePlatform,
 } from '../services/update-types.ts';
 import { signUpdateToken, verifyUpdateToken } from '../utils/update-token.ts';
-import { cachedFilePath, readCachedArtifact, refreshPlatform, versionCodeOf } from '../services/github-update.ts';
+import { cachedFilePath, checkServerUpdate, readCachedArtifact, refreshPlatform, versionCodeOf } from '../services/github-update.ts';
 import {
   getUpdateProxySettings,
   saveUpdateProxySettings,
@@ -32,6 +32,7 @@ import {
   type UpdateProxyKind,
 } from '../services/update-settings.ts';
 import { SERVER_VERSION } from '../app.ts';
+import { getDeployMode } from '../services/deploy-mode.ts';
 
 function versionName(value: unknown): string {
   const text = String(value ?? '').trim();
@@ -210,7 +211,15 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
     return {
       ...getUpdateProxySettings(),
       currentVersion: SERVER_VERSION,
+      deployMode: getDeployMode(),
     };
+  });
+
+  app.get('/api/admin/server-update', async req => {
+    requireWebAdmin(req);
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const force = ['1', 'true', 'yes'].includes(String(query.force ?? '').toLowerCase());
+    return checkServerUpdate(force);
   });
 
   app.patch('/api/admin/update-settings', async req => {

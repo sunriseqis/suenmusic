@@ -350,6 +350,7 @@ start_process() {
     #
     # 全部用 `${VAR:-默认}`：.env 里写了的以用户为准（重审 F）。
     export NODE_ENV="${NODE_ENV:-production}"
+    export SUENMUSIC_DEPLOY_ENV="${SUENMUSIC_DEPLOY_ENV:-fnos}"
     export SUENMUSIC_HOST="${SUENMUSIC_HOST:-0.0.0.0}"
     export SUENMUSIC_PORT="${PORT}"
     export SUENMUSIC_DB="${SUENMUSIC_DB:-${DATA_DIR}/suenmusic.db}"

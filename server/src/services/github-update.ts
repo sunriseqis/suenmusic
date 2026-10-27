@@ -24,6 +24,9 @@ import { getUpdateProxySettings, proxyUriSafe } from './update-settings.ts';
 import { updateProxyDispatcher } from '../utils/http-agent.ts';
 import { ProxyAgent } from 'undici';
 import { createLogger } from '../logger.ts';
+import { SERVER_VERSION } from '../app.ts';
+import { getDeployMode, type DeployMode } from './deploy-mode.ts';
+import { signUpdateToken } from '../utils/update-token.ts';
 
 const log = createLogger('update');
 import {
@@ -90,7 +93,7 @@ function versionFromTag(tag: string): string | null {
   return m ? m[1] : null;
 }
 
-function compareSemver(a: string, b: string): number {
+export function compareSemver(a: string, b: string): number {
   const pa = a.split('.').map(Number);
   const pb = b.split('.').map(Number);
   const len = Math.max(pa.length, pb.length);
@@ -284,15 +287,120 @@ export async function refreshPlatform(
   return artifact;
 }
 
+export function pickLatestReleaseVersion(releases: GithubRelease[]): string | null {
+  let best: string | null = null;
+  for (const release of releases) {
+    const v = versionFromTag(release.tag_name ?? '');
+    if (!v) continue;
+    if (!best || compareSemver(v, best) > 0) {
+      best = v;
+    }
+  }
+  return best;
+}
+
+export interface ServerUpdateResult {
+  available: boolean;
+  currentVersion: string;
+  latestVersion: string;
+  deployMode: DeployMode;
+  artifact: {
+    fileName: string;
+    size: number;
+    downloadToken: string;
+    downloadPath: string;
+  } | null;
+}
+
+let cachedDockerLatestVersion: { version: string; checkedAt: number } | null = null;
+
+/**
+ * 检查服务端/套件自身更新：
+ * - fnOS 原生套件部署：自动拉取并缓存 .fpk，返回下载信息供用户覆盖安装；
+ * - Docker 部署：仅比对最新镜像版本，提示用户手动拉取最新镜像，不下载 .fpk。
+ */
+export async function checkServerUpdate(force = false): Promise<ServerUpdateResult> {
+  const mode = getDeployMode();
+
+  if (mode === 'fnos') {
+    let artifact = readCachedArtifact('fnos');
+    if (force || !artifact) {
+      try {
+        artifact = await refreshPlatform('fnos', force);
+      } catch (err) {
+        log.warn(`检查飞牛套件更新失败：${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    const latestVersion = artifact ? artifact.versionName : SERVER_VERSION;
+    const available = artifact ? compareSemver(artifact.versionName, SERVER_VERSION) > 0 : false;
+    return {
+      available,
+      currentVersion: SERVER_VERSION,
+      latestVersion,
+      deployMode: 'fnos',
+      artifact: available && artifact ? {
+        fileName: artifact.fileName,
+        size: artifact.size,
+        downloadToken: signUpdateToken('fnos'),
+        downloadPath: '/api/update/download',
+      } : null,
+    };
+  }
+
+  // Docker 部署逻辑：只比对 GitHub Releases 上的最新标签版本，不拉取 .fpk 产物
+  let latestVersion = SERVER_VERSION;
+  if (!force && cachedDockerLatestVersion && (Date.now() - cachedDockerLatestVersion.checkedAt < 10 * 60 * 1000)) {
+    latestVersion = cachedDockerLatestVersion.version;
+  } else {
+    try {
+      const releases = await listReleases();
+      const picked = pickLatestReleaseVersion(releases);
+      if (picked) {
+        latestVersion = picked;
+        cachedDockerLatestVersion = { version: picked, checkedAt: Date.now() };
+      }
+    } catch (err) {
+      log.warn(`检查 Docker 镜像更新失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+  const available = compareSemver(latestVersion, SERVER_VERSION) > 0;
+  return {
+    available,
+    currentVersion: SERVER_VERSION,
+    latestVersion,
+    deployMode: 'docker',
+    artifact: null,
+  };
+}
+
 /** 轮询全部平台（后台定时调用） */
 export async function refreshAll(): Promise<void> {
   // 来源以 Web 设置页为准（env 只作初始缺省）
   if (getUpdateProxySettings().source === 'off' || config.updateSource === 'off') return;
-  for (const platform of Object.keys(EXTENSIONS) as UpdatePlatform[]) {
+  const mode = getDeployMode();
+  // 飞牛原生套件才拉取 .fpk；Docker 部署不拉取 .fpk，只拉取移动双端 (.hap / .ipa)
+  const platforms: UpdatePlatform[] = mode === 'fnos'
+    ? ['harmony', 'ios', 'fnos']
+    : ['harmony', 'ios'];
+
+  for (const platform of platforms) {
     try {
       await refreshPlatform(platform);
     } catch (err) {
       log.warn(`更新检查失败（${platform}）：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // Docker 模式下定时刷新版本号缓存
+  if (mode === 'docker') {
+    try {
+      const releases = await listReleases();
+      const picked = pickLatestReleaseVersion(releases);
+      if (picked) {
+        cachedDockerLatestVersion = { version: picked, checkedAt: Date.now() };
+      }
+    } catch {
+      /* ignore */
     }
   }
 }

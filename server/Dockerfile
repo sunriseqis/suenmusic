@@ -25,6 +25,7 @@ RUN apk add --no-cache tzdata wget ca-certificates
 WORKDIR /app
 
 ENV NODE_ENV=production \
+    SUENMUSIC_DEPLOY_ENV=docker \
     SUENMUSIC_HOST=0.0.0.0 \
     SUENMUSIC_PORT=3210 \
     SUENMUSIC_DB=/app/data/suenmusic.db

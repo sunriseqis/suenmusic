@@ -124,7 +124,7 @@ assert(fnData1.downloadToken.length > 0);
 
 import { SESSION_COOKIE } from '../http/session-cookie.ts';
 
-// 测试 4.4c：管理端 update-settings 返回真实版本号
+// 测试 4.4c：管理端 update-settings 返回真实版本号与部署模式
 const adminSettingsRes = await app.inject({
   method: 'GET',
   url: '/api/admin/update-settings',
@@ -135,6 +135,37 @@ const adminSettingsRes = await app.inject({
 assert.strictEqual(adminSettingsRes.statusCode, 200);
 const adminSettingsData = JSON.parse(adminSettingsRes.payload);
 assert.strictEqual(adminSettingsData.currentVersion, '2.0.0');
+assert(['docker', 'fnos'].includes(adminSettingsData.deployMode));
+
+// 测试 4.4d：管理端 GET /api/admin/server-update 接口
+// 模拟 fnos 模式
+process.env.SUENMUSIC_DEPLOY_ENV = 'fnos';
+const fnServerUpd = await app.inject({
+  method: 'GET',
+  url: '/api/admin/server-update',
+  headers: {
+    cookie: `${SESSION_COOKIE}=${session.refreshToken}`,
+  },
+});
+assert.strictEqual(fnServerUpd.statusCode, 200);
+const fnServerData = JSON.parse(fnServerUpd.payload);
+assert.strictEqual(fnServerData.deployMode, 'fnos');
+assert.strictEqual(fnServerData.currentVersion, '2.0.0');
+
+// 模拟 docker 模式
+process.env.SUENMUSIC_DEPLOY_ENV = 'docker';
+const dockerServerUpd = await app.inject({
+  method: 'GET',
+  url: '/api/admin/server-update',
+  headers: {
+    cookie: `${SESSION_COOKIE}=${session.refreshToken}`,
+  },
+});
+assert.strictEqual(dockerServerUpd.statusCode, 200);
+const dockerServerData = JSON.parse(dockerServerUpd.payload);
+assert.strictEqual(dockerServerData.deployMode, 'docker');
+assert.strictEqual(dockerServerData.artifact, null); // Docker 模式不提供 .fpk 产物下载
+delete process.env.SUENMUSIC_DEPLOY_ENV;
 
 // 测试 4.5：三端通过短期 token 下载（模拟浏览器或侧载工具直接发起，不需要 Authorization 头）
 for (const p of ['harmony', 'ios', 'fnos'] as const) {
