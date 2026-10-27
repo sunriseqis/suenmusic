@@ -1069,13 +1069,16 @@ final class LocalStreamProxy {
         guard !base.isEmpty else { return nil }
         let encoded = trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId
         var components = URLComponents(string: "\(base)/api/stream/\(encoded)")
+        var queryItems: [URLQueryItem] = [URLQueryItem(name: "platform", value: "ios")]
         if !token.isEmpty {
-            components?.queryItems = [URLQueryItem(name: "t", value: token)]
+            queryItems.append(URLQueryItem(name: "t", value: token))
         }
+        components?.queryItems = queryItems
         guard let url = components?.url else { return nil }
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
-        request.setValue("SuenMusic/1.0 (iOS)", forHTTPHeaderField: "User-Agent")
+        request.setValue("ios", forHTTPHeaderField: "X-Platform")
+        request.setValue("SuenMusic-iOS/1.0", forHTTPHeaderField: "User-Agent")
         if startOffset > 0 {
             /**
              ⚠️ **只有续拉才带 `Range`，首次整首下载绝不能带**（2026-09-26 实测教训）。

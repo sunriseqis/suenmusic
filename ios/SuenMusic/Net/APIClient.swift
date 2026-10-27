@@ -266,6 +266,8 @@ final class APIClient {
         req.httpMethod = method
         // 私有 IP 4 秒快速失败；公网给 20 秒（反代/隧道首包可能慢）
         req.timeoutInterval = ServerRouter.isPrivate(base) ? 4 : 20
+        req.setValue("ios", forHTTPHeaderField: "X-Platform")
+        req.setValue("SuenMusic-iOS/1.0", forHTTPHeaderField: "User-Agent")
         if authed, let token = accessToken {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
@@ -344,7 +346,7 @@ final class APIClient {
     }
 
     func resolve(trackId: String) async throws -> ResolveResponse {
-        try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)")
+        try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)", query: ["platform": "ios"])
     }
 
     // MARK: 集合页

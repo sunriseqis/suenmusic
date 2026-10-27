@@ -139,6 +139,17 @@ function memoryDelete(key: string): void {
   memory.delete(key);
 }
 
+export function isFlacUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return (
+    /\.flac(\?|$)/i.test(url) ||
+    /quflac/i.test(url) ||
+    /audio\/x-flac/i.test(url) ||
+    /\.ogg(\?|$)/i.test(url) ||
+    /audio\/ogg/i.test(url)
+  );
+}
+
 // ---------- 对外接口 ----------
 
 export interface ResolveOptions {
@@ -152,6 +163,8 @@ export interface ResolveOptions {
    * 一次失败结果会让这首歌在负缓存周期内怎么重试都播不出来。
    */
   retry?: boolean;
+  /** 优先使用 MP3（iOS 客户端规避 FLAC 播放器兼容性问题） */
+  preferMp3?: boolean;
 }
 
 /**
@@ -176,6 +189,9 @@ export function resolveTrack(
     });
   }
 
+  const preferMp3 = Boolean(options.preferMp3);
+  const cKey = preferMp3 ? `${key}:mp3` : key;
+
   /**
    * 用户源钉（锚定页「只用某源」）。
    *
@@ -187,13 +203,13 @@ export function resolveTrack(
    */
   const pin = getPin(key);
   if (pin) {
-    memoryDelete(key);
-    deleteSource(key);
+    memoryDelete(cKey);
+    deleteSource(cKey);
   }
 
   if (options.force) {
-    memoryDelete(key);
-    deleteSource(key);
+    memoryDelete(cKey);
+    deleteSource(cKey);
     // 强制重解析时必须同时清掉持久层，否则下一轮又读到旧的过期地址。
     // 锚定映射**不在清理范围**：force 的语义是"重新拿一个新鲜地址"，
     // 不是"重新匹配视频"——锚点直连取流恰好就是最快的新鲜地址来源。
@@ -205,59 +221,71 @@ export function resolveTrack(
      * 用户看到的就是"这一首怎么点都播不出来，换一首再切回来又好了"。
      */
     if (options.retry) {
-      const failed = memoryGet(key);
-      if (failed && !failed.ok) memoryDelete(key);
-      const failedRow = getSource(key);
-      if (failedRow && !failedRow.ok) deleteSource(key);
+      const failed = memoryGet(cKey);
+      if (failed && !failed.ok) memoryDelete(cKey);
+      const failedRow = getSource(cKey);
+      if (failedRow && !failedRow.ok) deleteSource(cKey);
     }
 
     // 优先检查用户手动锚定：手动固定的锚点具有最高权威（**但源钉优先**，见函数开头）
     const anchor = getAnchor(key);
     if (anchor?.pinned && !pin) {
-      const cached = memoryGet(key);
+      const cached = memoryGet(cKey);
       if (cached && cached.bvid === anchor.bvid && cached.ok) {
-        stats.memoryHits++;
-        return Promise.resolve(decorate(cached, key, 'memory', started));
+        if (!preferMp3 || !isFlacUrl(cached.sourceUrl)) {
+          stats.memoryHits++;
+          return Promise.resolve(decorate(cached, key, 'memory', started));
+        }
       }
-      if (cached) memoryDelete(key);
+      if (cached) memoryDelete(cKey);
 
-      const pending = inflight.get(key);
+      const pending = inflight.get(cKey);
       if (pending) return pending;
 
-      const persisted = getSource(key);
+      const persisted = getSource(cKey);
       if (persisted && persisted.bvid === anchor.bvid && persisted.ok) {
-        const result = rowToResult(persisted);
-        memorySet(key, result, persisted.expiresAt);
-        stats.dbHits++;
-        return Promise.resolve(decorate(result, key, 'db', started));
+        if (!preferMp3 || !isFlacUrl(persisted.audioUrl)) {
+          const result = rowToResult(persisted);
+          memorySet(cKey, result, persisted.expiresAt);
+          stats.dbHits++;
+          return Promise.resolve(decorate(result, key, 'db', started));
+        }
       }
-      if (persisted) deleteSource(key);
+      if (persisted) deleteSource(cKey);
 
       return resolveFromAnchor(key, anchor, input, started);
     }
 
-    const cached = memoryGet(key);
+    const cached = memoryGet(cKey);
     if (cached) {
-      stats.memoryHits++;
-      log.debug(`内存命中 ${key} ok=${cached.ok} score=${cached.score}`);
-      return Promise.resolve(decorate(cached, key, 'memory', started));
+      if (preferMp3 && isFlacUrl(cached.sourceUrl)) {
+        memoryDelete(cKey);
+      } else {
+        stats.memoryHits++;
+        log.debug(`内存命中 ${cKey} ok=${cached.ok} score=${cached.score}`);
+        return Promise.resolve(decorate(cached, key, 'memory', started));
+      }
     }
 
-    const pending = inflight.get(key);
+    const pending = inflight.get(cKey);
     if (pending) {
       // 不重复打上游。等待者拿到的是同一个解析结果，hitLevel 记 upstream：
       // 对它而言这次调用确实"走了一趟上游"，只是与别人共用了网络请求。
-      log.debug(`并发去重 ${key}`);
+      log.debug(`并发去重 ${cKey}`);
       return pending;
     }
 
-    const persisted = getSource(key);
+    const persisted = getSource(cKey);
     if (persisted) {
-      const result = rowToResult(persisted);
-      memorySet(key, result, persisted.expiresAt);
-      stats.dbHits++;
-      log.debug(`持久缓存命中 ${key} ok=${result.ok} score=${result.score}`);
-      return Promise.resolve(decorate(result, key, 'db', started));
+      if (preferMp3 && isFlacUrl(persisted.audioUrl)) {
+        deleteSource(cKey);
+      } else {
+        const result = rowToResult(persisted);
+        memorySet(cKey, result, persisted.expiresAt);
+        stats.dbHits++;
+        log.debug(`持久缓存命中 ${cKey} ok=${result.ok} score=${result.score}`);
+        return Promise.resolve(decorate(result, key, 'db', started));
+      }
     }
   }
 
@@ -305,14 +333,14 @@ export function resolveTrack(
   const kgChain = async (): Promise<ResolveResult> => {
     const meta = readKugouMeta(key);
     if (meta) {
-      const direct = await resolveKugouDirect(meta);
+      const direct = await resolveKugouDirect(meta, { preferMp3 });
       if (direct.ok) {
         log.info(`音源链 kg → 酷狗直取 ${key} 「${direct.matchedTitle}」 时长差=${direct.durationDiff ?? 0}s`);
         return direct;
       }
       log.debug(`酷狗直取未命中 ${key}：${direct.message ?? ''}，按名搜一次`);
     }
-    const searched = await resolveKugouSource(input);
+    const searched = await resolveKugouSource(input, { preferMp3 });
     if (searched.ok) {
       log.info(`音源链 kg → 酷狗搜索命中 ${key} 「${searched.matchedTitle}」 时长差=${searched.durationDiff ?? 0}s`);
       return searched;
@@ -329,7 +357,7 @@ export function resolveTrack(
    * 拿不到完整地址才落 B 站。很多歌其实是免费可听的，跳过等于白丢一条源。
    */
   const neChain = async (): Promise<ResolveResult> => {
-    const ne = await resolveNeteaseSource(input);
+    const ne = await resolveNeteaseSource(input, { preferMp3 });
     if (ne.ok) {
       log.info(`音源链 ne → 网易云命中 ${key} 「${ne.matchedTitle}」 时长差=${ne.durationDiff ?? 0}s`);
       return ne;
@@ -346,7 +374,7 @@ export function resolveTrack(
    * 在 qq_ 上再试一次网易云只是多打一次上游、多一次错配机会。
    */
   const qqChain = async (): Promise<ResolveResult> => {
-    const kugouResult = await resolveKugouSource(input);
+    const kugouResult = await resolveKugouSource(input, { preferMp3 });
     if (kugouResult.ok) {
       log.info(
         `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
@@ -361,7 +389,9 @@ export function resolveTrack(
   const baseChain: Promise<ResolveResult> = pin
     ? (async (): Promise<ResolveResult> => {
         log.info(`源钉 ${key} → 只走 ${pin.source}`);
-        return pin.source === 'kugou' ? resolveKugouSource(input) : resolveNeteaseSource(input);
+        return pin.source === 'kugou'
+          ? resolveKugouSource(input, { preferMp3 })
+          : resolveNeteaseSource(input, { preferMp3 });
       })()
     : source === 'kg'
       ? kgChain()
@@ -373,12 +403,12 @@ export function resolveTrack(
     .then((result): ResolveOutcome => {
       // 成功与失败都落库。负缓存同样重要：否则重启后会把"注定匹配不到"的
       // 曲子重新打一遍上游，而这正是风控的主要来源。
-      saveSource(key, result);
+      saveSource(cKey, result);
       const expiresAt = result.ok
         ? computeExpiry(result.sourceUrl ?? '', ts)
         : ts + NEGATIVE_TTL_MS;
 
-      memorySet(key, result, expiresAt);
+      memorySet(cKey, result, expiresAt);
 
       // 自动沉淀映射：匹配成功的 B 站曲目的 bvid 永久入库。
       // 之后播放只取流、不搜索（见上方锚点分支）；repo 层保证不会覆盖手动锚定。
@@ -411,15 +441,15 @@ export function resolveTrack(
     .catch((err): ResolveOutcome => {
       stats.errors++;
       const result = failResult('error', `解析异常：${(err as Error)?.message ?? err}`);
-      memorySet(key, result, Date.now() + NEGATIVE_TTL_MS);
+      memorySet(cKey, result, Date.now() + NEGATIVE_TTL_MS);
       log.error(`解析异常 ${key}`, (err as Error)?.stack ?? String(err));
       return decorate(result, key, 'upstream', started);
     })
     .finally(() => {
-      inflight.delete(key);
+      inflight.delete(cKey);
     });
 
-  inflight.set(key, promise);
+  inflight.set(cKey, promise);
   return promise;
 }
 

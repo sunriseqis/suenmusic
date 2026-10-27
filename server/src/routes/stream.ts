@@ -48,7 +48,8 @@ import { getAnchor } from '../db/repo/anchors.ts';
 import { getTrack, upsertTracks } from '../db/repo/tracks.ts';
 import { getSongDetail } from '../sources/qq/home.ts';
 import { fetchAudioStream, resolveTrackSource } from '../sources/bilibili/stream.ts';
-import { invalidateTrack, resolveTrack } from '../services/resolver.ts';
+import { invalidateTrack, resolveTrack, isFlacUrl } from '../services/resolver.ts';
+import { isIosClient } from '../http/platform.ts';
 
 const log = createLogger('routes:stream');
 
@@ -337,7 +338,12 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      */
     const upstreamRange = range ?? (headOnly ? 'bytes=0-0' : undefined);
 
-    const row = getSource(trackId);
+    const preferMp3 = isIosClient(req);
+    const cacheKey = preferMp3 ? `${trackId}:mp3` : trackId;
+    let row = getSource(cacheKey);
+    if (preferMp3 && row && isFlacUrl(row.audioUrl)) {
+      row = null;
+    }
     let upstream: Response | null = null;
     /// 本次取流的真实源地址（供 MIME 嗅探用；upstream 的 URL 拿不到原始字符串）
     let sniffSourceUrl: string | null = null;
@@ -401,7 +407,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
           // 无 Q 音专辑封面时网易云路径会去取网易云侧专辑封面（显示层兜底）
           hasAlbumCover: Boolean(track.al?.picUrl),
         },
-        { force: urlExpired }
+        { force: urlExpired, preferMp3 }
       );
 
       if (!outcome.ok || !outcome.sourceUrl) {

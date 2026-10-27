@@ -91,8 +91,14 @@ function fail(reason: ResolveResult['reason'], message: string): ResolveResult {
 }
 
 /** 向网易云要某首歌的可播地址。拿到试听（freeTrialInfo）视为失败 */
-async function fetchPlayableUrl(songId: number, vip: boolean): Promise<string | null> {
-  const levels = vip ? ['lossless', 'exhigh', 'standard'] : ['standard', 'exhigh'];
+async function fetchPlayableUrl(
+  songId: number,
+  vip: boolean,
+  options?: { preferMp3?: boolean },
+): Promise<string | null> {
+  const levels = options?.preferMp3
+    ? ['exhigh', 'standard']
+    : (vip ? ['lossless', 'exhigh', 'standard'] : ['standard', 'exhigh']);
   const cookie = currentNeteaseCookie();
 
   for (const level of levels) {
@@ -121,7 +127,10 @@ async function fetchPlayableUrl(songId: number, vip: boolean): Promise<string | 
  * 调用方（resolver）据此继续走 B 站。任何异常都被吞成失败——
  * 网易云不可用不能影响 B 站兜底链路。
  */
-export async function resolveNeteaseSource(track: ResolveInput): Promise<ResolveResult> {
+export async function resolveNeteaseSource(
+  track: ResolveInput,
+  options?: { preferMp3?: boolean },
+): Promise<ResolveResult> {
   const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const rawId = String(track.id ?? '').trim();
 
@@ -129,7 +138,7 @@ export async function resolveNeteaseSource(track: ResolveInput): Promise<Resolve
   if (rawId.startsWith('ne_')) {
     const directId = Number(rawId.slice(3));
     if (Number.isFinite(directId) && directId > 0) {
-      const directUrl = await fetchPlayableUrl(directId, vip);
+      const directUrl = await fetchPlayableUrl(directId, vip, options);
       if (directUrl) {
         log.info(`网易云直取命中 ${directId} 「${track.name ?? ''}」 vip=${vip ? '是' : '否'}`);
         return {
@@ -207,7 +216,7 @@ export async function resolveNeteaseSource(track: ResolveInput): Promise<Resolve
   }
 
   // ---- 取流（试听逐级降档）----
-  const url = await fetchPlayableUrl(best.id, vip);
+  const url = await fetchPlayableUrl(best.id, vip, options);
   if (!url) {
     return fail('no_stream', `匹配到「${best.name}」但拿不到完整音频（VIP 不足或歌曲无版权）`);
   }

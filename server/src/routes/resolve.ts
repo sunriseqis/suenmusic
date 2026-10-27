@@ -33,6 +33,7 @@ import { resolveKugouSource } from '../sources/kugou/stream.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
+import { isIosClient } from '../http/platform.ts';
 
 const log = createLogger('routes:resolve');
 
@@ -51,8 +52,14 @@ const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
 
 type TrackMeta = Awaited<ReturnType<typeof loadTrack>>;
 
-function shape(outcome: ResolveOutcome, meta: TrackMeta = null): Record<string, unknown> {
-  const row = outcome.ok ? getSource(outcome.trackId) : null;
+function shape(
+  outcome: ResolveOutcome,
+  meta: TrackMeta = null,
+  preferMp3 = false,
+): Record<string, unknown> {
+  const row = outcome.ok
+    ? (preferMp3 ? (getSource(`${outcome.trackId}:mp3`) ?? getSource(outcome.trackId)) : getSource(outcome.trackId))
+    : null;
 
   /**
    * 失败分两类（用户拍板）：
@@ -218,6 +225,7 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     const trackId = parsed.raw;
     const force = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.force).toLowerCase());
     const retry = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.retry).toLowerCase());
+    const preferMp3 = isIosClient(req);
 
     const meta = await loadTrack(trackId);
     if (!meta) throw notFound('曲目不存在');
@@ -231,14 +239,14 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         // 无 Q 音专辑封面时网易云路径会去取网易云侧专辑封面（显示层兜底）
         hasAlbumCover: Boolean(meta.albumPic),
       },
-      { force, retry }
+      { force, retry, preferMp3 }
     );
 
     log.debug(
       `resolve ${trackId} ok=${outcome.ok} hit=${outcome.hitLevel} ${outcome.costMs}ms`
     );
 
-    return shape(outcome, meta);
+    return shape(outcome, meta, preferMp3);
   });
 
   /**
@@ -250,6 +258,7 @@ export function registerResolveRoutes(app: FastifyInstance): void {
   app.post('/api/resolve/batch', async req => {
     requireUser(req);
 
+    const preferMp3 = isIosClient(req);
     const body = (req.body ?? {}) as { trackIds?: unknown };
     const ids = Array.isArray(body.trackIds)
       ? body.trackIds.filter((x): x is string => typeof x === 'string').slice(0, 10)
@@ -275,8 +284,8 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         name: meta.name,
         artists: meta.artists,
         durationMs: meta.durationMs,
-      });
-      results.push(shape(outcome, meta));
+      }, { preferMp3 });
+      results.push(shape(outcome, meta, preferMp3));
     }
 
     return { results };

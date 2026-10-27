@@ -1002,9 +1002,9 @@ final class AudioEngine: NSObject {
         let encId = trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId
         if !sessionToken.isEmpty {
             let encToken = sessionToken.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? sessionToken
-            return "\(base)/api/stream/\(encId)?t=\(encToken)"
+            return "\(base)/api/stream/\(encId)?platform=ios&t=\(encToken)"
         }
-        return "\(base)/api/stream/\(encId)"
+        return "\(base)/api/stream/\(encId)?platform=ios"
     }
 
     private func normalizedBase(_ raw: String) -> String {
