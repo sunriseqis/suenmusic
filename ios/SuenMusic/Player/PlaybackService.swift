@@ -24,7 +24,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 仅用于"引擎都起不来"这类**无法归入播放失败语义**的硬错误（不再用于逐曲失败）
     @Published var errorMessage: String?
     /// 音源角标：bilibili / netease
-    @Published private(set) var source: String = "bilibili"
+    @Published private(set) var source: String = ""
     /// 队列来源（eyebrow「正在播放 · 来源」用，setQueue 装载方写入）
     @Published private(set) var origin: String = ""
     /// 手动点播到无音源曲目：eyebrow 显示「无音源」，**不跳不弹任何按钮**（用户 2026-10-23 定的规格）
@@ -218,6 +218,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         ensureRecoReasons()
         currentRecoReason = recoReasons[tracks[index].id]
         armLoadWatchdog()
+        refreshSource(for: tracks[index].id)
 
         NSLog("[Start] play() 进入 id=\(tracks[index].id) origin=\(origin)")
         let token = await validToken()
@@ -334,6 +335,22 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         manualLoad = true
         armLoadWatchdog()
         engine.reloadCurrent(index: currentIndex, positionMs: 0, autoplay: autoplay)
+        refreshSource(for: queue[currentIndex].id)
+    }
+
+    /// 「音源」行取真实解析来源（hw `MediaPlayerCore.refreshSourceLabel` 同口径）：
+    /// 走 `/api/resolve/<id>`（命中服务端缓存很快，还顺带暖热 `/api/stream`）。
+    /// 切歌先清空，不拿上一首的音源冒充；失败按「未匹配」。
+    private func refreshSource(for trackId: String) {
+        source = ""
+        Task { [weak self] in
+            let r = try? await APIClient.shared.resolve(trackId: trackId)
+            await MainActor.run {
+                guard let self, self.currentTrack?.id == trackId else { return }
+                self.source = (r?.ok ?? false) ? (r?.source ?? "") : ""
+                self.pushActivity(force: true)
+            }
+        }
     }
 
     // MARK: 收藏（播放页红心，hw `toggleFav` 同口径）
@@ -362,9 +379,23 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         return await favoredIds([trackId]).contains(trackId)
     }
 
+    /// 收藏态变更广播：userInfo = ["id": String, "fav": Bool]。
+    /// 任一页面（搜索/首页/每日/集合/收藏/播放页）切换收藏后发出，其它页面据此同步红心与序号色，
+    /// 否则在播放页取消收藏、回到列表仍显示「已收藏」，再右滑就成了反向操作。
+    static let favoritesChanged = Notification.Name("suenmusic.favoritesChanged")
+
+    static func postFavoriteChanged(_ trackId: String, _ fav: Bool) {
+        NotificationCenter.default.post(name: favoritesChanged, object: nil,
+                                        userInfo: ["id": trackId, "fav": fav])
+    }
+
     /// 切换收藏态。返回新状态；nil = 失败（调用方回滚并 toast）
-    func toggleFavorite(_ track: Track) async -> Bool? {
-        let was = await isFavored(track.id)
+    /// - currentlyFavored: 调用方已知的当前态（列表 `favIds` / 播放页红心）。
+    ///   给了就不再多打一次 `/api/favorites/check`，并且以**用户看到的状态**为准决定加/删
+    ///   （hw `toggleFav` 同口径），避免界面与服务端判断不一致时出现「点收藏却被取消」。
+    func toggleFavorite(_ track: Track, currentlyFavored: Bool? = nil) async -> Bool? {
+        let was: Bool
+        if let currentlyFavored { was = currentlyFavored } else { was = await isFavored(track.id) }
         do {
             if was {
                 try await APIClient.shared.removeFavorite(trackId: track.id)
@@ -372,6 +403,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 let _: FavAddReply = try await APIClient.shared.post(
                     "/api/favorites", body: FavAddBody(trackId: track.id, track: track))
             }
+            Self.postFavoriteChanged(track.id, !was)
             return !was
         } catch {
             NSLog("[Fav] 切换失败 %@: %@", track.id, error.localizedDescription)
@@ -522,6 +554,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             self.ensureRecoReasons()
             self.currentRecoReason = self.recoReasons[id]
             self.lyricTrackId = id
+            self.refreshSource(for: id)
             self.loadLyrics(for: id)   // 换歌即拉歌词（Live Activity 的歌词行靠它）
             self.noSource = false
             // 进度先归零：否则新歌的卡会带着上一首的位置（emitProgress 下一 tick 才纠正）
@@ -703,11 +736,12 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         return origin.isEmpty ? status : "\(status) · \(origin)"
     }
 
-    /// 音源文案（hw `sourceLabel` 同口径：bilibili / 网易云 / 未匹配）
+    /// 音源文案（hw `sourceLabel` 同口径：bilibili / 网易云 / 酷狗 / 未匹配）
     var sourceLabel: String {
         switch source {
         case "bilibili": return "bilibili"
         case "netease": return "网易云"
+        case "kugou": return "酷狗"
         default: return "未匹配"
         }
     }

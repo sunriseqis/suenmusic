@@ -90,6 +90,10 @@ struct SearchView: View {
             submitted = ""
             clearResults()
         }
+        .onReceive(NotificationCenter.default.publisher(for: PlaybackService.favoritesChanged)) { note in
+            guard let id = note.userInfo?["id"] as? String, let fav = note.userInfo?["fav"] as? Bool else { return }
+            if fav { favIds.insert(id) } else { favIds.remove(id) }
+        }
         .onAppear {
             loadRecent()
             debugAutoSearch()
@@ -251,6 +255,7 @@ struct SearchView: View {
                     }
                     .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
                 }
+                .id("\(track.id)|\(favIds.contains(track.id))")   // 收藏态进身份：强制重建 UIKit 行的 swipe 配置
             }
             footer.listRowChrome()
         }
@@ -534,7 +539,10 @@ struct SearchView: View {
 
     /// 右滑收藏/取消收藏（hw `toggleFav`：失败回滚 + toast，返回是否已切换）
     private func toggleFav(_ track: Track) async -> Bool {
-        guard let nowFav = await player.toggleFavorite(track) else {
+        let wasFav = favIds.contains(track.id)
+        if wasFav { favIds.remove(track.id) } else { favIds.insert(track.id) }   // 乐观翻转
+        guard let nowFav = await player.toggleFavorite(track, currentlyFavored: wasFav) else {
+            if wasFav { favIds.insert(track.id) } else { favIds.remove(track.id) }
             ToastCenter.shared.show("收藏操作失败，请稍后重试")
             return false
         }

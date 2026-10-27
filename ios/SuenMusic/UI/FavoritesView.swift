@@ -82,6 +82,16 @@ struct FavoritesView: View {
             guard (note.object as? Int) == 2 else { return }
             Task { await load(reset: true) }
         }
+        // 别处（播放页/搜索/首页…）改了收藏：取消 → 就地剪行；新增 → 重拉
+        .onReceive(NotificationCenter.default.publisher(for: PlaybackService.favoritesChanged)) { note in
+            guard let id = note.userInfo?["id"] as? String, let fav = note.userInfo?["fav"] as? Bool else { return }
+            if fav {
+                Task { await load(reset: true) }
+            } else if items.contains(where: { $0.trackId == id }) {
+                items.removeAll { $0.trackId == id }
+                total = max(0, total - 1)
+            }
+        }
     }
 
     // MARK: - 头部（AI 摘要 → 主标题 + 副题）
@@ -314,6 +324,7 @@ struct FavoritesView: View {
             try await APIClient.shared.removeFavorite(trackId: trackId)
             items.removeAll { $0.trackId == trackId }
             total = max(0, total - 1)
+            PlaybackService.postFavoriteChanged(trackId, false)
             return true
         } catch {
             ToastCenter.shared.show(describe(error))

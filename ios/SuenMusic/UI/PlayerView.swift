@@ -153,6 +153,12 @@ struct PlayerView: View {
         // hw 没有下拉收起：只认左上 chevron-down
         .interactiveDismissDisabled()
         .task(id: track?.id) { await syncTrackState() }
+        // 列表右滑/收藏页改了当前曲的收藏态：红心跟着变
+        .onReceive(NotificationCenter.default.publisher(for: PlaybackService.favoritesChanged)) { note in
+            guard let id = note.userInfo?["id"] as? String, id == track?.id,
+                  let fav = note.userInfo?["fav"] as? Bool else { return }
+            favored = fav
+        }
         .onChange(of: track?.id) { _, _ in
             // 换歌：拖动状态一并复位（否则新歌的进度条会被旧的拖动值锁住）
             dragging = false
@@ -209,7 +215,7 @@ struct PlayerView: View {
         return first.name
     }
 
-    /// 「音源」行文案（hw `sourceLabel`）：bilibili / 网易云 / 未匹配；
+    /// 「音源」行文案（hw `sourceLabel`）：bilibili / 网易云 / 酷狗 / 未匹配；
     /// 解析还没回来但已手动锚定时兜底成 bilibili（锚点必然是 B 站）
     private var sourceText: String {
         let label = player.sourceLabel
@@ -628,7 +634,7 @@ struct PlayerView: View {
         guard let track else { return }
         let was = favored
         favored = !was   // 先动视觉，失败再回滚（hw 同口径）
-        guard let next = await player.toggleFavorite(track) else {
+        guard let next = await player.toggleFavorite(track, currentlyFavored: was) else {
             favored = was
             ToastCenter.shared.show("收藏操作失败，请稍后重试")
             return

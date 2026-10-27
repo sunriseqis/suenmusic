@@ -212,7 +212,7 @@ struct ResolveResponse: Codable {
     let reason: String?
     let message: String?
     let score: Int
-    /// `bilibili` / `netease` —— 只用于角标展示
+    /// `bilibili` / `netease` / `kugou` —— 只用于角标展示
     let source: String
     /// **相对路径**，形如 `/api/stream/qq_xxx?t=<签名令牌>`；必须拼上 baseURL 才能喂给播放器
     let streamUrl: String?

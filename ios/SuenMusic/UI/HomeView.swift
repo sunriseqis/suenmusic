@@ -58,6 +58,10 @@ struct HomeView: View {
             }
             if let songs = app.home?.newSongs { player.warm(songs, limit: newSongRows) }
         }
+        .onReceive(NotificationCenter.default.publisher(for: PlaybackService.favoritesChanged)) { note in
+            guard let id = note.userInfo?["id"] as? String, let fav = note.userInfo?["fav"] as? Bool else { return }
+            if fav { favIds.insert(id) } else { favIds.remove(id) }
+        }
         .onReceive(NotificationCenter.default.publisher(for: RefreshSignal.name)) { note in
             guard (note.object as? Int) == 0 else { return }
             Task { await load() }
@@ -100,6 +104,7 @@ struct HomeView: View {
                         }
                         .tint(on ? DesignTokens.swipeFavBg : DesignTokens.accentText)
                     }
+                    .id("\(track.id)|\(favIds.contains(track.id))")   // 收藏态进身份：强制重建 UIKit 行的 swipe 配置
                 }
             }
             if !home.toplists.isEmpty {
@@ -361,10 +366,10 @@ struct HomeView: View {
 
     // MARK: - 收藏（右滑手势的支撑，失败静默 + toast）
 
+    /// 整批覆盖（不是只补未知）：别处取消收藏后回到本页，旧红心要能被清掉
     private func refreshFavMarks(_ tracks: [Track]) async {
-        let unknown = tracks.map(\.id).filter { !favIds.contains($0) }
-        guard !unknown.isEmpty else { return }
-        favIds.formUnion(await player.favoredIds(unknown))
+        guard !tracks.isEmpty else { return }
+        favIds = Set(await player.favoredIds(tracks.map(\.id)))
     }
 
     private func setFav(_ trackId: String, _ fav: Bool) {
@@ -375,7 +380,7 @@ struct HomeView: View {
     private func toggleFav(_ track: Track) async -> Bool {
         let wasFav = favIds.contains(track.id)
         setFav(track.id, !wasFav)
-        guard let next = await player.toggleFavorite(track) else {
+        guard let next = await player.toggleFavorite(track, currentlyFavored: wasFav) else {
             setFav(track.id, wasFav)
             ToastCenter.shared.show(Copy.describe(status: Self.fallbackStatus, code: nil, message: nil))
             return false
