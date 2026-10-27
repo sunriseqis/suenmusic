@@ -35,6 +35,16 @@ const VARIANT_CHARS: Array<[RegExp, string]> = [
   [/陳/g, '陈'],
 ];
 
+/** 歌手名分隔符归一：`、` `，` `&` `／` 统一成 `/`，否则同一组歌手会被判成两个人 */
+function normArtistList(s: string): string {
+  return String(s ?? '')
+    .split(/[、,，&/／+]/)
+    .map(x => norm(x))
+    .filter(Boolean)
+    .sort()
+    .join('/');
+}
+
 function norm(s: string): string {
   let out = String(s ?? '').toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
   for (const [re, to] of VARIANT_CHARS) out = out.replace(re, to);
@@ -45,11 +55,8 @@ function norm(s: string): string {
 function dedupeKey(t: Track): string {
   const live = LIVE_RE.test(t.name) ? '1' : '0';
   const base = norm(t.name.replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ''));
-  const artists = (t.ar ?? [])
-    .map(a => norm(a.name))
-    .filter(Boolean)
-    .sort()
-    .join('/');
+  // 歌手集合按「归一 + 排序」拼：合作曲在不同源可能写成 `A、B` / `A/B` / `A & B`
+  const artists = normArtistList((t.ar ?? []).map(a => a.name).join('/'));
   return `${base}|${live}|${artists}`;
 }
 

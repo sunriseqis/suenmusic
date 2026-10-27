@@ -481,6 +481,79 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     }
   };
 
+  /**
+   * 歌手页统一去重。
+   *
+   * 去重键 = 歌名(去括号后缀) + 是否 Live + **拆分后排序的歌手集合**。
+   * 关键在「拆分」：多源回同一首合作曲时，歌手串可能是 `房东的猫、夏日入侵企画` 也可能是
+   * `房东的猫/夏日入侵企画`，不拆词会被判成两个不同歌手 → 同一首歌出现两行。
+   * 同一源内部的重复（网易云歌手页会返回同名同歌手多条）也一并清掉。
+   */
+  const dedupeArtistSongs = (songs: Track[], limit: number): Track[] => {
+    /**
+     * 时长容差：同名同歌手但**时长差超过它**的，视为不同版本（live / 单曲版 / 重录），两条都留。
+     * 用户 2026-10-27 反馈：重复条目的元数据时长完全不一样 —— 硬合并会把不同录音吞掉。
+     */
+    const DUR_TOLERANCE_MS = 8000;
+    const keyOf = (t: Track): string => {
+      const live = /(live|现场|演唱会)/i.test(t.name) ? '1' : '0';
+      const base = normName(t.name.replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ''));
+      const tokens = (t.ar ?? [])
+        .flatMap(a => String(a.name ?? '').split(/[、,，&/／+]/))
+        .map(x => normName(x))
+        .filter(Boolean)
+        .sort();
+      return `${base}|${live}|${tokens.join('/')}`;
+    };
+    /**
+     * 同名组内剔除「明显短于最长版本」的条目。
+     *
+     * 实测歌手页里的同名条目时长差异极大（真空 229s vs 91s、以渺小之名 206s vs 111s/129s），
+     * 短的那些是片段/改编/花絮，不是正规版本。阈值取最长版本的 70%（且最长需 ≥120s），
+     * 这样「录音室版 vs Live 版」这类正常差异会被保留，残片会被清掉。
+     */
+    const SHORT_RATIO = 0.7;
+    const maxDtByName = new Map<string, number>();
+    for (const t of songs) {
+      if (!t.dt) continue;
+      const n = normName(t.name.replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ''));
+      if ((maxDtByName.get(n) ?? 0) < t.dt) maxDtByName.set(n, t.dt);
+    }
+    const isOutlier = (t: Track): boolean => {
+      if (!t.dt) return false;
+      const n = normName(t.name.replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ''));
+      const max = maxDtByName.get(n) ?? 0;
+      if (max < 120_000) return false;
+      return t.dt < max * SHORT_RATIO;
+    };
+
+    // 按「歌名+Live+歌手集合」分组，组内再按时长聚类：只有时长接近的才算重复
+    const groups = new Map<string, Track[]>();
+    const out: Track[] = [];
+    for (const t of songs) {
+      // 极短条目不是歌（试听片段/花絮/音效）：实测歌手页里混过 23s、91s、111s 的同名条目，
+      // 它们在列表里既占位置又会被误当成「重复曲目」。45 秒以下直接丢弃。
+      if (t.dt > 0 && t.dt < 45_000) continue;
+      if (isOutlier(t)) continue;
+      const k = keyOf(t);
+      const bucket = groups.get(k);
+      if (bucket) {
+        const isDup = bucket.some(prev => {
+          // 任一方时长未知时，按重复处理（宁少勿多，避免同一行出现两次）
+          if (!prev.dt || !t.dt) return true;
+          return Math.abs(prev.dt - t.dt) <= DUR_TOLERANCE_MS;
+        });
+        if (isDup) continue;
+        bucket.push(t);
+      } else {
+        groups.set(k, [t]);
+      }
+      out.push(t);
+      if (out.length >= limit) break;
+    }
+    return out;
+  };
+
   /** 名称归一（歌手过滤用）：去空白/括号/小写 */
   const normName = (s: string): string => {
     let out = String(s ?? '').toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
@@ -550,7 +623,9 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     // ---- 多源分流：kg_ar_ / ne_ar_ 走各自上游，qq_ar_ 保持原实现 ----
     if (parsed.source === 'ne') {
-      const songs = backfillCovers(await getNeteaseArtistSongs(parsed.value, limit, page));
+      const songs = backfillCovers(
+        dedupeArtistSongs(await getNeteaseArtistSongs(parsed.value, limit, page), limit),
+      );
       if (songs.length > 0) upsertTracks(songs);
       return {
         id: `ne_ar_${parsed.value}`,
@@ -571,12 +646,15 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       const agg = await searchSongsMulti(singerName, limit);
       const target = normName(singerName);
       const songs = backfillCovers(
-        agg.songs.filter(t =>
-          (t.ar ?? []).some(a => {
-            const n = normName(a.name);
-            return n.length > 0 && (n.includes(target) || target.includes(n));
-          })
-        )
+        dedupeArtistSongs(
+          agg.songs.filter(t =>
+            (t.ar ?? []).some(a => {
+              const n = normName(a.name);
+              return n.length > 0 && (n.includes(target) || target.includes(n));
+            }),
+          ),
+          limit,
+        ),
       );
       return {
         id: `kg_ar_${parsed.value}`,
@@ -595,6 +673,27 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     const result = await getArtistSongs(parsed.value, singerName, limit, page);
     upsertTracks(result.songs);
+
+    /**
+     * 歌手页也要「多源合一」：QQ 列表只代表 QQ 曲库，
+     * 用户在多源时代期待的是「这位歌手的歌」，所以第 1 页再并一次酷狗 + 网易云的结果。
+     * 只在 page=1 做：翻页请求不该再打两个上游。
+     */
+    if (page === 1 && singerName) {
+      try {
+        const agg = await searchSongsMulti(singerName, limit);
+        const target = normName(singerName);
+        const belongs = (t: Track) =>
+          (t.ar ?? []).some(a => {
+            const n = normName(a.name);
+            return n.length > 0 && (n.includes(target) || target.includes(n));
+          });
+        result.songs = dedupeArtistSongs([...result.songs, ...agg.songs.filter(belongs)], limit);
+      } catch (err) {
+        log.warn(`歌手页多源合并失败 ${singerName}：${(err as Error).message}`);
+      }
+    }
+
     await enrichMissingAlbums(result.songs);
     backfillCovers(result.songs);
 
