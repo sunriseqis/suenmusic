@@ -2,21 +2,33 @@
 #
 # 设置页的配置变更回调。
 #
-# fnOS 在用户在应用设置页改完环境变量后调用它。以前这里是裸 `exit 0`
-# —— 改完什么都不发生，用户以为生效了，实际服务仍在用旧环境（重审 F）。
+# fnOS 在用户在应用设置页改完环境变量或 wizard/config 后调用它。
+# 此时 wizard/config 收集到的向导变量（如 wizard_port）会作为环境变量注入。
 #
-# 这里做两件事：
-#   1. 让服务重新读一次配置（stop + start；纯 bash 无法热重载 node 进程）；
-#   2. 把结果写进 info.log，事后能查"这次改动到底有没有生效"。
+# 这里做三件事：
+#   1. 若传入了 wizard_port，持久化到 etc/.env 并同步 app/ui/config；
+#   2. 重启服务以按新配置运行（stop + start）；
+#   3. 把结果写进 info.log，事后能查"这次改动到底有没有生效"。
 
-# 数据目录解析（与 cmd/main 同一套反推 + 硬闸）：TRIM_PKGVAR 为空时
-# 直接把日志写到 /info.log 会污染根分区（用户实测踩过），这里退到 /dev/null。
+set -o pipefail
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="${TRIM_APPDEST:-}"
 VAR_DIR="${TRIM_PKGVAR:-}"
+ETC_DIR="${TRIM_PKGETC:-}"
+
+if [ -z "${APP_DIR}" ]; then
+    APP_DIR="$(cd "${SCRIPT_DIR}/.." 2>/dev/null && pwd)"
+fi
 if [ -z "${VAR_DIR}" ]; then
-    PKG_ROOT="$(cd "${SCRIPT_DIR}/../.." 2>/dev/null && pwd)"
+    PKG_ROOT="$(cd "${APP_DIR}/.." 2>/dev/null && pwd)"
     VAR_DIR="${PKG_ROOT}/var"
 fi
+if [ -z "${ETC_DIR}" ]; then
+    PKG_ROOT_ETC="$(cd "${APP_DIR}/.." 2>/dev/null && pwd)"
+    ETC_DIR="${PKG_ROOT_ETC}/etc"
+fi
+
 case "${VAR_DIR}" in
     ""|"/"|"/var"|"/usr"|"/tmp") LOG_FILE=/dev/null ;;
     *) LOG_FILE="${VAR_DIR}/info.log" ;;
@@ -26,12 +38,35 @@ log_msg() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - [config_callback] $1" >> "${LOG_FILE}" 2>/dev/null
 }
 
-log_msg "配置变更，重启服务以生效"
+log_msg "配置变更回调开始执行..."
+
+# 1. 若向导或环境传入了新端口，写入 etc/.env
+NEW_PORT="${wizard_port:-${SUENMUSIC_PORT:-}}"
+if [ -n "${NEW_PORT}" ]; then
+    mkdir -p "${ETC_DIR}" 2>/dev/null || true
+    ENV_FILE="${ETC_DIR}/.env"
+    touch "${ENV_FILE}" 2>/dev/null || true
+    if grep -q "^SUENMUSIC_PORT=" "${ENV_FILE}" 2>/dev/null; then
+        sed -i "s/^SUENMUSIC_PORT=.*/SUENMUSIC_PORT=${NEW_PORT}/" "${ENV_FILE}" 2>/dev/null || true
+    else
+        echo "SUENMUSIC_PORT=${NEW_PORT}" >> "${ENV_FILE}" 2>/dev/null || true
+    fi
+    log_msg "已更新端口配置 SUENMUSIC_PORT=${NEW_PORT} -> ${ENV_FILE}"
+
+    UI_CONFIG="${APP_DIR}/ui/config"
+    if [ -f "${UI_CONFIG}" ]; then
+        sed -i "s/\"port\":[[:space:]]*\"[0-9]*\"/\"port\": \"${NEW_PORT}\"/" "${UI_CONFIG}" 2>/dev/null || true
+        log_msg "已同步桌面快捷入口端口: ${NEW_PORT}"
+    fi
+fi
+
+# 2. 重启服务
+log_msg "正在重启服务以使新配置生效..."
 "${SCRIPT_DIR}/main" stop >> "${LOG_FILE}" 2>&1
 "${SCRIPT_DIR}/main" start >> "${LOG_FILE}" 2>&1
 RC=$?
 if [ "${RC}" = "0" ]; then
-    log_msg "已按新配置重启"
+    log_msg "已按新配置成功重启"
 else
     log_msg "[WARN] 重启失败（rc=${RC}），请查看 ${LOG_FILE}"
 fi

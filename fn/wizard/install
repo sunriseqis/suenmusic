@@ -1,0 +1,74 @@
+[
+  {
+    "stepTitle": "服务与网络",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "请设置 SuenMusic 的服务端口。Web 网页端和客户端将通过该端口连接。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_port",
+        "label": "服务端口",
+        "initValue": "3210",
+        "rules": [
+          {
+            "required": true,
+            "message": "服务端口不能为空"
+          },
+          {
+            "pattern": "^([1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$",
+            "message": "请输入有效的端口号 (1-65535)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "stepTitle": "初始管理员账号",
+    "items": [
+      {
+        "type": "tips",
+        "helpText": "创建首个系统管理员账号，安装完成后可直接在网页或 App 中登录，开箱即用。"
+      },
+      {
+        "type": "text",
+        "field": "wizard_admin_user",
+        "label": "管理员用户名",
+        "initValue": "admin",
+        "rules": [
+          {
+            "required": true,
+            "message": "用户名不能为空"
+          },
+          {
+            "pattern": "^[a-zA-Z0-9_-]{3,32}$",
+            "message": "用户名需为 3-32 位字母、数字、下划线或连字符"
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "field": "wizard_admin_password",
+        "label": "管理员密码",
+        "rules": [
+          {
+            "required": true,
+            "message": "密码不能为空"
+          },
+          {
+            "min": 6,
+            "max": 64,
+            "message": "密码长度需在 6-64 位之间"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_admin_display_name",
+        "label": "显示昵称",
+        "initValue": "管理员"
+      }
+    ]
+  }
+]
