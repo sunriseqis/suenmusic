@@ -84,8 +84,34 @@ export const useFavoritesStore = defineStore('favorites', () => {
 
   const count = computed(() => ids.value.size);
 
+  /**
+   * 「歌名 + 歌手」指纹集合。
+   *
+   * 为什么需要：多源之后同一首歌可能是 `qq_...`、`kg_...`、`ne_...` —— 用户收藏的是
+   * qq_ 那条，搜索返回 kg_ 那条，仅按 id 比对就显示成「未收藏」（红心不亮、序号不变色）。
+   * 收藏去重本身也是按「歌名+主歌手」判的（routes/favorites.ts），所以这里用同一口径。
+   */
+  const keys = ref<Set<string>>(new Set());
+
+  function trackKey(track: { name?: string; ar?: Array<{ name?: string }> }): string {
+    const name = String(track?.name ?? '').trim().toLowerCase();
+    const artists = (track?.ar ?? [])
+      .map(a => String(a?.name ?? '').trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join('/');
+    return name && artists ? `${name}|${artists}` : '';
+  }
+
   function contains(id: string): boolean {
     return ids.value.has(id);
+  }
+
+  /** 跨源友好的收藏判断：先按 id，再按「歌名+歌手」指纹 */
+  function containsTrack(track: { id?: string; name?: string; ar?: Array<{ name?: string }> }): boolean {
+    if (track?.id && ids.value.has(track.id)) return true;
+    const k = trackKey(track);
+    return k !== '' && keys.value.has(k);
   }
 
   /**
@@ -102,18 +128,24 @@ export const useFavoritesStore = defineStore('favorites', () => {
     loadingPromise = (async () => {
       try {
         const acc = new Set<string>();
+        const accKeys = new Set<string>();
         let cursor: string | null = null;
         let totalCount = 0;
 
         for (let page = 0; page < MAX_PAGES; page++) {
           const res = await fetchFavorites({ limit: PAGE_SIZE, cursor });
           totalCount = res.total;
-          for (const item of res.items) acc.add(item.track?.id ?? item.trackId);
+          for (const item of res.items) {
+            acc.add(item.track?.id ?? item.trackId);
+            const k = trackKey(item.track ?? {});
+            if (k) accKeys.add(k);
+          }
           if (!res.nextCursor) break;
           cursor = res.nextCursor;
         }
 
         ids.value = acc;
+        keys.value = accKeys;
         total.value = totalCount;
         loaded.value = true;
       } finally {
@@ -251,6 +283,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
     loaded,
     count,
     contains,
+    containsTrack,
     ensureLoaded,
     reload,
     syncIds,

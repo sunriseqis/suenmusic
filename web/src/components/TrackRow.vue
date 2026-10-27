@@ -66,7 +66,8 @@ const ui = useUiStore();
 const isCurrent = computed(() => player.currentTrack?.id === props.track.id);
 const artist = computed(() => artistNames(props.track.ar));
 const cover = computed(() => coverUrl(props.track.al?.picUrl, 150));
-const isFav = computed(() => favorites.contains(props.track.id));
+// 跨源友好：收藏的是 qq_ 条目、搜索召回 kg_/ne_ 条目时也要点亮红心（按歌名+歌手兜底）
+const isFav = computed(() => favorites.containsTrack(props.track));
 
 /** 右滑动作区上的文字：动作取决于当前状态 */
 const swipeLabel = computed(() => (isFav.value ? '取消收藏' : '收藏'));

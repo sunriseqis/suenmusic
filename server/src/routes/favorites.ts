@@ -77,7 +77,54 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
 
     const ids = body.ids.filter((x): x is string => typeof x === 'string');
     const result: Record<string, boolean> = {};
-    for (const id of ids) result[id] = repo.isFavorite(user.id, id);
+
+    /**
+     * 跨源兜底：多源之后同一首歌可能是 qq_ / kg_ / ne_ 三种 id。
+     * 用户收藏的是其中一条，搜索召回的是另一条 —— 只按 id 比对会显示「未收藏」。
+     * 这里用「歌名 + 排序后歌手名」指纹再判一次，与收藏去重口径保持一致。
+     */
+    const favKeys = new Set<string>();
+    const favRows = getDatabase()
+      .prepare(
+        `SELECT t.name, t.artists_json
+           FROM favorites f JOIN tracks t ON t.id = f.track_id
+          WHERE f.user_id = ?`
+      )
+      .all(user.id) as Array<{ name: string; artists_json: string }>;
+    const keyOf = (name: string, artistsJson: string): string => {
+      let artists: Array<{ name?: string }> = [];
+      try {
+        artists = JSON.parse(artistsJson || '[]');
+      } catch {
+        artists = [];
+      }
+      const names = artists
+        .map(a => String(a?.name ?? '').trim().toLowerCase())
+        .filter(Boolean)
+        .sort()
+        .join('/');
+      const n = String(name ?? '').trim().toLowerCase();
+      return n && names ? `${n}|${names}` : '';
+    };
+    for (const row of favRows) {
+      const k = keyOf(row.name, row.artists_json);
+      if (k) favKeys.add(k);
+    }
+
+    for (const id of ids) {
+      if (repo.isFavorite(user.id, id)) {
+        result[id] = true;
+        continue;
+      }
+      if (favKeys.size === 0) {
+        result[id] = false;
+        continue;
+      }
+      const t = getDatabase()
+        .prepare('SELECT name, artists_json FROM tracks WHERE id = ?')
+        .get(id) as { name: string; artists_json: string } | undefined;
+      result[id] = t ? favKeys.has(keyOf(t.name, t.artists_json)) : false;
+    }
 
     return { favorites: result };
   });

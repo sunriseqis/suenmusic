@@ -17,12 +17,14 @@ import { useSessionStore } from '@/stores/session.ts';
 import { useUiStore } from '@/stores/ui.ts';
 import { useUpdateStore } from '@/stores/update.ts';
 import { useLyricsStore } from '@/stores/lyrics.ts';
+import { useFavoritesStore } from '@/stores/favorites.ts';
 
 const route = useRoute();
 const ui = useUiStore();
 const session = useSessionStore();
 const player = usePlayerStore();
 const update = useUpdateStore();
+const favorites = useFavoritesStore();
 const lyrics = useLyricsStore();
 
 lyrics.init();
@@ -109,6 +111,24 @@ watch(
     if (!loggedIn || updateChecked) return;
     updateChecked = true;
     void update.check(true);
+  },
+  { immediate: true }
+);
+
+/**
+ * 登录后拉一次收藏集合。
+ *
+ * 以前只有收藏页与设置页会 `ensureLoaded()`，于是搜索/首页这些列表的红心永远不亮、
+ * 序号也不变色（`contains()` 恒 false）—— 用户 2026-10-26 报的就是这个。
+ * 放全局：任何列表渲染前集合已就绪，逐行不再发请求。
+ */
+let favoritesChecked = false;
+watch(
+  () => session.isLoggedIn,
+  loggedIn => {
+    if (!loggedIn || favoritesChecked) return;
+    favoritesChecked = true;
+    void favorites.ensureLoaded();
   },
   { immediate: true }
 );
