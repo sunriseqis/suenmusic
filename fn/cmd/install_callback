@@ -67,7 +67,7 @@ if [ -n "${PORT}" ]; then
     )
     for conf in "${POSSIBLE_UI_CONFIGS[@]}"; do
         if [ -f "${conf}" ]; then
-            sed -i "s/\"port\":[[:space:]]*\"[0-9]*\"/\"port\": \"${PORT}\"/" "${conf}" 2>/dev/null || true
+            sed -i -E "s/\"port\":[[:space:]]*\"[^\"]*\"/\"port\": \"${PORT}\"/" "${conf}" 2>/dev/null || true
             log_msg "已同步桌面入口端口 (${PORT}) -> ${conf}"
         fi
     done

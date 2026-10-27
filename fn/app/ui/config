@@ -4,10 +4,10 @@
             "title": "SuenMusic",
             "icon": "images/icon_{0}.png",
             "type": "url",
-            "protocol": "",
-            "port": "3210",
+            "protocol": "http",
+            "port": "${wizard_port}",
             "url": "/",
-            "allUsers": false
+            "allUsers": true
         }
     }
 }
