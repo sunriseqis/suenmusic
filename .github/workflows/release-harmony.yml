@@ -1,0 +1,71 @@
+name: Release HarmonyOS Package (.hap)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本 Tag（如 v2.0.0，不填则读取 VERSION 文件）'
+        required: false
+        default: ''
+
+jobs:
+  build-and-release-harmony:
+    name: Build & Release HarmonyOS HAP
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Root Dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Setup HarmonyOS / OpenHarmony Toolchain
+        uses: ErBWs/setup-ohos@v2
+        with:
+          version: '6.1.1.280'
+          cache: true
+
+      - name: Build HarmonyOS HAP
+        run: |
+          npm run hw:check
+          node scripts/build-hw.mjs
+
+      - name: Prepare Release Assets & Tag
+        id: prep
+        run: |
+          RAW_VER=$(cat VERSION | tr -d '[:space:]')
+          TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$TAG" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              TAG="${GITHUB_REF#refs/tags/}"
+            else
+              TAG="v${RAW_VER}"
+            fi
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${RAW_VER}" >> $GITHUB_OUTPUT
+
+      - name: Release to Public Repo (sunriseqis/suenapp)
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: sunriseqis/suenapp
+          token: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: SuenMusic ${{ steps.prep.outputs.tag }}
+          body: |
+            ### SuenMusic ${{ steps.prep.outputs.tag }} 鸿蒙 NEXT 原生客户端
+
+            - **格式**：`.hap` 未签名包。
+            - **使用方式**：可直接推入鸿蒙 NEXT 模拟器调试，或通过移动端侧载/自签名工具签名后在真机运行。
+          files: output/*.hap
+          draft: false
+          prerelease: false
+          append_body: true

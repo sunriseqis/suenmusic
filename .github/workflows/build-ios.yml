@@ -1,0 +1,68 @@
+name: Build & Release iOS Package (.ipa) [Manual]
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本 Tag（如 v2.0.0，不填则读取 VERSION 文件）'
+        required: false
+        default: ''
+
+jobs:
+  build-and-release-ios:
+    name: Build & Release iOS IPA
+    runs-on: macos-14
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Sub-project Dependencies
+        run: |
+          npm install --no-audit --no-fund
+          cd web && npm ci --no-audit --no-fund && cd ..
+          cd server && npm ci --no-audit --no-fund && cd ..
+
+      - name: Select Xcode Version
+        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build Web SPA & Sync Capacitor
+        run: |
+          npm run web:build
+          npm run ios:sync
+
+      - name: Build Unsigned IPA
+        run: |
+          node scripts/build-ios.mjs --unsigned
+
+      - name: Prepare Release Assets & Tag
+        id: prep
+        run: |
+          RAW_VER=$(cat VERSION | tr -d '[:space:]')
+          TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$TAG" ]; then
+            TAG="v${RAW_VER}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${RAW_VER}" >> $GITHUB_OUTPUT
+
+      - name: Release to Public Repo (sunriseqis/suenapp)
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: sunriseqis/suenapp
+          token: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: SuenMusic ${{ steps.prep.outputs.tag }}
+          body: |
+            ### SuenMusic ${{ steps.prep.outputs.tag }} iOS 原生客户端
+
+            - **格式**：`.ipa` 未签名包。
+            - **使用方式**：可直接使用 AltStore、SideStore、爱思助手等工具通过个人证书签名后安装到真机。
+          files: app/unsigned/*.ipa
+          draft: false
+          prerelease: false
+          append_body: true

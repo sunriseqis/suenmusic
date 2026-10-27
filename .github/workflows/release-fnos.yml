@@ -1,0 +1,71 @@
+name: Release fnOS Package (.fpk)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: '发布版本 Tag（如 v2.0.0，不填则读取 VERSION 文件）'
+        required: false
+        default: ''
+
+jobs:
+  build-and-release-fnos:
+    name: Build & Release fnOS FPK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Root Dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Sub-project Dependencies
+        run: |
+          cd web && npm ci --no-audit --no-fund && cd ..
+          cd server && npm ci --no-audit --no-fund && cd ..
+
+      - name: Build Web SPA
+        run: npm run web:build
+
+      - name: Build fnOS FPK Package
+        run: node scripts/build-fn.mjs
+
+      - name: Prepare Release Assets & Tag
+        id: prep
+        run: |
+          RAW_VER=$(cat VERSION | tr -d '[:space:]')
+          TAG="${{ github.event.inputs.tag_name }}"
+          if [ -z "$TAG" ]; then
+            if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+              TAG="${GITHUB_REF#refs/tags/}"
+            else
+              TAG="v${RAW_VER}"
+            fi
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "version=${RAW_VER}" >> $GITHUB_OUTPUT
+
+      - name: Release to Public Repo (sunriseqis/suenapp)
+        uses: softprops/action-gh-release@v2
+        with:
+          repository: sunriseqis/suenapp
+          token: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
+          tag_name: ${{ steps.prep.outputs.tag }}
+          name: SuenMusic ${{ steps.prep.outputs.tag }}
+          body: |
+            ### SuenMusic ${{ steps.prep.outputs.tag }} 飞牛私有云（fnOS）原生套件
+
+            - **格式**：`.fpk` 纯原生系统运行（免 Docker，零虚拟化损耗）。
+            - **功能**：内置安装引导向导，支持安装时自定义服务端口并直接初始化第一个管理员账号，开箱即用。
+          files: output/*.fpk
+          draft: false
+          prerelease: false
+          append_body: true
