@@ -30,11 +30,16 @@ jobs:
       - name: Setup HarmonyOS / OpenHarmony Toolchain
         uses: ErBWs/setup-ohos@v2
         with:
-          version: '6.1.1.280'
+          version: '26.0.0.821'
           cache: true
 
       - name: Build HarmonyOS HAP
+        env:
+          DEVECO_SDK_HOME: ${{ env.HOS_SDK_HOME }}
         run: |
+          echo "HOS_SDK_HOME=$HOS_SDK_HOME"
+          echo "DEVECO_SDK_HOME=$DEVECO_SDK_HOME"
+          ls -la "$HOS_SDK_HOME/default" || true
           npm run hw:check
           node scripts/build-hw.mjs
 
