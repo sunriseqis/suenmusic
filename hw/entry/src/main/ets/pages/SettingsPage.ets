@@ -130,7 +130,6 @@ export struct SettingsPage {
 
   aboutToAppear(): void {
     this.loadCacheUsage();
-    this.loadCardCount();
     this.loadWebdavFields();
     this.loadDislikes();
     this.loadPersona();
