@@ -1,4 +1,4 @@
-name: Release fnOS Package (.fpk)
+name: 构建发行飞牛端
 
 on:
   push:

@@ -1,4 +1,4 @@
-name: Build & Release iOS Package (.ipa) [Manual]
+name: 构建发行苹果端 (手动)
 
 on:
   workflow_dispatch:

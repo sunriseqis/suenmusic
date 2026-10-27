@@ -1,4 +1,4 @@
-name: Publish Docker Image to GHCR [Manual]
+name: 构建推送Docker镜像 (手动)
 
 on:
   workflow_dispatch:

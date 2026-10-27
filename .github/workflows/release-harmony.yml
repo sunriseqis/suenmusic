@@ -1,4 +1,4 @@
-name: Release HarmonyOS Package (.hap)
+name: 构建发行鸿蒙端
 
 on:
   push:
