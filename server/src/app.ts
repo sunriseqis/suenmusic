@@ -31,7 +31,21 @@ import { registerUpdateRoutes } from './routes/update.ts';
 
 const log = createLogger('http');
 
-export const SERVER_VERSION = '0.1.0';
+function readRootVersion(): string {
+  try {
+    const p1 = join(config.webRoot, '../../VERSION');
+    if (existsSync(p1)) return readFileSync(p1, 'utf8').trim();
+    const p2 = join(import.meta.dirname, '../../VERSION');
+    if (existsSync(p2)) return readFileSync(p2, 'utf8').trim();
+    const p3 = join(import.meta.dirname, '../VERSION');
+    if (existsSync(p3)) return readFileSync(p3, 'utf8').trim();
+  } catch {
+    /* ignore */
+  }
+  return '2.0.0';
+}
+
+export const SERVER_VERSION = readRootVersion();
 
 /** 音频代理需要客户端能读到这些响应头，否则进度条拿不到总长度 */
 /**

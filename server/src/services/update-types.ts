@@ -11,13 +11,14 @@
  * `android` 已于 2026-10-21 封库，但枚举值保留 —— 删掉会让老客户端拿到
  * `invalid_platform`，比"已停止更新"更难懂。
  */
-export type UpdatePlatform = 'android' | 'ios' | 'harmony';
+export type UpdatePlatform = 'android' | 'ios' | 'harmony' | 'fnos';
 
 /** 平台 → 产物扩展名 */
 export const PLATFORM_EXTENSION: Record<UpdatePlatform, string> = {
   android: 'apk',
   ios: 'ipa',
   harmony: 'hap',
+  fnos: 'fpk',
 };
 
 /** 产物下载时的 MIME。-octet-stream：系统不解析、原样落盘，侧签工具按扩展名接管 */
@@ -25,6 +26,7 @@ export const PLATFORM_CONTENT_TYPE: Record<UpdatePlatform, string> = {
   android: 'application/vnd.android.package-archive',
   ios: 'application/octet-stream',
   harmony: 'application/octet-stream',
+  fnos: 'application/octet-stream',
 };
 
 /** 一个已就绪的更新产物 */
@@ -40,7 +42,7 @@ export interface UpdateArtifact {
 }
 
 export function isUpdatePlatform(value: unknown): value is UpdatePlatform {
-  return value === 'android' || value === 'ios' || value === 'harmony';
+  return value === 'android' || value === 'ios' || value === 'harmony' || value === 'fnos';
 }
 
 /** semver 比较（a>b 返回正数） */

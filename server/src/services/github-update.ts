@@ -215,7 +215,7 @@ async function pruneOldFiles(platform: UpdatePlatform, keep: string): Promise<vo
   try {
     for (const name of await readdir(dir)) {
       if (name === keep || name === 'latest.json') continue;
-      if (!/^(?:suenmusic|SuenMusic)-.+\.(hap|ipa|apk)$/i.test(name)) continue;
+      if (!/^(?:suenmusic|SuenMusic)-.+\.(hap|ipa|apk|fpk)$/i.test(name)) continue;
       rmSync(join(dir, name), { force: true });
     }
   } catch (err) {

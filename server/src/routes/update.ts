@@ -31,6 +31,7 @@ import {
   validateProxy,
   type UpdateProxyKind,
 } from '../services/update-settings.ts';
+import { SERVER_VERSION } from '../app.ts';
 
 function versionName(value: unknown): string {
   const text = String(value ?? '').trim();
@@ -206,7 +207,10 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
 
   app.get('/api/admin/update-settings', async req => {
     requireWebAdmin(req);
-    return getUpdateProxySettings();
+    return {
+      ...getUpdateProxySettings(),
+      currentVersion: SERVER_VERSION,
+    };
   });
 
   app.patch('/api/admin/update-settings', async req => {

@@ -23,15 +23,15 @@ assert.strictEqual(compareVersionName('2.0.0', '1.5.0'), 1);
 assert.strictEqual(compareVersionName('2.0.0', '2.0.0'), 0);
 assert.strictEqual(compareVersionName('1.5.0', '2.0.0'), -1);
 
-// 3. 短期 Token 签发与验证测试（双端下载）
-for (const p of ['harmony', 'ios'] as const) {
+// 3. 短期 Token 签发与验证测试（三端下载）
+for (const p of ['harmony', 'ios', 'fnos'] as const) {
   const token = signUpdateToken(p);
   assert(token.length > 0, `${p} token should not be empty`);
   assert.strictEqual(verifyUpdateToken(p, token), true, `${p} token should be valid`);
   assert.strictEqual(verifyUpdateToken(p === 'harmony' ? 'ios' : 'harmony', token), false, 'token should not cross-validate other platforms');
 }
 
-// 4. 双端 HTTP 接口测试
+// 4. 双端与飞牛套件 HTTP 接口测试
 const testDb = join(SERVER_ROOT, `data/.test-update-${randomBytes(4).toString('hex')}.db`);
 openDatabase(testDb);
 migrate();
@@ -44,8 +44,9 @@ const app = buildApp();
 await app.ready();
 
 // 模拟本地已缓存 2.0.0 产物
-for (const p of ['harmony', 'ios'] as const) {
-  const ext = p === 'harmony' ? 'hap' : 'ipa';
+const PLATFORM_EXT = { harmony: 'hap', ios: 'ipa', fnos: 'fpk' };
+for (const p of ['harmony', 'ios', 'fnos'] as const) {
+  const ext = PLATFORM_EXT[p];
   const dir = cacheDir(p);
   mkdirSync(dir, { recursive: true });
   const fileName = `suenmusic-2.0.0.${ext}`;
@@ -108,8 +109,35 @@ assert.strictEqual(iosRes2.statusCode, 200);
 const iosData2 = JSON.parse(iosRes2.payload);
 assert.strictEqual(iosData2.available, false);
 
-// 测试 4.5：双端通过短期 token 下载（模拟浏览器或侧载工具直接发起，不需要 Authorization 头）
-for (const p of ['harmony', 'ios'] as const) {
+// 测试 4.4b：飞牛 fnOS 套件检查更新 (1.0.0 -> 发现新版本)
+const fnRes1 = await app.inject({
+  method: 'GET',
+  url: '/api/update/check?platform=fnos&version_name=1.0.0&version_code=0',
+  headers: authHeader,
+});
+assert.strictEqual(fnRes1.statusCode, 200);
+const fnData1 = JSON.parse(fnRes1.payload);
+assert.strictEqual(fnData1.available, true);
+assert.strictEqual(fnData1.latest.versionName, '2.0.0');
+assert.strictEqual(fnData1.latest.fileName, 'suenmusic-2.0.0.fpk');
+assert(fnData1.downloadToken.length > 0);
+
+import { SESSION_COOKIE } from '../http/session-cookie.ts';
+
+// 测试 4.4c：管理端 update-settings 返回真实版本号
+const adminSettingsRes = await app.inject({
+  method: 'GET',
+  url: '/api/admin/update-settings',
+  headers: {
+    cookie: `${SESSION_COOKIE}=${session.refreshToken}`,
+  },
+});
+assert.strictEqual(adminSettingsRes.statusCode, 200);
+const adminSettingsData = JSON.parse(adminSettingsRes.payload);
+assert.strictEqual(adminSettingsData.currentVersion, '2.0.0');
+
+// 测试 4.5：三端通过短期 token 下载（模拟浏览器或侧载工具直接发起，不需要 Authorization 头）
+for (const p of ['harmony', 'ios', 'fnos'] as const) {
   const token = signUpdateToken(p);
   const dlRes = await app.inject({
     method: 'GET',
