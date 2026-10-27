@@ -482,9 +482,13 @@ export struct SearchPage {
         await APIClient.shared().addFavorite(track.id, track);
       }
       AppState.shared().bumpFavRev();
+      // 单行 notifyChange 在 LazyForEach 里不必然触发重建（实测：序号不染色、
+      // 右滑背景仍显示「收藏」），这里补一次整组重投影，保证行内状态立即正确。
+      this.syncSongRows();
       return true;
     } catch (e) {
       this.setFav(track.id, wasFav);
+      this.syncSongRows();
       const msg = (e as ApiError).message;
       AppToast.show(msg === undefined ? Copy.favOpFailed : msg);
       hilog.warn(0x0000, 'SuenMusic_Fav', '收藏切换失败: %{public}s', JSON.stringify(e));
