@@ -428,7 +428,29 @@ export function adaptQQAlbum(
   //   新碟首发（newalbum.NewAlbumServer）是扁平的 `singers`
   const rawSingers =
     basic.singer || basic.singer_list || basic.singers || extra.artists || [];
-  const artists: TrackArtist[] = rawSingers.map(adaptQQTrackArtist);
+  let artists: TrackArtist[] = rawSingers.map(adaptQQTrackArtist);
+
+  /**
+   * 搜索分片（album）不提供 `singer` 数组，只给 `singerName` / `singerMID` 两个字符串。
+   * 不补这一步，歌手页专辑列表就会整列显示「未知歌手」，
+   * 而且归属过滤拿不到歌手 mid/名字 → 别人的专辑混进来（实测「夏日入侵企画的救赎（版本1）」）。
+   */
+  if (artists.length === 0) {
+    const names = String(basic.singerName ?? '')
+      .split(/[、,，&/]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    const mids = String(basic.singerMID ?? '')
+      .split(/[、,，&/]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    artists = names.map((n: string, i: number) => ({
+      id: `qq_ar_${mids[i] ?? ''}`,
+      mid: mids[i] ?? '',
+      name: n,
+      picUrl: getSingerAvatarUrl(mids[i] ?? ''),
+    }));
+  }
 
   return {
     id: `qq_al_${mid}`,

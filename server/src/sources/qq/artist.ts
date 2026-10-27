@@ -256,15 +256,25 @@ export async function getArtistAlbums(
     const hasMore = list.length >= limit;
     if (!singerMid) return { albums, hasMore };
 
+    /**
+     * 归属判定与歌手页歌曲同口径：mid 命中，或**名字命中**；
+     * 两者都拿不到（既无 mid 又无歌手名）的专辑一律丢弃 —— 实测那种条目的 singerName 为空串，
+     * 正是「未知歌手 + 别人的专辑混进歌手页」的来源。
+     */
+    const target = normArtist(singerName);
     const owned = albums.filter(album => {
-      const mids = (album.artists || []).map(a => a?.mid).filter(Boolean);
-      if (mids.length === 0) return true;
-      return mids.includes(singerMid);
+      const artists = album.artists || [];
+      const mids = artists.map(a => a?.mid).filter(Boolean);
+      if (mids.length > 0 && mids.includes(singerMid)) return true;
+      return artists.some(a => {
+        const n = normArtist(a.name);
+        return n.length > 0 && (n.includes(target) || target.includes(n));
+      });
     });
 
     const seen = new Set<string>();
     const picked: Album[] = [];
-    for (const a of owned.length ? owned : albums) {
+    for (const a of owned) {
       if (seen.has(a.mid)) continue;
       seen.add(a.mid);
       picked.push(a);
