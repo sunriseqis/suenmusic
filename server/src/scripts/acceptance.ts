@@ -179,7 +179,10 @@ async function main(): Promise<number> {
   }
 
   must(true, `搜到 ${songs.length} 首，首条「${songs[0].name}」`);
-  must(/^qq_(?!al_|ar_|pl_|top_).+/.test(songs[0].id), `单曲 id 是路由键（${songs[0].id}）`);
+  must(
+    /^(?:qq_(?!al_|ar_|pl_|top_)|kg_(?!al_|ar_)|ne_(?!al_|ar_|pl_)).+/.test(songs[0].id),
+    `单曲 id 是路由键（${songs[0].id}）`,
+  );
 
   const trackId: string = songs[0].id;
   const durationMs: number = Number(songs[0].dt) || 0;

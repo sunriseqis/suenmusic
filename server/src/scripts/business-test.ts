@@ -229,10 +229,19 @@ async function main(): Promise<number> {
     note(`命中 ${songs.length} 首，第一首：${songs[0].name}`);
 
     const s = songs[0];
-    check('单曲 id 是路由键（qq_<mid>）', /^qq_(?!al_|ar_|pl_|top_).+/.test(s.id), s.id);
-    check('专辑 id 是路由键（qq_al_<mid>）', /^qq_al_.+/.test(s.al?.id ?? ''), s.al?.id);
-    check('歌手 id 是路由键（qq_ar_<mid>）', /^qq_ar_.+/.test(s.ar?.[0]?.id ?? ''), s.ar?.[0]?.id);
-    check('专辑封面是 QQ 图床', String(s.al?.picUrl ?? '').includes('y.gtimg.cn'), s.al?.picUrl);
+    // 多源聚合后单曲可能来自酷狗（kg_）或网易云（ne_），三套前缀都合法
+    check(
+      '单曲 id 是路由键（qq_/kg_/ne_）',
+      /^(?:qq_(?!al_|ar_|pl_|top_)|kg_(?!al_|ar_)|ne_(?!al_|ar_|pl_)).+/.test(s.id),
+      s.id,
+    );
+    check('专辑 id 是路由键（*_al_<id>）', /^(?:qq|kg|ne)_al_.+/.test(s.al?.id ?? ''), s.al?.id);
+    check('歌手 id 是路由键（*_ar_<id>）', /^(?:qq|kg|ne)_ar_.+/.test(s.ar?.[0]?.id ?? ''), s.ar?.[0]?.id);
+    check(
+      '专辑封面来自已知图床（QQ / 酷狗 / 网易云）',
+      /(y\.gtimg\.cn|imge\.kugou\.com|music\.126\.net)/.test(String(s.al?.picUrl ?? '')),
+      s.al?.picUrl,
+    );
     check('时长为正数（毫秒）', Number(s.dt) > 0, `dt=${s.dt}`);
     eq('artists 与 ar 一致', s.artists?.length, s.ar?.length);
     check('提供播放特权字段（前端兼容）', !!s.privilege);
@@ -287,7 +296,7 @@ async function main(): Promise<number> {
     `artists=${artistSliceCount} hasMore.artist=${slicedArtist.json?.hasMore?.artist}`
   );
   if (artists[0]) {
-    check('歌手 id 是路由键', /^qq_ar_.+/.test(artists[0].id), artists[0].id);
+    check('歌手 id 是路由键', /^(?:qq|kg|ne)_ar_.+/.test(artists[0].id), artists[0].id);
   }
 
   const albumSearch = await req('GET', '/api/search?q=%E5%8F%B6%E6%83%A0%E7%BE%8E&type=album', {
