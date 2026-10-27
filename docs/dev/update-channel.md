@@ -22,7 +22,6 @@
 SUENMUSIC_UPDATE_GITHUB_REPO=owner/repo   # 缺省 sunriseqis/suenapp（公开仓库）
 SUENMUSIC_UPDATE_GITHUB_TOKEN=            # 可选：60/h → 5000/h
 SUENMUSIC_UPDATE_GITHUB_API_BASE=         # 可选：API 反代（部署层决策），默认官方
-SUENMUSIC_UPDATE_GITHUB_PROXY=            # 可选：下载代理前缀（如 https://gh-proxy.com/）
 SUENMUSIC_UPDATE_CACHE_DIR=./data/updates # 持久化
 SUENMUSIC_UPDATE_POLL_MINUTES=30          # 0 = 只手点时核对
 ```

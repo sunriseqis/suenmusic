@@ -251,15 +251,7 @@ export async function refreshPlatform(
   const target = join(dir, fileName);
   const temp = `${target}.part`;
 
-  let downloadUrl = picked.asset.browser_download_url!;
-  if (config.updateGithubProxy) {
-    const prefix = config.updateGithubProxy.endsWith('/')
-      ? config.updateGithubProxy
-      : `${config.updateGithubProxy}/`;
-    downloadUrl = `${prefix}${downloadUrl}`;
-  }
-
-  const res = await fetch(downloadUrl, {
+  const res = await fetch(picked.asset.browser_download_url!, {
     headers: githubHeaders(),
     dispatcher: proxyDispatcher(),
   } as never);

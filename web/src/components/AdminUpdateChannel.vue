@@ -68,10 +68,12 @@ async function load(): Promise<void> {
 async function save(): Promise<void> {
   saving.value = true;
   try {
+    const trimmedUrl = proxyUrl.value.trim();
+    const kind = trimmedUrl ? 'http' : 'none';
     const s = await http.patch<UpdateSettings>('/api/admin/update-settings', {
       source: source.value,
-      proxyKind: proxyKind.value,
-      proxyUrl: proxyUrl.value.trim(),
+      proxyKind: kind,
+      proxyUrl: trimmedUrl,
     });
     source.value = s.source;
     proxyKind.value = s.proxyKind;

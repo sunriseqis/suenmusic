@@ -65,12 +65,7 @@ export interface Config {
    * 通常会失败，所以两者不共用同一个变量。
    */
   updateGithubApiBase: string;
-  /**
-   * 资产下载代理前缀（可选）。国内直连 `objects.githubusercontent.com` 常失败时填它：
-   *   `https://gh-proxy.com/` → 最终 URL = 前缀 + 原始 browser_download_url
-   * 只影响**下载**，不影响 API 查询。
-   */
-  updateGithubProxy: string;
+
   /** 产物本地缓存目录（docker 挂卷 / fnOS 数据目录都指到能持久化的地方） */
   updateCacheDir: string;
   /** 后台轮询 GitHub 的间隔（分钟，0 = 不自动轮询，只响应手动 force） */
@@ -256,7 +251,7 @@ export const config: Config = {
   updateGithubRepo: envStr('SUENMUSIC_UPDATE_GITHUB_REPO', 'sunriseqis/suenapp').trim(),
   updateGithubToken: envStr('SUENMUSIC_UPDATE_GITHUB_TOKEN', '').trim(),
   updateGithubApiBase: envStr('SUENMUSIC_UPDATE_GITHUB_API_BASE', 'https://api.github.com').trim().replace(/\/+$/, ''),
-  updateGithubProxy: envStr('SUENMUSIC_UPDATE_GITHUB_PROXY', '').trim(),
+
   updateCacheDir: envStr('SUENMUSIC_UPDATE_CACHE_DIR', './data/updates'),
   updatePollMinutes: envNum('SUENMUSIC_UPDATE_POLL_MINUTES', 30),
   // 分享 ID 本身不是凭据；默认指向官方更新目录，仍可用环境变量替换。

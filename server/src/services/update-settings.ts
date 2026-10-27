@@ -75,11 +75,19 @@ export function saveUpdateProxySettings(next: {
   proxyKind?: UpdateProxyKind;
   proxyUrl?: string;
 }): UpdateProxySettings {
+  const rawUrl = (next.proxyUrl ?? '').trim();
+  // 智能容错：填了代理地址即为 http，清空代理地址即为 none 直连，避免误判
+  let kind: UpdateProxyKind = next.proxyKind === 'http' ? 'http' : 'none';
+  if (rawUrl) {
+    kind = 'http';
+  } else {
+    kind = 'none';
+  }
+
   const value: UpdateProxySettings = {
     source: next.source === 'off' ? 'off' : 'github',
-    proxyKind:
-      next.proxyKind === 'http' ? 'http' : 'none',
-    proxyUrl: (next.proxyUrl ?? '').trim(),
+    proxyKind: kind,
+    proxyUrl: kind === 'none' ? '' : rawUrl,
   };
   const problem = validateProxy(value.proxyKind, value.proxyUrl);
   if (problem) throw new Error(problem);

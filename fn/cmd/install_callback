@@ -38,12 +38,12 @@ log_msg() {
 
 log_msg "开始执行安装后初始化..."
 
-# 1. 持久化自定义端口至 etc/.env
+# 1. 全局同步端口配置至 etc/.env、桌面 ui/config 及 manifest 元数据
 PORT="${wizard_port:-${SUENMUSIC_PORT:-3210}}"
 mkdir -p "${ETC_DIR}" 2>/dev/null || true
 ENV_FILE="${ETC_DIR}/.env"
 
-if [ -n "${wizard_port}" ] || [ ! -f "${ENV_FILE}" ]; then
+if [ -n "${PORT}" ]; then
     touch "${ENV_FILE}" 2>/dev/null || true
     if grep -q "^SUENMUSIC_PORT=" "${ENV_FILE}" 2>/dev/null; then
         sed -i "s/^SUENMUSIC_PORT=.*/SUENMUSIC_PORT=${PORT}/" "${ENV_FILE}" 2>/dev/null || true
@@ -51,16 +51,46 @@ if [ -n "${wizard_port}" ] || [ ! -f "${ENV_FILE}" ]; then
         echo "SUENMUSIC_PORT=${PORT}" >> "${ENV_FILE}" 2>/dev/null || true
     fi
     log_msg "已写入自定义端口配置 SUENMUSIC_PORT=${PORT} -> ${ENV_FILE}"
+
+    # 递归/多路径同步所有存在的 ui/config（保证桌面快捷方式读取到新端口）
+    POSSIBLE_UI_CONFIGS=(
+        "${APP_DIR}/ui/config"
+        "${APP_DIR}/app/ui/config"
+        "${PKG_ROOT}/ui/config"
+        "${PKG_ROOT}/target/ui/config"
+        "${SCRIPT_DIR}/../ui/config"
+        "${SCRIPT_DIR}/../target/ui/config"
+        "/var/apps/suenmusic/ui/config"
+        "/var/apps/suenmusic/target/ui/config"
+        "/var/packages/suenmusic/target/ui/config"
+        "/var/packages/suenmusic/ui/config"
+    )
+    for conf in "${POSSIBLE_UI_CONFIGS[@]}"; do
+        if [ -f "${conf}" ]; then
+            sed -i "s/\"port\":[[:space:]]*\"[0-9]*\"/\"port\": \"${PORT}\"/" "${conf}" 2>/dev/null || true
+            log_msg "已同步桌面入口端口 (${PORT}) -> ${conf}"
+        fi
+    done
+
+    # 同步系统 manifest / INFO 元数据（系统服务中心与桌面快捷方式注册数据源）
+    POSSIBLE_MANIFESTS=(
+        "${APP_DIR}/manifest"
+        "${APP_DIR}/../manifest"
+        "${PKG_ROOT}/manifest"
+        "${SCRIPT_DIR}/../manifest"
+        "/var/apps/suenmusic/manifest"
+        "/var/packages/suenmusic/manifest"
+        "/var/packages/suenmusic/INFO"
+    )
+    for mf in "${POSSIBLE_MANIFESTS[@]}"; do
+        if [ -f "${mf}" ]; then
+            sed -i "s/^service_port[[:space:]]*=.*/service_port = ${PORT}/" "${mf}" 2>/dev/null || true
+            log_msg "已同步系统元数据 service_port (${PORT}) -> ${mf}"
+        fi
+    done
 fi
 
-# 2. 同步更新桌面 UI 入口中的端口
-UI_CONFIG="${APP_DIR}/ui/config"
-if [ -f "${UI_CONFIG}" ]; then
-    sed -i "s/\"port\":[[:space:]]*\"[0-9]*\"/\"port\": \"${PORT}\"/" "${UI_CONFIG}" 2>/dev/null || true
-    log_msg "已同步桌面快捷入口端口: ${PORT}"
-fi
-
-# 3. 创建初始管理员账号
+# 2. 创建初始管理员账号
 DATA_DIR="${VAR_DIR}/data"
 mkdir -p "${DATA_DIR}" 2>/dev/null || true
 
@@ -75,22 +105,28 @@ ADMIN_USER="${wizard_admin_user:-admin}"
 ADMIN_PASS="${wizard_admin_password:-}"
 ADMIN_NAME="${wizard_admin_display_name:-管理员}"
 
-if [ -n "${NODE_BIN}" ] && [ -n "${ADMIN_PASS}" ] && [ -d "${APP_DIR}/server" ]; then
-    log_msg "正在创建初始管理员账号: ${ADMIN_USER}..."
-    export SUENMUSIC_DB="${DATA_DIR}/suenmusic.db"
-    (
-        cd "${APP_DIR}/server" || exit 0
-        "${NODE_BIN}" --experimental-strip-types --disable-warning=ExperimentalWarning \
-            src/scripts/user-add.ts -u "${ADMIN_USER}" -p "${ADMIN_PASS}" -n "${ADMIN_NAME}" >> "${LOG_FILE}" 2>&1
-    )
-    RC=$?
-    if [ "${RC}" = "0" ]; then
-        log_msg "初始管理员账号 [${ADMIN_USER}] 创建成功，开箱即用"
+if [ -n "${ADMIN_PASS}" ]; then
+    if [ "${#ADMIN_PASS}" -lt 8 ]; then
+        log_msg "[ERROR] 密码长度小于 8 位（当前 ${#ADMIN_PASS} 位），服务端密码策略拒绝弱密码，未能创建账号！"
+    elif [ -n "${NODE_BIN}" ] && [ -d "${APP_DIR}/server" ]; then
+        log_msg "正在创建初始管理员账号: ${ADMIN_USER}..."
+        export SUENMUSIC_DB="${DATA_DIR}/suenmusic.db"
+        (
+            cd "${APP_DIR}/server" || exit 0
+            "${NODE_BIN}" --experimental-strip-types --disable-warning=ExperimentalWarning \
+                src/scripts/user-add.ts -u "${ADMIN_USER}" -p "${ADMIN_PASS}" -n "${ADMIN_NAME}" >> "${LOG_FILE}" 2>&1
+        )
+        RC=$?
+        if [ "${RC}" = "0" ]; then
+            log_msg "初始管理员账号 [${ADMIN_USER}] 创建成功，开箱即用"
+        else
+            log_msg "[WARN] 管理员账号创建脚本返回 ${RC}，请查看日志详情"
+        fi
     else
-        log_msg "[WARN] 管理员账号创建脚本返回 ${RC}，请查看日志详情"
+        log_msg "[WARN] Node 运行时或服务端目录不存在，跳过创建管理员账号"
     fi
 else
-    log_msg "未提供初始管理员密码或 Node 运行时不可用，跳过创建管理员账号"
+    log_msg "未提供初始管理员密码，跳过创建管理员账号"
 fi
 
 log_msg "安装后初始化完成"

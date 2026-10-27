@@ -24,4 +24,9 @@ if (command -v timeout >/dev/null 2>&1 \
         && timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/${SUENMUSIC_PORT:-3210}" 2>/dev/null); then
     echo "$(date '+%Y-%m-%d %H:%M:%S') - [uninstall_callback] [WARN] 端口仍被占用，可能有残留进程" >> "${LOG_FILE}" 2>/dev/null
 fi
+
+# 清理运行时临时文件与残留软链
+rm -f "${VAR_DIR}/app.pid" "${VAR_DIR}/daemon.pid" 2>/dev/null || true
+rm -rf "${VAR_DIR}/tmp" 2>/dev/null || true
+
 exit 0
