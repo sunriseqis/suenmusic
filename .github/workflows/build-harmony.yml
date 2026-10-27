@@ -58,6 +58,15 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${RAW_VER}" >> $GITHUB_OUTPUT
 
+      - name: Prepare Release Notes
+        run: |
+          node scripts/prepare-release-notes.mjs \
+            --platform harmony \
+            --tag ${{ steps.prep.outputs.tag }} \
+            --output /tmp/release_body.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Release to Public Repo (sunriseqis/suenapp)
         uses: softprops/action-gh-release@v2
         with:
@@ -65,12 +74,8 @@ jobs:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.prep.outputs.tag }}
           name: SuenMusic ${{ steps.prep.outputs.tag }}
-          body: |
-            ### SuenMusic ${{ steps.prep.outputs.tag }} 鸿蒙 NEXT 原生客户端
-
-            - **格式**：`.hap` 未签名包。
-            - **使用方式**：可直接推入鸿蒙 NEXT 模拟器调试，或通过移动端侧载/自签名工具签名后在真机运行。
+          body_path: /tmp/release_body.md
           files: output/*.hap
           draft: false
           prerelease: false
-          append_body: true
+          append_body: false

@@ -50,6 +50,15 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "version=${RAW_VER}" >> $GITHUB_OUTPUT
 
+      - name: Prepare Release Notes
+        run: |
+          node scripts/prepare-release-notes.mjs \
+            --platform fnos \
+            --tag ${{ steps.prep.outputs.tag }} \
+            --output /tmp/release_body.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
+
       - name: Release to Public Repo (sunriseqis/suenapp)
         uses: softprops/action-gh-release@v2
         with:
@@ -57,12 +66,8 @@ jobs:
           token: ${{ secrets.GH_RELEASE_TOKEN || secrets.SUENAPP_TOKEN || secrets.GITHUB_TOKEN }}
           tag_name: ${{ steps.prep.outputs.tag }}
           name: SuenMusic ${{ steps.prep.outputs.tag }}
-          body: |
-            ### SuenMusic ${{ steps.prep.outputs.tag }} 飞牛私有云（fnOS）原生套件
-
-            - **格式**：`.fpk` 纯原生系统运行（免 Docker，零虚拟化损耗）。
-            - **功能**：内置安装引导向导，支持安装时自定义服务端口并直接初始化第一个管理员账号，开箱即用。
+          body_path: /tmp/release_body.md
           files: output/*.fpk
           draft: false
           prerelease: false
-          append_body: true
+          append_body: false
