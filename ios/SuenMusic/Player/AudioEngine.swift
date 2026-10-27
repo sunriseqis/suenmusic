@@ -9,6 +9,7 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
+import Network
 // CryptoKit 提供 Insecure.SHA1（封面文件名摘要用；原来靠外部库，原生化后改系统框架）
 import CryptoKit
 
@@ -731,7 +732,7 @@ final class AudioEngine: NSObject {
         let status = item.map { Int($0.status.rawValue) } ?? -1
         let reason = player.reasonForWaitingToPlay?.rawValue ?? "-"
         let errText = item?.error.map { "\($0)" } ?? "-"
-        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) pos=\(positionMs)ms dur=\(currentItemDurationMs())ms 源=\(durationSource()) rate=\(player.rate) err=\(errText) intent=\(playingIntent)")
+        NSLog("[Diag] tcs=\(player.timeControlStatus.rawValue) item=\(status) reason=\(reason) pos=\(positionMs)ms dur=\(currentItemDurationMs())ms 源=\(durationSource()) rate=\(player.rate) err=\(errText) intent=\(playingIntent)")
 
         // 兜底（2026-10-25）：有音源却起不来 —— tcs 已是 playing、item 未 failed、但 5s 内进度一直是 0。
         // 实测 qq_002TTnfc13TkgO 就是这种：服务端 206 正常、ttfb 2.25s，AVFoundation 却停在 unknown。

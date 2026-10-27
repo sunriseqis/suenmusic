@@ -87,13 +87,15 @@ final class AnchorPreview: ObservableObject {
         observers.append(center.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.stop(resumeMain: true, main: main) }
+            guard let self else { return }
+            Task { @MainActor in self.stop(resumeMain: true, main: main) }
         })
         observers.append(center.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main
         ) { [weak self] _ in
+            guard let self else { return }
             Task { @MainActor in
-                self?.stop(resumeMain: true, main: main)
+                self.stop(resumeMain: true, main: main)
                 ToastCenter.shared.show("试听加载失败，请稍后重试")
             }
         })

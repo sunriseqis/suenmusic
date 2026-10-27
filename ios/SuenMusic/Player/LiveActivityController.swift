@@ -99,7 +99,8 @@ final class LiveActivityController {
         foregroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.flushPending() }
+            guard let self else { return }
+            Task { @MainActor in self.flushPending() }
         }
     }
 
