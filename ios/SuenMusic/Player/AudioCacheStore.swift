@@ -778,7 +778,7 @@ final class AudioCacheStore {
         cacheLog("clear", "缓存已清空")
     }
 
-    /// 超出 4GB 上限时按 LRU 淘汰（跳过有活动读者和正在下载的条目）
+    /// 超出 2GB 上限时按 LRU 淘汰（跳过有活动读者和正在下载的条目）
     private func enforceLimit(protecting id: String) {
         var used = usedBytes()
         guard used > Self.maxBytes else { return }
@@ -792,7 +792,7 @@ final class AudioCacheStore {
         }
         // 内存里能淘汰的都淘汰完了还超限 → 还剩"上一次进程留下的文件"。
         // `entries` 只装本进程碰过的条目，冷启动后旧文件虽然占着 usedBytes()，
-        // 却永远进不了候选集 —— 缓存目录就这样无上限增长，4GB 上限形同虚设。
+        // 却永远进不了候选集 —— 缓存目录就这样无上限增长，2GB 上限形同虚设。
         _ = enforceLimitFromDisk(protecting: id)
     }
 

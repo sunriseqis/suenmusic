@@ -22,8 +22,13 @@ enum SettingsFmt {
         if bytes <= 0 { return "0M" }
         if bytes >= gb {
             let v = Double(bytes) / Double(gb)
-            // JS Math.round：>= 10 取整，否则留一位小数
-            return v >= 10 ? String(Int(v.rounded())) : String(format: "%.1f", v)
+            let s: String
+            if v >= 10 || (v * 10).rounded().truncatingRemainder(dividingBy: 10) == 0 {
+                s = String(Int(v.rounded()))
+            } else {
+                s = String(format: "%.1f", v)
+            }
+            return s + "G"
         }
         return String(Int((Double(bytes) / Double(mb)).rounded())) + "M"
     }

@@ -167,7 +167,8 @@ export struct SettingsPage {
     }
     if (b >= gb) {
       const v = b / gb;
-      return (v >= 10 ? Math.round(v).toString() : v.toFixed(1)) + 'G';
+      const s = (v >= 10 || Math.round(v * 10) % 10 === 0) ? Math.round(v).toString() : v.toFixed(1);
+      return s + 'G';
     }
     return Math.round(b / mb).toString() + 'M';
   }
