@@ -257,6 +257,35 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
   });
 
   /**
+   * 详情回源补专辑/封面。
+   *
+   * 事实澄清（2026-10-26 实测）：QQ **搜索分片**对部分条目不带专辑（`al.mid`/`al.name` 皆空），
+   * 但 **详情接口**（`get_song_detail_yqq`）通常是有的 —— 这也解释了用户观察到的
+   * 「点播放后封面就补上了」：播放链路会触发详情回源并落库。
+   * 所以这里在列表阶段就补一次，而不是靠用户点播放来补齐。
+   *
+   * 限量 N 条：每次回源是一次上游请求，一页几十条全补会打爆风控。
+   */
+  const enrichMissingAlbums = async (songs: Track[], max = 10): Promise<Track[]> => {
+    const targets = songs.filter(s => s.mid && (!s.al?.mid || !s.al?.name)).slice(0, max);
+    if (targets.length === 0) return songs;
+    await Promise.all(
+      targets.map(async t => {
+        try {
+          const full = await getSongDetail(t.mid, { bypassCache: true });
+          if (!full?.al?.mid) return;
+          t.al = { ...t.al, ...full.al };
+          t.album = { ...t.album, ...(full.album ?? full.al) };
+          if (!t.dt && full.dt) t.dt = full.dt;
+        } catch {
+          // 单条失败不影响列表
+        }
+      }),
+    );
+    return songs;
+  };
+
+  /**
    * 封面兜底：库里同一首歌若已有封面（多源别的条目带过），直接补上。
    *
    * QQ 歌手页的召回行有相当比例不带专辑封面（实测「夏日入侵企划」27 条里 14 条空封面），
@@ -410,6 +439,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
 
     const result = await getArtistSongs(parsed.value, singerName, limit, page);
     upsertTracks(result.songs);
+    await enrichMissingAlbums(result.songs);
     backfillCovers(result.songs);
 
     return {

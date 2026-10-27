@@ -268,6 +268,10 @@ export function adaptQQSong(song: QQRecord | null | undefined): Track | null {
   const name = song0.name || song0.songname || song0.title || '';
   const interval = song0.interval || song0.duration || 0;
 
+  // 既无 mid 也无 rawId → 这不是一条可寻址的曲目（详情接口对「原声/上传」类会返回空壳）。
+  // 不拦的话会产出 id='qq_' 的垃圾行，落库后还会污染封面兜底与去重。
+  if (!mid && !rawId) return null;
+
   const singers = (song0.singer || song0.singer_list || []).map(adaptQQTrackArtist);
 
   const albumMid = song0.album?.mid || song0.albummid || '';
