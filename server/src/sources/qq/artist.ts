@@ -161,7 +161,15 @@ export async function getArtistSongs(
 
     // 伴奏版是原曲的附赠重复项：留着会与原曲显示成同一个名字（见适配器注释）。
     // 搜索接口**不**过滤 —— 用户可能就是冲着伴奏来搜的。
+    /**
+     * 短视频「原声」条目不是歌：名字形如「@某某创作的原声一某某」，没有专辑也没有封面。
+     * 歌手页里把它们当曲目列出来只会制造空白行（用户 2026-10-26 报的就是这类）。
+     */
+    const isOriginalSoundClip = (name: string) =>
+      /创作的原声|原声[一-]|\.?原声$/.test(name) || /^[@#]/.test(name.trim());
+
     const songs = dedupeRawByMid(withoutAccompaniment(list))
+      .filter(raw => !isOriginalSoundClip(String((raw as Record<string, unknown>)?.title ?? (raw as Record<string, unknown>)?.name ?? '')))
       .map(adaptQQSong)
       .filter((x): x is Track => x !== null);
 

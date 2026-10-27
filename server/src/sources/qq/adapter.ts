@@ -277,6 +277,15 @@ export function adaptQQSong(song: QQRecord | null | undefined): Track | null {
     ? `qq_al_${albumMid}`
     : String(song0.album?.id || song0.albumid || '');
 
+  /**
+   * 封面：优先专辑图；**没有专辑 mid 时退回歌手头像**。
+   *
+   * QQ 的「原声/上传」类条目（如「@夏日入侵企画创作的原声…」）没有专辑绑定，
+   * `al.mid`/`al.name` 都是空 —— 直接算专辑图会得到空串，列表里就是一片空白。
+   * 歌手头像 URL 是确定性的（T001R300x300M000{mid}.jpg），零额外请求。
+   */
+  const coverUrl = getAlbumCoverUrl(albumMid) || getSingerAvatarUrl(singers[0]?.mid ?? '');
+
   return {
     id: `qq_${mid || rawId}`,
     mid,
@@ -287,12 +296,12 @@ export function adaptQQSong(song: QQRecord | null | undefined): Track | null {
       id: albumRouteId,
       mid: albumMid,
       name: albumName,
-      picUrl: getAlbumCoverUrl(albumMid),
+      picUrl: coverUrl,
     },
     album: {
       id: albumRouteId,
       name: albumName,
-      picUrl: getAlbumCoverUrl(albumMid),
+      picUrl: coverUrl,
     },
     dt: interval * 1000,
     duration: interval,
