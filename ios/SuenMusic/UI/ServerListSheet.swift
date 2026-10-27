@@ -444,8 +444,12 @@ struct ServerListSheet: View {
             p.scrim
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
-                .onTapGesture {}
+                .onTapGesture {
+                    onClose()
+                }
             panel
+                .contentShape(Rectangle())
+                .onTapGesture {}
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .task {

@@ -525,7 +525,7 @@ struct NativeRoot {
             .width('100%')
             .height('100%')
 
-            // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板不关浮层（避免误触丢输入/状态）
+            // 浮层背板（S4 §二）：scrim 0→1 渐显；点背板关浮层
             if (this.showServers || this.showCache || this.showCollection) {
               Column()
                 .width('100%')
@@ -533,7 +533,10 @@ struct NativeRoot {
                 .backgroundColor(Tokens.scrim)
                 .transition(TransitionEffect.OPACITY
                   .animation({ duration: Motion.standard, curve: Motion.curve }))
-                .onClick(() => {})
+                .onClick(() => {
+                  if (this.showServers) { this.showServers = false; }
+                  if (this.showCache) { this.showCache = false; }
+                })
             }
 
             // 服务端管理 / 缓存面板 / 集合详情：底部上滑转场（S4 §二，200ms EaseOut），

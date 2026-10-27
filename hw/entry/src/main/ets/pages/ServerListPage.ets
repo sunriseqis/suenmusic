@@ -474,6 +474,14 @@ export struct ServerListPage {
 
   build() {
     Stack({ alignContent: Alignment.Bottom }) {
+      // 遮罩空白区：点击关闭
+      Column()
+        .width('100%')
+        .height('100%')
+        .onClick(() => {
+          this.onClose();
+        })
+
       Column({ space: Dim.s3 }) {
         this.sheetGrip()
 
@@ -554,6 +562,7 @@ export struct ServerListPage {
       .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s4 })
       .backgroundColor(Tokens.panel)
       .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
+      .onClick(() => {})
     }
     .width('100%')
     .height('100%')

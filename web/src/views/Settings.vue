@@ -13,9 +13,9 @@
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { renderMarkdown } from '@/utils/markdown.ts';
 import { fetchKugouStatus, startKugouQr, pollKugouQr, logoutKugou } from '@/api/kugou.ts';
 import NeuButton from '@/components/neu/NeuButton.vue';
-import NeuIcon from '@/components/neu/NeuIcon.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
 import NeuSwitch from '@/components/neu/NeuSwitch.vue';
 import NeuTabs from '@/components/neu/NeuTabs.vue';
@@ -66,7 +66,21 @@ const dislikes = useDislikesStore();
 const update = useUpdateStore();
 const player = usePlayerStore();
 
-type SheetName = 'login' | 'dislikes' | 'import' | 'dedupe' | 'backup' | 'theme' | 'cache' | 'auth';
+type SheetName =
+  | 'login'
+  | 'dislikes'
+  | 'import'
+  | 'dedupe'
+  | 'backup'
+  | 'theme'
+  | 'cache'
+  | 'auth'
+  | 'persona'
+  | 'ai-models'
+  | 'admin-users'
+  | 'admin-update'
+  | 'admin-anchors'
+  | 'admin-maint';
 const sheet = ref<SheetName | null>(null);
 
 // ---------------------------------------------------------------- 主题
@@ -296,9 +310,12 @@ async function doLogout(): Promise<void> {
 
 // ---------------------------------------------------------------- 智能
 const persona = ref<PersonaDetail | null>(null);
-const personaOpen = ref(false);
 const guidance = ref('');
 const tuning = ref(false);
+
+const renderedPersonaSummary = computed(() => {
+  return renderMarkdown(persona.value?.summary);
+});
 
 
 async function loadPersona(): Promise<void> {
@@ -636,19 +653,10 @@ onBeforeUnmount(() => {
       <section class="sec">
         <h2 class="label">画像</h2>
         <div class="panel">
-          <button type="button" class="row row-btn" @click="personaOpen = !personaOpen">
-            <span class="row-name">{{ persona?.summary ? '音乐画像' : '尚未生成' }}</span>
-            <NeuIcon :name="personaOpen ? 'chevron-up' : 'chevron-down'" :size="16" />
+          <button type="button" class="row row-btn" @click="sheet = 'persona'">
+            <span class="row-name">音乐画像</span>
+            <span class="row-val">{{ persona?.summary ? '查看画像' : '尚未生成' }}</span>
           </button>
-          <div v-if="personaOpen" class="pad">
-            <p class="para">{{ persona?.summary || '暂无' }}</p>
-            <ul class="lines">
-              <li v-for="(l, i) in persona?.profileLines ?? []" :key="i">{{ l }}</li>
-            </ul>
-            <ul class="lines">
-              <li v-for="(l, i) in persona?.ledgerLines ?? []" :key="i">{{ l }}</li>
-            </ul>
-          </div>
         </div>
       </section>
 
@@ -669,17 +677,21 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <!-- 模型增删改 + 决策/复核分配：仅 Web 面板的管理员（接口层有渠道闸） -->
+      <!-- 模型增删改 + 决策/复核分配：收缩为弹层入口 -->
       <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
         <h2 class="label">AI 模型</h2>
-        <AdminAiModels />
+        <div class="panel">
+          <button type="button" class="row row-btn" @click="sheet = 'ai-models'">
+            <span class="row-name">AI 模型配置</span>
+            <span class="row-val">查看与配置</span>
+          </button>
+        </div>
       </section>
     </template>
 
     <!-- ==================== 高级 ==================== -->
     <template v-if="serverConfigured && (isDesktop || activeTab === 'advanced')">
-      <!-- 多服务端：门禁用 isNativeShell（Capacitor ∪ 鸿蒙），不能用 isNativeAudio ——
-           鸿蒙没有 Capacitor 音频插件，用它当门禁会让鸿蒙永远没有改地址的入口 -->
+      <!-- 多服务端：门禁用 isNativeShell（Capacitor ∪ 鸿蒙），不能用 isNativeAudio -->
       <section v-if="isNativeShell" class="sec">
         <h2 class="label">多服务端</h2>
         <ServerListEditor />
@@ -716,41 +728,26 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <!-- 系统运维：合并管理员管理项为统一面板，收缩为弹层 -->
       <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
-        <h2 class="label">账号管理</h2>
-        <AdminUsers />
-      </section>
-
-      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
-        <h2 class="label">数据维护</h2>
-        <AdminMaintenance />
-      </section>
-
-      <!-- 更新通道（GitHub 源 + 下载代理）：仅 Web 面板管理员；接口层有渠道闸 -->
-      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
-        <h2 class="label">更新通道</h2>
-        <AdminUpdateChannel />
-      </section>
-
-      <!-- 音源锚点：自动沉淀的 B 站锚点会压过取流链，这里给一个一键清理口子 -->
-      <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
-        <h2 class="label">音源锚点</h2>
+        <h2 class="label">系统运维</h2>
         <div class="panel">
-          <div class="row">
-            <span class="row-name">自动锚点</span>
-            <span class="row-val">{{ anchorStats.auto }} 条（优先于取流链）</span>
-          </div>
-          <div class="row">
-            <span class="row-name">手动锚定</span>
-            <span class="row-val">{{ anchorStats.manual }} 条（永远最高优先，清理不会动）</span>
-          </div>
-          <div class="row">
-            <span class="row-name">清理自动锚点</span>
-            <span class="row-val">清空后这些曲目回到自动判定（酷狗 → B 站）</span>
-            <NeuButton size="sm" :loading="purging" :disabled="anchorStats.auto === 0" @click="purgeAutoAnchors">
-              清理
-            </NeuButton>
-          </div>
+          <button type="button" class="row row-btn" @click="sheet = 'admin-users'">
+            <span class="row-name">账号管理</span>
+            <span class="row-val">用户与权限</span>
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'admin-update'">
+            <span class="row-name">更新通道</span>
+            <span class="row-val">服务端与双端更新</span>
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'admin-anchors'">
+            <span class="row-name">音源锚点</span>
+            <span class="row-val">自动 {{ anchorStats.auto }} · 手动 {{ anchorStats.manual }}</span>
+          </button>
+          <button type="button" class="row row-btn" @click="sheet = 'admin-maint'">
+            <span class="row-name">数据维护</span>
+            <span class="row-val">备份与完整性</span>
+          </button>
         </div>
       </section>
     </template>
@@ -881,6 +878,77 @@ onBeforeUnmount(() => {
       </div>
       <NeuButton variant="primary" block :loading="loginBusy" @click="doLogin">登入</NeuButton>
       <p v-if="loginErr" class="hint err">{{ loginErr }}</p>
+    </Sheet>
+
+    <!-- 音乐画像弹层 -->
+    <Sheet :open="sheet === 'persona'" title="音乐画像" @close="sheet = null">
+      <div class="sheet-pad persona-sheet-content">
+        <div v-if="persona?.summary" class="persona-markdown" v-html="renderedPersonaSummary" />
+        <p v-else class="empty-hint">暂无音乐画像，请先在客户端听歌并积累播放记录</p>
+        <template v-if="persona?.profileLines?.length">
+          <h3 class="persona-subhead">口味特征</h3>
+          <ul class="md-ul">
+            <li v-for="(l, i) in persona.profileLines" :key="i">{{ l }}</li>
+          </ul>
+        </template>
+        <template v-if="persona?.ledgerLines?.length">
+          <h3 class="persona-subhead">记忆账本</h3>
+          <ul class="md-ul">
+            <li v-for="(l, i) in persona.ledgerLines" :key="i">{{ l }}</li>
+          </ul>
+        </template>
+      </div>
+    </Sheet>
+
+    <!-- AI 模型配置弹层 -->
+    <Sheet :open="sheet === 'ai-models'" title="AI 模型配置" @close="sheet = null">
+      <div class="sheet-pad">
+        <AdminAiModels />
+      </div>
+    </Sheet>
+
+    <!-- 账号管理弹层 -->
+    <Sheet :open="sheet === 'admin-users'" title="账号管理" @close="sheet = null">
+      <div class="sheet-pad">
+        <AdminUsers />
+      </div>
+    </Sheet>
+
+    <!-- 更新通道弹层 -->
+    <Sheet :open="sheet === 'admin-update'" title="更新通道" @close="sheet = null">
+      <div class="sheet-pad">
+        <AdminUpdateChannel />
+      </div>
+    </Sheet>
+
+    <!-- 音源锚点弹层 -->
+    <Sheet :open="sheet === 'admin-anchors'" title="音源锚点管理" @close="sheet = null">
+      <div class="sheet-pad">
+        <div class="panel">
+          <div class="row">
+            <span class="row-name">自动锚点</span>
+            <span class="row-val">{{ anchorStats.auto }} 条（优先于取流链）</span>
+          </div>
+          <div class="row">
+            <span class="row-name">手动锚定</span>
+            <span class="row-val">{{ anchorStats.manual }} 条（永远最高优先，清理不会动）</span>
+          </div>
+          <div class="row">
+            <span class="row-name">清理自动锚点</span>
+            <span class="row-val">清空后这些曲目回到自动判定（酷狗 → B 站）</span>
+            <NeuButton size="sm" :loading="purging" :disabled="anchorStats.auto === 0" @click="purgeAutoAnchors">
+              清理
+            </NeuButton>
+          </div>
+        </div>
+      </div>
+    </Sheet>
+
+    <!-- 数据维护弹层 -->
+    <Sheet :open="sheet === 'admin-maint'" title="数据维护" @close="sheet = null">
+      <div class="sheet-pad">
+        <AdminMaintenance />
+      </div>
     </Sheet>
   </div>
 </template>
@@ -1207,5 +1275,93 @@ onBeforeUnmount(() => {
   .panel > .row-btn + .row-btn {
     border-top: 1px solid var(--line);
   }
+}
+
+.sheet-pad {
+  padding: 1.25rem 0.5rem;
+}
+
+.persona-sheet-content {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.persona-subhead {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.5rem 0 0.5rem;
+  color: var(--t1);
+}
+
+.empty-hint {
+  color: var(--t2);
+  font-size: 0.875rem;
+  text-align: center;
+  padding: 2rem 0;
+}
+
+.persona-markdown {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--t1);
+}
+
+.persona-markdown :deep(.md-h1),
+.persona-markdown :deep(.md-h2) {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.5rem;
+  color: var(--t1);
+}
+
+.persona-markdown :deep(.md-h3),
+.persona-markdown :deep(.md-h4) {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.375rem;
+  color: var(--t1);
+}
+
+.persona-markdown :deep(.md-p) {
+  margin: 0.6rem 0;
+}
+
+.persona-markdown :deep(.md-ul),
+.persona-markdown :deep(.md-ol),
+.md-ul {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+}
+
+.persona-markdown :deep(li),
+.md-ul li {
+  margin: 0.25rem 0;
+  color: var(--t2);
+}
+
+.persona-markdown :deep(.md-hr) {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 1rem 0;
+}
+
+.persona-markdown :deep(.md-quote) {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  background: var(--panel);
+  border-radius: 4px;
+}
+
+.persona-markdown :deep(strong) {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.persona-markdown :deep(.md-code) {
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  background: var(--panel);
+  font-size: 0.85em;
 }
 </style>

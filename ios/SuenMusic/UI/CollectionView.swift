@@ -416,6 +416,7 @@ struct CollectionView: View {
                 title = r.name.isEmpty ? route.name : r.name
                 subtitle = "热门歌曲"
                 tracks = r.songs
+                coverUrl = Self.pickArtistAvatar(songs: r.songs, artistId: route.id, fallbackName: route.name)
                 // 专辑是补充内容：独立请求、独立兜错，拿不到就整节不出现（hw loadArtistAlbums 同口径）
                 await loadArtistAlbums()
             case "playlist":
@@ -455,6 +456,23 @@ struct CollectionView: View {
         } catch {
             albums = []
         }
+    }
+
+    /// 歌手头像：从召回曲目就地取（web / hw pickArtistAvatar 同口径），优先认 id 完全匹配那位
+    private static func pickArtistAvatar(songs: [Track], artistId: String, fallbackName: String) -> String {
+        for track in songs {
+            for ar in track.ar {
+                if ar.id == artistId, let pic = ar.picUrl, !pic.isEmpty {
+                    return pic
+                }
+            }
+        }
+        if let firstTrack = songs.first, let firstAr = firstTrack.ar.first {
+            if let pic = firstAr.picUrl, !pic.isEmpty, firstAr.name == fallbackName {
+                return pic
+            }
+        }
+        return ""
     }
 }
 

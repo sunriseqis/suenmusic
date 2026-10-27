@@ -193,12 +193,6 @@ struct DailyView: View {
                     Text("\(tracks.count) 首")
                         .font(.system(size: Dim.fsCaption))
                         .foregroundStyle(p.text2)
-                    Spacer(minLength: Dim.s2)
-                    // hw 播放全部 = accent 底 + badgeInk 字 + radiusMd（WebButton primary）
-                    WebButton("播放全部", variant: .primary, size: .md) {
-                        Task { await playAll() }
-                    }
-                    .accessibilityLabel("播放全部")
                 }
                 .padding(.top, Dim.s1)
             }

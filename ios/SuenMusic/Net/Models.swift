@@ -47,6 +47,13 @@ struct LyricReply: Decodable {
 struct TrackArtist: Codable, Hashable, Identifiable {
     let id: String
     let name: String
+    let picUrl: String?
+
+    init(id: String, name: String, picUrl: String? = nil) {
+        self.id = id
+        self.name = name
+        self.picUrl = picUrl
+    }
 }
 
 struct TrackAlbum: Codable, Hashable {

@@ -284,7 +284,7 @@ struct SearchView: View {
                     grid {
                         ForEach(artists) { artist in
                             NavigationLink(value: CollectionRoute(kind: "artist", id: artist.id, name: artist.name)) {
-                                coverCell(url: "", title: artist.name, sub: "", circle: true)
+                                coverCell(url: artist.picUrl ?? "", title: artist.name, sub: "", circle: true)
                             }
                             .buttonStyle(.plain)
                         }
