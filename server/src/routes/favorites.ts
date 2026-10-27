@@ -68,6 +68,22 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
     };
   });
 
+  const keyOf = (name: string, artistsJson: string): string => {
+    let artists: Array<{ name?: string }> = [];
+    try {
+      artists = JSON.parse(artistsJson || '[]');
+    } catch {
+      artists = [];
+    }
+    const names = artists
+      .map(a => String(a?.name ?? '').trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join('/');
+    const n = String(name ?? '').trim().toLowerCase();
+    return n && names ? `${n}|${names}` : '';
+  };
+
   /** 某几首是否已收藏（客户端渲染列表时批量查） */
   app.post('/api/favorites/check', async req => {
     const user = requireUser(req);
@@ -91,21 +107,6 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
           WHERE f.user_id = ?`
       )
       .all(user.id) as Array<{ name: string; artists_json: string }>;
-    const keyOf = (name: string, artistsJson: string): string => {
-      let artists: Array<{ name?: string }> = [];
-      try {
-        artists = JSON.parse(artistsJson || '[]');
-      } catch {
-        artists = [];
-      }
-      const names = artists
-        .map(a => String(a?.name ?? '').trim().toLowerCase())
-        .filter(Boolean)
-        .sort()
-        .join('/');
-      const n = String(name ?? '').trim().toLowerCase();
-      return n && names ? `${n}|${names}` : '';
-    };
     for (const row of favRows) {
       const k = keyOf(row.name, row.artists_json);
       if (k) favKeys.add(k);
@@ -134,19 +135,26 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
    * 歌手 mid 是推荐种子统计的钥匙 —— 缺了它，这批收藏在每日推荐里会被
    * 整批忽略（真机报障："账号提示没有种子"）。这里回源补一次全量元数据
    * 再入库；回源失败不挡收藏，只是数据仍旧不全（种子统计有名字兜底）。
+   *
+   * 注意：仅对 `qq_` 曲目尝试 QQ `getSongDetail`；`kg_` / `ne_` 曲目直接入库，
+   * 且 QQ 回源失败时若库里尚无该曲目也必须入库，避免 `favorites` 有记录但 `tracks` 为空。
    */
   async function enrichAndStoreTrack(incoming: Track, fallbackId: string): Promise<string> {
+    const id = incoming.id || fallbackId;
+    const isQQ = !id || id.startsWith('qq_');
     const missingMid = !incoming.ar?.length || incoming.ar.some(a => !a.mid);
-    if (missingMid && incoming.mid) {
+    if (isQQ && missingMid && incoming.mid) {
       const full = await getSongDetail(incoming.mid).catch(() => null);
       if (full) {
         upsertTracks([full]);
-        return full.id || fallbackId;
+        return full.id || id;
       }
-      return incoming.id || fallbackId;   // 不用不完整的数据覆盖库里可能更全的行
+      if (id && getTracks([id]).length > 0) {
+        return id; // 不用不完整的数据覆盖库里已有的更全行
+      }
     }
     upsertTracks([incoming]);
-    return incoming.id || fallbackId;
+    return id;
   }
 
   /**
@@ -175,7 +183,34 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
   app.delete('/api/favorites/:trackId', async req => {
     const user = requireUser(req);
     const trackId = (req.params as any).trackId as string;
-    const removed = repo.removeFavorite(user.id, trackId);
+    let removed = repo.removeFavorite(user.id, trackId);
+
+    // 跨源取消收藏同步：如果用户收藏的是 qq_ 曲目，但搜索页展示的是同名的 kg_ / ne_ 曲目，
+    // check 接口会按「歌名+歌手」指纹返回 true；此时右滑取消收藏传入的是 kg_ / ne_ id，
+    // 需要同步移除同一指纹下的跨源收藏记录，否则下次 check 依然会判定为已收藏。
+    const targetRow = getDatabase()
+      .prepare('SELECT name, artists_json FROM tracks WHERE id = ?')
+      .get(trackId) as { name: string; artists_json: string } | undefined;
+    if (targetRow) {
+      const targetKey = keyOf(targetRow.name, targetRow.artists_json);
+      if (targetKey) {
+        const favRows = getDatabase()
+          .prepare(
+            `SELECT f.track_id, t.name, t.artists_json
+               FROM favorites f JOIN tracks t ON t.id = f.track_id
+              WHERE f.user_id = ?`
+          )
+          .all(user.id) as Array<{ track_id: string; name: string; artists_json: string }>;
+        for (const row of favRows) {
+          if (keyOf(row.name, row.artists_json) === targetKey) {
+            if (repo.removeFavorite(user.id, row.track_id)) {
+              removed = true;
+            }
+          }
+        }
+      }
+    }
+
     if (removed) triggerFavoritesSummaryUpdate(user.id);
     return { ok: true, removed };
   });

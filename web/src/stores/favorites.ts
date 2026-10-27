@@ -186,17 +186,20 @@ export const useFavoritesStore = defineStore('favorites', () => {
    */
   async function toggle(track: Track): Promise<boolean> {
     const id = track.id;
-    if (pending.has(id)) return ids.value.has(id);
+    const k = trackKey(track);
+    if (pending.has(id)) return containsTrack(track);
     pending.add(id);
 
-    const wasFav = ids.value.has(id);
+    const wasFav = containsTrack(track);
 
     // 乐观更新：先改本地，失败回滚
     if (wasFav) {
       ids.value.delete(id);
+      if (k) keys.value.delete(k);
       total.value = Math.max(0, total.value - 1);
     } else {
       ids.value.add(id);
+      if (k) keys.value.add(k);
       total.value += 1;
     }
 
@@ -211,17 +214,20 @@ export const useFavoritesStore = defineStore('favorites', () => {
       // 回滚到操作前的状态
       if (wasFav) {
         ids.value.add(id);
+        if (k) keys.value.add(k);
         total.value += 1;
       } else {
         ids.value.delete(id);
+        if (k) keys.value.delete(k);
         total.value = Math.max(0, total.value - 1);
       }
       throw e;
     } finally {
       pending.delete(id);
       // 成功与回滚都要报：以本地集合的最终状态为准，原生侧只认 assetId 匹配的
-      reportHarmonyFavorite(id, ids.value.has(id));
-      void reportWidgetFavorite(id, ids.value.has(id));
+      const finalFav = containsTrack(track);
+      reportHarmonyFavorite(id, finalFav);
+      void reportWidgetFavorite(id, finalFav);
     }
   }
 
@@ -236,12 +242,14 @@ export const useFavoritesStore = defineStore('favorites', () => {
     if (trackList.length === 0) return 0;
 
     // 只收藏尚未收藏的
-    const newTracks = trackList.filter(t => !ids.value.has(t.id));
+    const newTracks = trackList.filter(t => !containsTrack(t));
     if (newTracks.length === 0) return 0;
 
     // 乐观更新
     const newIds = newTracks.map(t => t.id);
+    const newKeys = newTracks.map(t => trackKey(t)).filter(Boolean);
     for (const id of newIds) ids.value.add(id);
+    for (const k of newKeys) keys.value.add(k);
     total.value += newIds.length;
 
     // 整批占住这些 id：批量在飞时对同一首滑动（"收藏全部"后立刻划掉一首）
@@ -257,6 +265,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
     } catch (e) {
       // 回滚
       for (const id of newIds) ids.value.delete(id);
+      for (const k of newKeys) keys.value.delete(k);
       total.value = Math.max(0, total.value - newIds.length);
       throw e;
     } finally {
@@ -267,6 +276,7 @@ export const useFavoritesStore = defineStore('favorites', () => {
   /** 退出登录时清空。收藏数据属于账号，不能留给下一个用户 */
   function reset(): void {
     ids.value = new Set();
+    keys.value = new Set();
     total.value = 0;
     loaded.value = false;
     loadingPromise = null;

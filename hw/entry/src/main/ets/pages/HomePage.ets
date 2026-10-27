@@ -421,7 +421,7 @@ export struct HomePage {
                     onTap: () => { this.playAt(row.track.id); }
                   })
                 }
-              }, (row: TrackRow) => row.track.id)
+              }, (row: TrackRow) => `${row.track.id}|${row.fav ? '1' : '0'}|${row.no}`)
             }
             // ---- 巅峰榜：两列封面卡（web ≤767px 两列 CoverCard 网格） ----
             if (this.home.toplists.length > 0) {

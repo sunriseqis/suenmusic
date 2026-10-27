@@ -122,10 +122,36 @@ async function fetchPlayableUrl(songId: number, vip: boolean): Promise<string | 
  * 网易云不可用不能影响 B 站兜底链路。
  */
 export async function resolveNeteaseSource(track: ResolveInput): Promise<ResolveResult> {
+  const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
+  const rawId = String(track.id ?? '').trim();
+
+  // ---- 直取快径：`ne_<songId>` 自带网易云 songId，直接调 songUrlV1（0 次搜索） ----
+  if (rawId.startsWith('ne_')) {
+    const directId = Number(rawId.slice(3));
+    if (Number.isFinite(directId) && directId > 0) {
+      const directUrl = await fetchPlayableUrl(directId, vip);
+      if (directUrl) {
+        log.info(`网易云直取命中 ${directId} 「${track.name ?? ''}」 vip=${vip ? '是' : '否'}`);
+        return {
+          ok: true,
+          reason: undefined,
+          bvid: null,
+          sourceUrl: directUrl,
+          score: 100,
+          matchedTitle: String(track.name ?? ''),
+          matchedAuthor: (track.artists ?? []).join('/'),
+          durationDiff: 0,
+          bandwidth: undefined,
+          source: 'netease',
+        };
+      }
+      log.debug(`网易云直取无完整流 songId=${directId}，回退按歌名搜索`);
+    }
+  }
+
   const name = String(track.name ?? '').trim();
   if (!name) return fail('no_candidates', '曲目无名，无法搜索');
 
-  const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const cookie = currentNeteaseCookie();
   // 搜索词带第一个歌手名能显著提高正版命中率（不带时前几名常是翻唱）
   const artist = (track.artists ?? [])[0] ?? '';

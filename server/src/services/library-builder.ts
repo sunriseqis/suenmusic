@@ -116,14 +116,14 @@ async function runLoop(triggerUserId: number): Promise<void> {
         continue;
       }
 
-      if (qqCooldown.active() || externalProcessed >= MAX_EXTERNAL_JOBS_PER_ROUND) {
+      if (externalProcessed >= MAX_EXTERNAL_JOBS_PER_ROUND) {
         if (!hasBuildJob(job.kind, job.payload)) {
           enqueueBuildJob(job.userId, job.kind, job.payload, job.origin);
         }
         consecutiveExternalSkips += 1;
         if (consecutiveExternalSkips >= 5) {
           log.info(
-            `已连续遇到 ${consecutiveExternalSkips} 个外网任务（配额已满或冷却中），本地可回填任务已排空，收工`
+            `已连续遇到 ${consecutiveExternalSkips} 个外网任务（本轮配额已满），本地可回填任务已排空，收工`
           );
           break;
         }
@@ -211,42 +211,63 @@ async function resolveArtistName(job: BuildJob): Promise<{ resolvedLocally: bool
     return { resolvedLocally: true };
   }
 
-  // ② 本地未命中，走外网特遣搜索
-  if (qqCooldown.active()) {
-    throw new Error('QQ 冷却中，暂停外部歌手搜索');
-  }
-
-  const res = await fetchSearchSlice('singer', name, 0, 5);
-  const { list } = res;
-
-  if (res.code === 2001) {
-    throw new Error(`QQ 2001 限流（歌手搜索 ${name}）`);
-  }
-
+  // ② 本地未命中，走外网特遣搜索（QQ 未冷却时先查 QQ singer mid，否则或失败时走多源直接拉歌建档）
   const targetNorm = norm(name);
-  // 1. 同名精确匹配
-  let hit =
-    list.find((a: any) => norm(a?.singerName ?? a?.name) === targetNorm) ?? null;
+  let mid: string | null = null;
 
-  // 2. 别名与包含容错：如 "陈奕迅 (Eason Chan)" 包含 "陈奕迅"，或 "Beyond"
-  if (!hit && list.length > 0) {
-    hit = list.find((a: any) => {
-      const aNorm = norm(a?.singerName ?? a?.name);
-      return aNorm && (aNorm.includes(targetNorm) || targetNorm.includes(aNorm));
-    }) ?? null;
-  }
+  if (!qqCooldown.active()) {
+    const res = await fetchSearchSlice('singer', name, 0, 5);
+    const { list } = res;
 
-  // 3. 高置信度首选兜底：搜特定人名且首条结果前缀匹配
-  if (!hit && list.length > 0) {
-    const firstNorm = norm(list[0]?.singerName ?? list[0]?.name);
-    if (firstNorm && (firstNorm.startsWith(targetNorm.slice(0, 2)) || targetNorm.startsWith(firstNorm.slice(0, 2)))) {
-      hit = list[0];
+    if (res.code !== 2001 && list.length > 0) {
+      // 1. 同名精确匹配
+      let hit =
+        list.find((a: any) => norm(a?.singerName ?? a?.name) === targetNorm) ?? null;
+
+      // 2. 别名与包含容错：如 "陈奕迅 (Eason Chan)" 包含 "陈奕迅"，或 "Beyond"
+      if (!hit) {
+        hit = list.find((a: any) => {
+          const aNorm = norm(a?.singerName ?? a?.name);
+          return aNorm && (aNorm.includes(targetNorm) || targetNorm.includes(aNorm));
+        }) ?? null;
+      }
+
+      // 3. 高置信度首选兜底：搜特定人名且首条结果前缀匹配
+      if (!hit) {
+        const firstNorm = norm(list[0]?.singerName ?? list[0]?.name);
+        if (firstNorm && (firstNorm.startsWith(targetNorm.slice(0, 2)) || targetNorm.startsWith(firstNorm.slice(0, 2)))) {
+          hit = list[0];
+        }
+      }
+
+      mid = String(hit?.singerMID ?? hit?.mid ?? '') || null;
     }
   }
 
-  const mid = String(hit?.singerMID ?? hit?.mid ?? '') || null;
+  // QQ 冷却/2001/未搜到时，直接用多源拉曲目并从曲目反推歌手 mid 建档
   if (!mid) {
-    log.debug(`相似歌手换 mid 失败（搜不到同名）：${name}`);
+    const multi = await fetchArtistSongsMulti(name, 30);
+    if (multi.songs.length === 0) {
+      log.debug(`相似歌手换 mid 失败（多源均无曲目）：${name}`);
+      return { resolvedLocally: false };
+    }
+    const matchedAr = multi.songs[0]?.ar?.find(a => {
+      const aNorm = norm(a.name);
+      return aNorm && (aNorm.includes(targetNorm) || targetNorm.includes(aNorm));
+    }) ?? multi.songs[0]?.ar?.[0];
+    mid = String(matchedAr?.mid || `ne_${targetNorm}`);
+
+    const { artistMids } = getDislikeSets(job.userId);
+    if (artistMids.has(mid)) {
+      return { resolvedLocally: false };
+    }
+    upsertLibraryArtist(mid, matchedAr?.name || name);
+    saveLibraryTracks(mid, multi.songs);
+    markArtistFetched(mid);
+    linkUserArtist(job.userId, mid, job.origin);
+    log.info(
+      `[多源建库] 歌手「${name}」(${mid}) 一步建档入库 ${multi.songs.length} 首 (源=${multi.source})`,
+    );
     return { resolvedLocally: false };
   }
 
@@ -292,10 +313,7 @@ async function fetchArtistSongs(job: BuildJob): Promise<{ resolvedLocally: boole
     return { resolvedLocally: true };
   }
 
-  // 3. 本地无曲目，外网拉取（冷门歌手）
-  if (qqCooldown.active()) {
-    throw new Error('QQ 冷却中，暂停外部歌曲搜索');
-  }
+  // 3. 本地无曲目，走多源外网拉取（酷狗为主 → 网易云为辅 → QQ 兜底，不受 QQ 冷却阻塞）
 
   /**
    * 多源拉取（用户 2026-10-26 定稿）：**酷狗为主 → 网易云为辅 → QQ 兜底**。

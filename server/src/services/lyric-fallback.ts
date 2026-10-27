@@ -74,11 +74,41 @@ export async function getLyricForTrack(track: Track): Promise<QQLyric> {
   // null = 四级链路已确认没有歌词（负缓存），返回空形状而非重跑链路
   if (cached !== undefined) return cached ?? { lrc: { lyric: '' }, tlyric: { lyric: '' } };
 
-  // ---- 第 1 级：本曲 ----
-  const own = await getQQLyric(track.mid ?? String(track.id).replace(/^qq_/, ''));
-  if (hasLyric(own)) {
-    cacheSet(track.id, own);
-    return own;
+  const idStr = String(track.id ?? '');
+
+  // ---- 第 0 级：`ne_<songId>` 直接按网易云 id 拉 lyric_new（0 次搜索、不打 QQ） ----
+  if (idStr.startsWith('ne_')) {
+    const neId = Number(track.mid || idStr.slice(3));
+    if (Number.isFinite(neId) && neId > 0) {
+      try {
+        const lr = await netease.lyricNew({ id: neId }, neteaseRequest);
+        const body = lr?.body as { lrc?: { lyric?: string }; tlyric?: { lyric?: string } };
+        const lrc = String(body?.lrc?.lyric ?? '');
+        if (lrc) {
+          const result: QQLyric = {
+            lrc: { lyric: lrc },
+            tlyric: { lyric: String(body?.tlyric?.lyric ?? '') },
+          };
+          cacheSet(track.id, result);
+          return result;
+        }
+      } catch (err) {
+        log.warn(`网易云直取歌词失败 ${track.id}: ${(err as Error)?.message ?? err}`);
+      }
+    }
+    if (!track.name) {
+      cacheSet(track.id, null);
+      return { lrc: { lyric: '' }, tlyric: { lyric: '' } };
+    }
+  }
+
+  // ---- 第 1 级：QQ 本曲（仅 qq_ 曲目） ----
+  if (!idStr || idStr.startsWith('qq_')) {
+    const own = await getQQLyric(track.mid ?? idStr.replace(/^qq_/, ''));
+    if (hasLyric(own)) {
+      cacheSet(track.id, own);
+      return own;
+    }
   }
 
   const artists = (track.ar ?? []).map(a => a.name).filter(Boolean);

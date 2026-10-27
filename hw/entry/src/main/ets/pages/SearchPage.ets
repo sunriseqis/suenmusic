@@ -820,7 +820,7 @@ export struct SearchPage {
                   onTap: () => { this.playAt(row.track.id); }
                 })
               }
-            }, (row: TrackRow) => row.track.id)
+            }, (row: TrackRow) => `${row.track.id}|${row.fav ? '1' : '0'}|${row.no}`)
           } else if (this.activeSlice === 1) {
             ListItem() { this.blockHead('专辑', this.albums.length, this.sliceHasMore(), false) }
             ForEach(this.gridRows(this.albumCells()), (row: CoverCell[]) => {

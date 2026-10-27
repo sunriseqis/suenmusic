@@ -27,6 +27,7 @@ import {
 } from '../sources/qq/home.ts';
 import { getQQLyric } from '../sources/qq/lyric.ts';
 import { getLyricForTrack } from '../services/lyric-fallback.ts';
+import { isCoverOrInstrumental } from '../services/content-filter.ts';
 import { QQ_SEARCH_ALL_SLICES, QQ_SEARCH_TYPE, searchQQ } from '../sources/qq/search.ts';
 import { kugouSearchSongs } from '../sources/kugou/source.ts';
 import { searchSongsMulti } from '../services/multi-search.ts';
@@ -469,32 +470,45 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
   const guessArtistName = (artistId: string): string => {
     if (!artistId) return '';
     try {
-      const row = getDatabase()
-        .prepare("SELECT artists_json FROM tracks WHERE artists_json LIKE ? LIMIT 1")
-        .get(`%"mid":"${artistId}"%`) as { artists_json: string } | undefined;
-      if (!row) return '';
-      const ar = JSON.parse(row.artists_json || '[]') as Array<{ mid?: string; name?: string }>;
-      const hit = ar.find(a => String(a?.mid ?? '') === artistId);
-      return String(hit?.name ?? '');
+      const db = getDatabase();
+      const libRow = db
+        .prepare('SELECT name FROM library_artists WHERE mid = ? LIMIT 1')
+        .get(artistId) as { name: string } | undefined;
+      if (libRow?.name) return String(libRow.name);
+
+      for (const table of ['tracks', 'playlist_pool_items']) {
+        const row = db
+          .prepare(`SELECT artists_json FROM ${table} WHERE artists_json LIKE ? LIMIT 1`)
+          .get(`%${artistId}%`) as { artists_json: string } | undefined;
+        if (!row) continue;
+        const ar = JSON.parse(row.artists_json || '[]') as Array<{ id?: string; mid?: string; name?: string }>;
+        const hit = ar.find(
+          a => String(a?.mid ?? '') === artistId || String(a?.id ?? '').endsWith(`_${artistId}`),
+        );
+        if (hit?.name) return String(hit.name);
+      }
+      return '';
     } catch {
       return '';
     }
   };
 
+  /** 变种/翻唱清洗：与 multi-search 保持同一零翻唱口径 */
+  const ARTIST_VARIANT_RE =
+    /(伴奏|纯音乐|钢琴|吉他|器乐|dj|慢摇|变速|remix|片段|消音|和声|翻唱|cover|intro|outro|demo|不插电|串烧|填词|翻填|戏腔版|女声版|男声版|女生版|男生版|烟嗓版|高潮版|唢呐版)/i;
+  /** 综艺翻唱合辑过滤：QQ 曲目无原唱标记，综艺竞演专辑几乎全为翻唱 */
+  const VARIETY_COVER_ALBUM_RE =
+    /(声生不息|天赐的声音|我是歌手|歌手·当打之年|歌手202|中国好声音|蒙面唱将|时光音乐会|我们的歌|乐队的夏天|披荆斩棘|乘风破浪|音乐缘计划|舞台2023|闪光的乐队|为歌而赞|谁是宝藏歌手)/i;
+
   /**
-   * 歌手页统一去重。
+   * 歌手页统一去重与零翻唱清洗。
    *
    * 去重键 = 歌名(去括号后缀) + 是否 Live + **拆分后排序的歌手集合**。
    * 关键在「拆分」：多源回同一首合作曲时，歌手串可能是 `房东的猫、夏日入侵企画` 也可能是
    * `房东的猫/夏日入侵企画`，不拆词会被判成两个不同歌手 → 同一首歌出现两行。
-   * 同一源内部的重复（网易云歌手页会返回同名同歌手多条）也一并清掉。
+   * 同名同歌手同 Live 状态的曲目严格只保留第一条（高优认证源在前），若首条缺封面/专辑名则由后续同曲补齐。
    */
   const dedupeArtistSongs = (songs: Track[], limit: number): Track[] => {
-    /**
-     * 时长容差：同名同歌手但**时长差超过它**的，视为不同版本（live / 单曲版 / 重录），两条都留。
-     * 用户 2026-10-27 反馈：重复条目的元数据时长完全不一样 —— 硬合并会把不同录音吞掉。
-     */
-    const DUR_TOLERANCE_MS = 8000;
     const keyOf = (t: Track): string => {
       const live = /(live|现场|演唱会)/i.test(t.name) ? '1' : '0';
       const base = normName(t.name.replace(/\([^)]*\)|（[^）]*）|\[[^\]]*\]/g, ''));
@@ -527,27 +541,30 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       return t.dt < max * SHORT_RATIO;
     };
 
-    // 按「歌名+Live+歌手集合」分组，组内再按时长聚类：只有时长接近的才算重复
-    const groups = new Map<string, Track[]>();
+    const byKey = new Map<string, Track>();
     const out: Track[] = [];
     for (const t of songs) {
-      // 极短条目不是歌（试听片段/花絮/音效）：实测歌手页里混过 23s、91s、111s 的同名条目，
-      // 它们在列表里既占位置又会被误当成「重复曲目」。45 秒以下直接丢弃。
+      // 零翻唱/零伴奏硬过滤（含综艺翻唱专辑）
+      if (ARTIST_VARIANT_RE.test(t.name) || isCoverOrInstrumental(t)) continue;
+      if (VARIETY_COVER_ALBUM_RE.test(String(t.al?.name ?? ''))) continue;
+      // 极短条目不是歌（试听片段/花絮/音效）：45 秒以下直接丢弃。
       if (t.dt > 0 && t.dt < 45_000) continue;
       if (isOutlier(t)) continue;
       const k = keyOf(t);
-      const bucket = groups.get(k);
-      if (bucket) {
-        const isDup = bucket.some(prev => {
-          // 任一方时长未知时，按重复处理（宁少勿多，避免同一行出现两次）
-          if (!prev.dt || !t.dt) return true;
-          return Math.abs(prev.dt - t.dt) <= DUR_TOLERANCE_MS;
-        });
-        if (isDup) continue;
-        bucket.push(t);
-      } else {
-        groups.set(k, [t]);
+      const prev = byKey.get(k);
+      if (prev) {
+        // 用后续同曲补齐首条可能缺失的封面或专辑名
+        if (prev.al && t.al) {
+          if (!prev.al.picUrl && t.al.picUrl) prev.al.picUrl = t.al.picUrl;
+          if (!prev.al.name && t.al.name) prev.al.name = t.al.name;
+        }
+        if (prev.album && t.al) {
+          if (!prev.album.picUrl && t.al.picUrl) prev.album.picUrl = t.al.picUrl;
+          if (!prev.album.name && t.al.name) prev.album.name = t.al.name;
+        }
+        continue;
       }
+      byKey.set(k, t);
       out.push(t);
       if (out.length >= limit) break;
     }
@@ -562,33 +579,85 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     return out;
   };
 
-  /** 网易云歌手歌曲 → ne_ Track[] */
-  const getNeteaseArtistSongs = async (artistId: string, limit: number, page: number) => {
+  /**
+   * 网易云歌手歌曲 → ne_ Track[]（零翻唱：通过 cloudsearch 校验 originCoverType === 1）。
+   *
+   * 为什么不直接裸用 `/api/v1/artist/songs`：
+   *   `artistSongs` 接口不返回 `originCoverType` 字段，会把歌手在综艺/电台里的翻唱
+   *   （如《张三的歌》《恼人的秋风》《勇气》，在 cloudsearch 中均为 originCoverType=2）
+   *   以及未标原唱的合集重录版（如《奇形怪状的云》originCoverType=0）一并返回。
+   */
+  const getNeteaseArtistSongs = async (
+    artistId: string,
+    singerName: string,
+    limit: number,
+    page: number,
+  ): Promise<{ songs: Track[]; resolvedName: string }> => {
     try {
-      const res: any = await netease.artistSongs(
-        { id: Number(artistId), limit, offset: (page - 1) * limit, order: 'hot', cookie: currentNeteaseCookie() },
+      const cookie = currentNeteaseCookie();
+      let resolvedName = singerName || guessArtistName(artistId);
+      if (!resolvedName && artistId) {
+        const probe: any = await netease.artistSongs(
+          { id: Number(artistId), limit: 5, offset: 0, order: 'hot', cookie },
+          neteaseRequest,
+        );
+        const probeRows = (probe?.body?.songs ?? []) as Array<Record<string, any>>;
+        for (const s of probeRows) {
+          const hit = ((s.ar ?? []) as Array<Record<string, any>>).find(
+            a => String(a.id ?? '') === String(artistId) && a.name,
+          );
+          if (hit?.name) {
+            resolvedName = String(hit.name);
+            break;
+          }
+        }
+      }
+      if (!resolvedName) return { songs: [], resolvedName: '' };
+
+      const target = normName(resolvedName);
+      const fetchLimit = Math.min(Math.max(limit * 2, 60), 100);
+      const res: any = await netease.cloudsearch(
+        {
+          keywords: resolvedName,
+          type: 1,
+          limit: fetchLimit,
+          offset: (page - 1) * limit,
+          cookie,
+        },
         neteaseRequest,
       );
-      const rows = res?.body?.songs ?? [];
-      return (rows as Array<Record<string, any>>).map(s => {
+      const rows = (res?.body?.result?.songs ?? []) as Array<Record<string, any>>;
+      const out: Track[] = [];
+      for (const s of rows) {
+        if (Number(s.originCoverType ?? 0) !== 1) continue;
+        const songName = String(s.name ?? '');
+        if (ARTIST_VARIANT_RE.test(songName)) continue;
+
         const ar = ((s.ar ?? []) as Array<Record<string, any>>).map(a => ({
           id: 'ne_ar_' + String(a.id ?? ''),
           mid: String(a.id ?? ''),
           name: String(a.name ?? ''),
           picUrl: '',
         }));
+        const belongs = ar.some(a => {
+          if (artistId && a.mid === String(artistId)) return true;
+          const n = normName(a.name);
+          return n.length > 0 && (n.includes(target) || target.includes(n));
+        });
+        if (!belongs) continue;
+
         const al = (s.al ?? {}) as Record<string, any>;
         const dt = Number(s.dt ?? 0);
         const album = {
           id: 'ne_al_' + String(al.id ?? '0'),
           mid: String(al.id ?? '0'),
           name: String(al.name ?? ''),
-          picUrl: String(al.picUrl ?? ''),
+          picUrl: String(al.picUrl ?? '').replace(/^http:/, 'https:'),
         };
-        return {
+        const track: Track = {
           id: 'ne_' + String(s.id),
           mid: String(s.id),
-          name: String(s.name ?? ''),
+          name: songName,
           ar,
           artists: ar,
           al: album,
@@ -599,10 +668,13 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
           matched: true,
           privilege: { playMaxbr: 0, maxbr: 0, freeTrialPrivilege: { resConsumable: false } },
         };
-      });
+        if (isCoverOrInstrumental(track)) continue;
+        out.push(track);
+      }
+      return { songs: out, resolvedName };
     } catch (err) {
       log.warn(`网易云歌手歌曲失败：${(err as Error).message}`);
-      return [];
+      return { songs: [], resolvedName: singerName };
     }
   };
 
@@ -621,41 +693,52 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     const page = intParam((req.query as any)?.page, 1, { min: 1, max: 20 });
     const name = strParam((req.query as any)?.name);
 
-    // ---- 多源分流：kg_ar_ / ne_ar_ 走各自上游，qq_ar_ 保持原实现 ----
-    if (parsed.source === 'ne') {
-      const songs = backfillCovers(
-        dedupeArtistSongs(await getNeteaseArtistSongs(parsed.value, limit, page), limit),
+    const filterBelongsTo = (list: Track[], singerName: string): Track[] => {
+      const target = normName(singerName);
+      if (!target) return list;
+      return list.filter(t =>
+        (t.ar ?? []).some(a => {
+          const n = normName(a.name);
+          return n.length > 0 && (n.includes(target) || target.includes(n));
+        }),
       );
+    };
+
+    // ---- 多源分流：kg_ar_ / ne_ar_ / qq_ar_ 首屏均优先聚合酷狗+网易云官方原唱 ----
+    if (parsed.source === 'ne') {
+      const neRes = await getNeteaseArtistSongs(parsed.value, name, limit, page);
+      const resolvedName = neRes.resolvedName || name || guessArtistName(parsed.value);
+      let combined = neRes.songs;
+      if (page === 1 && resolvedName) {
+        try {
+          const agg = await searchSongsMulti(resolvedName, limit);
+          combined = [...filterBelongsTo(agg.songs, resolvedName), ...neRes.songs];
+        } catch (err) {
+          log.warn(`网易云歌手页多源合并失败 ${resolvedName}：${(err as Error).message}`);
+        }
+      }
+      const songs = backfillCovers(dedupeArtistSongs(combined, limit));
       if (songs.length > 0) upsertTracks(songs);
       return {
         id: `ne_ar_${parsed.value}`,
-        // 客户端没带 name 时用库反查，保证页面标题有歌手名
-        name: name || guessArtistName(parsed.value),
+        name: resolvedName,
         page,
         songs,
-        hasMore: songs.length >= limit,
+        hasMore: neRes.songs.length >= limit,
         degraded: null,
       };
     }
     if (parsed.source === 'kg') {
-      // 酷狗没有稳定的「按 singerId 取歌」接口，改用聚合搜索后按歌手过滤：
-      // 结果同样带 kg_ 前缀与 kugouMeta，点播可直取流。
-      // name 缺失时从本地库反查（客户端少传一处也不会 404）。
       const singerName = name || guessArtistName(parsed.value);
       if (!singerName) throw notFound('酷狗歌手页需要带 name 参数（本地库也没有该歌手曲目）');
-      const agg = await searchSongsMulti(singerName, limit);
-      const target = normName(singerName);
+      const [agg, neRes] = await Promise.all([
+        searchSongsMulti(singerName, limit),
+        page === 1 ? getNeteaseArtistSongs('', singerName, limit, 1) : Promise.resolve({ songs: [], resolvedName: singerName }),
+      ]);
       const songs = backfillCovers(
-        dedupeArtistSongs(
-          agg.songs.filter(t =>
-            (t.ar ?? []).some(a => {
-              const n = normName(a.name);
-              return n.length > 0 && (n.includes(target) || target.includes(n));
-            }),
-          ),
-          limit,
-        ),
+        dedupeArtistSongs([...filterBelongsTo(agg.songs, singerName), ...neRes.songs], limit),
       );
+      if (songs.length > 0) upsertTracks(songs);
       return {
         id: `kg_ar_${parsed.value}`,
         name: singerName,
@@ -667,35 +750,85 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     }
 
     // 拿不到名字就没法用搜索召回，先取详情
-    const artist = name ? null : await getArtistDetail(parsed.value);
-    const singerName = name || artist?.name || '';
+    const localName = name || guessArtistName(parsed.value);
+    const artist = localName ? null : await getArtistDetail(parsed.value);
+    const singerName = localName || artist?.name || '';
     if (!singerName) throw notFound('歌手不存在');
 
-    const result = await getArtistSongs(parsed.value, singerName, limit, page);
-    upsertTracks(result.songs);
+    const result: { songs: Track[]; hasMore: boolean; degradedCode: number | null } = {
+      songs: [],
+      hasMore: false,
+      degradedCode: null,
+    };
 
     /**
-     * 歌手页也要「多源合一」：QQ 列表只代表 QQ 曲库，
-     * 用户在多源时代期待的是「这位歌手的歌」，所以第 1 页再并一次酷狗 + 网易云的结果。
-     * 只在 page=1 做：翻页请求不该再打两个上游。
+     * 歌手页「多源合一 + 原唱优先」：
+     *   1. 第 1 页优先并发拉酷狗（IsOriginal===1）+ 网易云（originCoverType===1）认证原唱；
+     *   2. 若认证原唱已 ≥ 8 首，则第 1 页直接采用认证原唱（0 次 QQ 搜索消耗，且彻底杜绝 QQ 无原唱标记带来的综艺翻唱/野鸡重传）；
+     *   3. 仅当认证原唱不足 8 首或翻到 page > 1 时，才调用 QQ `getArtistSongs` 兜底补充。
      */
     if (page === 1 && singerName) {
       try {
-        const agg = await searchSongsMulti(singerName, limit);
-        const target = normName(singerName);
-        const belongs = (t: Track) =>
-          (t.ar ?? []).some(a => {
-            const n = normName(a.name);
-            return n.length > 0 && (n.includes(target) || target.includes(n));
-          });
-        result.songs = dedupeArtistSongs([...result.songs, ...agg.songs.filter(belongs)], limit);
+        const [agg, neRes] = await Promise.all([
+          searchSongsMulti(singerName, limit),
+          getNeteaseArtistSongs('', singerName, limit, 1),
+        ]);
+        const certified = dedupeArtistSongs(
+          [...filterBelongsTo(agg.songs, singerName), ...neRes.songs],
+          limit,
+        );
+        if (certified.length >= 8) {
+          result.songs = certified;
+          result.hasMore = false;
+        } else {
+          const qqRes = await getArtistSongs(parsed.value, singerName, limit, page);
+          upsertTracks(qqRes.songs);
+          const qqFiltered =
+            certified.length > 0
+              ? qqRes.songs.filter(t => Boolean(t.al?.name?.trim()))
+              : qqRes.songs;
+          result.songs = dedupeArtistSongs([...certified, ...qqFiltered], limit);
+          result.hasMore = qqRes.hasMore;
+          result.degradedCode = qqRes.degradedCode ?? null;
+        }
       } catch (err) {
         log.warn(`歌手页多源合并失败 ${singerName}：${(err as Error).message}`);
+        const qqRes = await getArtistSongs(parsed.value, singerName, limit, page);
+        upsertTracks(qqRes.songs);
+        result.songs = dedupeArtistSongs(qqRes.songs, limit);
+        result.hasMore = qqRes.hasMore;
+        result.degradedCode = qqRes.degradedCode ?? null;
       }
+    } else {
+      const qqRes = await getArtistSongs(parsed.value, singerName, limit, page);
+      upsertTracks(qqRes.songs);
+      result.songs = dedupeArtistSongs(qqRes.songs, limit);
+      result.hasMore = qqRes.hasMore;
+      result.degradedCode = qqRes.degradedCode ?? null;
     }
 
     await enrichMissingAlbums(result.songs);
     backfillCovers(result.songs);
+
+    // 统一对齐主歌手的路由 id / mid 为当前 qq_ar_<mid>：
+    //   1. 从歌手页点播 kg_ / ne_ 曲目后，在播放页再点歌手名能跳回完整歌手页（带专辑/简介/相似歌手）；
+    //   2. 收藏该曲目时自带真实歌手 mid，每日推荐种子统计不丢。
+    const targetNorm = normName(singerName);
+    const fullArtistId = `qq_ar_${parsed.value}`;
+    for (const s of result.songs) {
+      for (const list of [s.ar, s.artists]) {
+        if (!Array.isArray(list)) continue;
+        for (const a of list) {
+          const n = normName(a?.name ?? '');
+          if (n && (n.includes(targetNorm) || targetNorm.includes(n))) {
+            a.id = fullArtistId;
+            a.mid = parsed.value;
+          }
+        }
+      }
+    }
+
+    if (result.songs.length > 0) upsertTracks(result.songs);
 
     return {
       id: `qq_ar_${parsed.value}`,
@@ -706,9 +839,10 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       // 一页 50 条过滤完可能只剩 8 条，但上游明明还有下一页
       hasMore: result.hasMore,
       // 让客户端能区分"这位歌手真没有歌"与"上游被限流了"
-      degraded: result.degradedCode
-        ? { code: result.degradedCode, message: 'QQ 音乐检索被限流，请稍后重试' }
-        : null,
+      degraded:
+        result.degradedCode && result.songs.length === 0
+          ? { code: result.degradedCode, message: 'QQ 音乐检索被限流，请稍后重试' }
+          : null,
     };
   });
 
@@ -732,15 +866,22 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     const page = intParam((req.query as any)?.page, 1, { min: 1, max: 20 });
     const name = strParam((req.query as any)?.name);
 
-    // 拿不到名字就没法用搜索召回，先取详情（与热门歌曲同一套处理）
-    const artist = name ? null : await getArtistDetail(parsed.value);
-    const singerName = name || artist?.name || '';
-    if (!singerName) throw notFound('歌手不存在');
+    const localName = name || guessArtistName(parsed.value);
+    const artist = !localName && parsed.source === 'qq' ? await getArtistDetail(parsed.value) : null;
+    const singerName = localName || artist?.name || '';
+    const fullId = `${parsed.source}_ar_${parsed.value}`;
+    if (!singerName) {
+      if (parsed.source !== 'qq') {
+        return { id: fullId, name: '', page, albums: [], hasMore: false, degraded: null };
+      }
+      throw notFound('歌手不存在');
+    }
 
-    const result = await getArtistAlbums(parsed.value, singerName, limit, page);
+    const qqMid = parsed.source === 'qq' ? parsed.value : '';
+    const result = await getArtistAlbums(qqMid, singerName, limit, page);
 
     return {
-      id: `qq_ar_${parsed.value}`,
+      id: fullId,
       name: singerName,
       page,
       albums: result.albums,
@@ -766,11 +907,11 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       throw badRequest(`歌手 id 不合法：${raw}`, 'invalid_id');
     }
 
-    const name = strParam((req.query as any)?.name);
+    const name = strParam((req.query as any)?.name) || guessArtistName(parsed.value);
     if (!name) throw badRequest('缺少歌手名（name）', 'invalid_param');
 
     const artists = await getSimilarArtists(name, name);
-    return { id: `qq_ar_${parsed.value}`, name, artists };
+    return { id: `${parsed.source}_ar_${parsed.value}`, name, artists };
   });
 
   /**
@@ -791,12 +932,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     const cached = getTrack(parsed.raw);
     if (cached) return { track: cached, source: 'cache' };
 
-    let fetched = await getSongDetail(parsed.value);
-    // QQ 查不到（版权下架/地区限制/接口抖动）→ **酷狗元数据兜底**：
-    // 以 id 里的关键词不存在——这里按 trackId 无语义，只能靠搜索。
-    // 但回源请求方（stream/resolve/favorites）拿到的只是 id，没有歌名，无法搜酷狗。
-    // 所以这里的兜底仅当调用方能提供 query 时才可能 —— 单曲回源场景没有，跳过。
-    // （真正的酷狗元数据兜底在搜索聚合与每日推荐快照，不在单曲回源。）
+    const fetched = parsed.source === 'qq' ? await getSongDetail(parsed.value) : null;
     if (!fetched) throw notFound('曲目不存在');
 
     upsertTracks([fetched]);
@@ -807,7 +943,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
   /**
    * 歌词。
    *
-   * `:id` 是曲目的路由键（`qq_<mid>`）。歌词内容对同一 mid 永远不变，
+   * `:id` 是曲目的路由键（`qq_<mid>` / `ne_<id>` / `kg_<id>`）。歌词内容对同一曲目永远不变，
    * 允许客户端长缓存 —— 但必须 `private`，它仍是按用户鉴权的数据面。
    */
   app.get('/api/lyrics/:id', async (req, reply) => {
@@ -819,11 +955,13 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       throw badRequest(`这不是曲目 id：${raw}`, 'invalid_id');
     }
 
-    // 四级兜底：QQ 本曲 → QQ 同曲异版本 → 网易云 → 暂无（services/lyric-fallback.ts）
+    // 多源歌词链路：ne_ 直取网易云 lyricNew；其余走四级兜底（services/lyric-fallback.ts）
     const track = getTrack(parsed.raw);
     const lyric = track
       ? await getLyricForTrack(track)
-      : await getQQLyric(parsed.value, strParam((req.query as any)?.songId));
+      : parsed.source === 'ne'
+        ? await getLyricForTrack({ id: parsed.raw, mid: parsed.value, name: '', ar: [], dt: 0 } as unknown as Track)
+        : await getQQLyric(parsed.value, strParam((req.query as any)?.songId));
 
     reply.header('Cache-Control', 'private, max-age=86400');
     return { id: parsed.raw, ...lyric };

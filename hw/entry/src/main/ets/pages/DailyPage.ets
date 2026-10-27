@@ -276,7 +276,7 @@ export struct DailyPage {
                   onTap: () => { this.playAt(i); }
                 })
               }
-            }, (t: Track) => t.id)
+            }, (t: Track) => `${t.id}|${this.favIds.indexOf(t.id) >= 0 ? '1' : '0'}`)
           }
             .scrollBar(BarState.Off)
           .width('100%')

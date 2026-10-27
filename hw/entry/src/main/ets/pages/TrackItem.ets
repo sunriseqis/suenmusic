@@ -322,9 +322,19 @@ export struct TrackItem {
             return;
           }
           // 普通页：行留在原地，弹回后由序号染色/文案变化确认结果
-          const cb = this.onSwipeToggle;
-          if (cb !== null) { cb(); }
+          const prevFav = this.isFav;
+          this.isFav = !prevFav;
           this.animateSwipeTo(0);
+          const cb = this.onSwipeToggle;
+          if (cb !== null) {
+            cb().then((ok: boolean) => {
+              if (!ok) {
+                this.isFav = prevFav;
+              }
+            }).catch(() => {
+              this.isFav = prevFav;
+            });
+          }
         })
         .onActionCancel(() => {
           // 手势被系统打断（来电、返回手势接管）：只复位，绝不当作「已触发」

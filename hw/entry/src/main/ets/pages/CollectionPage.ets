@@ -720,7 +720,7 @@ export struct CollectionPage {
         onSwipeToggle: (): Promise<boolean> => this.toggleFav(t),
         onTap: (): void => { this.playAt(this.songIndexBase() + i); }
       })
-    }, (t: Track) => t.id)
+    }, (t: Track) => `${t.id}|${this.hasFav(t.id) ? '1' : '0'}`)
   }
 
   /** 歌手页分页条（web .pager：圆钮 + 页码 + 加载更多 + 圆钮） */

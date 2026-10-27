@@ -14,16 +14,18 @@
 
 import { createLogger } from '../logger.ts';
 import { kugouSearchSongs, kugouTrackToTrack } from '../sources/kugou/source.ts';
-import { searchQQ, QQ_SEARCH_TYPE } from '../sources/qq/search.ts';
+import { searchQQ } from '../sources/qq/search.ts';
 import { netease, neteaseRequest } from '../sources/netease/vendor.ts';
 import { currentNeteaseCookie } from './netease-account.ts';
+import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track } from '../sources/qq/adapter.ts';
 import { upsertTracks } from '../db/repo/tracks.ts';
 
 const log = createLogger('multi-search');
 
-/** 变种/翻唱清洗：命中的一律不当作原唱 */
-const VARIANT_RE = /(伴奏|纯音乐|钢琴|吉他|器乐|dj|慢摇|变速|remix|片段|消音|和声|翻唱|cover)/i;
+/** 变种/翻唱清洗：命中的一律不当作原唱（同时检查曲名与专辑名） */
+const VARIANT_RE =
+  /(伴奏|纯音乐|钢琴|吉他|器乐|dj|慢摇|变速|remix|片段|消音|和声|翻唱|cover|intro|outro|demo|不插电|串烧|填词|翻填|戏腔版|女声版|男声版|女生版|男生版|烟嗓版|高潮版|唢呐版)/i;
 /** 原唱本人的官方 Live：保留，排在录音室原版之后 */
 const LIVE_RE = /(live|现场|演唱会)/i;
 
@@ -126,7 +128,7 @@ export async function searchSongsMulti(query: string, limit = 20): Promise<Multi
     try {
       const rows = await kugouSearchSongs(q, 30);
       return rows.filter(r => {
-        if (VARIANT_RE.test(r.name)) return false;
+        if (VARIANT_RE.test(r.name) || VARIANT_RE.test(r.albumName)) return false;
         if (!r.isOriginal) return false;
         return relevant(r.name, r.singers.map(s => s.name));
       });
@@ -146,7 +148,8 @@ export async function searchSongsMulti(query: string, limit = 20): Promise<Multi
       // 官方原唱认证硬门槛：只放行 originCoverType === 1
       return (songs as Array<Record<string, any>>).filter(s => {
         if (Number(s.originCoverType ?? 0) !== 1) return false;
-        if (VARIANT_RE.test(String(s.name ?? ''))) return false;
+        const alName = String(s.al?.name ?? '');
+        if (VARIANT_RE.test(String(s.name ?? '')) || VARIANT_RE.test(alName)) return false;
         const artists = ((s.ar ?? []) as Array<Record<string, any>>).map(a => String(a.name ?? ''));
         return relevant(String(s.name ?? ''), artists);
       });
@@ -158,8 +161,12 @@ export async function searchSongsMulti(query: string, limit = 20): Promise<Multi
 
   const [kugouRows, neteaseRows] = await Promise.all([kugouTask, neteaseTask]);
 
-  const kugouSongs = kugouRows.map(t => kugouTrackToTrack(t));
-  const neteaseSongs = neteaseRows.map(s => neteaseSongToTrack(s));
+  const kugouSongs = kugouRows
+    .map(t => kugouTrackToTrack(t))
+    .filter(t => !isCoverOrInstrumental(t));
+  const neteaseSongs = neteaseRows
+    .map(s => neteaseSongToTrack(s))
+    .filter(t => !isCoverOrInstrumental(t));
   if (kugouSongs.length > 0) sources.push('kugou');
   if (neteaseSongs.length > 0) sources.push('netease');
 
@@ -186,16 +193,19 @@ export async function searchSongsMulti(query: string, limit = 20): Promise<Multi
     });
   };
 
-  // ---- QQ 辅源（对质用）：始终拉取，用来挡掉「同名但歌手不符」的野鸡条目 ----
+  // ---- QQ 兜底：仅当酷狗失败或为空时才触发，平时 0 次 QQ 搜索消耗 ----
   let qqSongs: Track[] = [];
-  try {
-    const r = await searchQQ(q, { limit, slices: [QQ_SEARCH_TYPE.song] as never });
-    qqSongs = (r.songs ?? []).filter(t => {
-      if (VARIANT_RE.test(t.name)) return false;
-      return relevant(t.name, (t.ar ?? []).map(a => a.name));
-    });
-  } catch (err) {
-    log.warn(`QQ 辅源搜索失败：${(err as Error).message}`);
+  if (kugouSongs.length === 0) {
+    try {
+      const r = await searchQQ(q, { limit, slices: ['song'] });
+      qqSongs = (r.songs ?? []).filter(t => {
+        if (VARIANT_RE.test(t.name) || isCoverOrInstrumental(t)) return false;
+        return relevant(t.name, (t.ar ?? []).map(a => a.name));
+      });
+      if (qqSongs.length > 0) sources.push('qq');
+    } catch (err) {
+      log.warn(`QQ 兜底搜索失败：${(err as Error).message}`);
+    }
   }
 
   // 酷狗与网易云条目也要过一遍对质：能杀掉酷狗侧的同名翻唱（如《知我》里的伪原唱条目）
