@@ -85,7 +85,35 @@ async function checkServerUpdate(): Promise<void> {
   checking.value = true;
   updResult.value = null;
   try {
-    const res = await http.get<ServerUpdateReply>('/api/admin/server-update?force=1');
+    let res: ServerUpdateReply;
+    try {
+      res = await http.get<ServerUpdateReply>('/api/admin/server-update?force=1');
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        // 兼容老版本服务端（未暴露 /api/admin/server-update）
+        const q = `?platform=fnos&version_name=${encodeURIComponent(currentVersion.value)}&version_code=0&force=1`;
+        const legacy = await http.get<{
+          available: boolean;
+          latest: { versionName: string; size: number; fileName: string } | null;
+          downloadToken: string | null;
+          downloadPath: string | null;
+        }>(`/api/update/check${q}`);
+        res = {
+          available: legacy.available,
+          currentVersion: currentVersion.value,
+          latestVersion: legacy.latest?.versionName || currentVersion.value,
+          deployMode: deployMode.value,
+          artifact: legacy.available && legacy.latest ? {
+            fileName: legacy.latest.fileName,
+            size: legacy.latest.size,
+            downloadToken: legacy.downloadToken || '',
+            downloadPath: legacy.downloadPath || '/api/update/download',
+          } : null,
+        };
+      } else {
+        throw err;
+      }
+    }
     updResult.value = res;
     if (res.deployMode) deployMode.value = res.deployMode;
     if (res.available) {
