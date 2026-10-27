@@ -11,6 +11,7 @@
     "hw:check:strict": "node scripts/check-arkts.mjs --strict",
     "hw:build": "node scripts/build-hw.mjs",
     "hw:sync": "node scripts/sync-hw.mjs",
+    "web:build": "npm --prefix web run build",
     "fn:build": "node scripts/build-fn.mjs",
     "icons": "python3 scripts/gen-brand-icons.py",
     "wordmark": "python3 web/scripts/write-wordmark-assets.py"

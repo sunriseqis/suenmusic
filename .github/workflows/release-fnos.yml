@@ -32,9 +32,6 @@ jobs:
           cd web && npm ci --no-audit --no-fund && cd ..
           cd server && npm ci --no-audit --no-fund && cd ..
 
-      - name: Build Web SPA
-        run: npm run web:build
-
       - name: Build fnOS FPK Package
         run: node scripts/build-fn.mjs
 
