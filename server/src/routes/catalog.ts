@@ -232,7 +232,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     // 用客户端带来的 name 组一个最小对象，避免点进歌手页直接 404。
     // picUrl 留给客户端用搜索结果里的歌手图（或首字母占位）。
     if (parsed.source !== 'qq') {
-      const name = strParam((req.query as any)?.name);
+      const name = strParam((req.query as any)?.name) || guessArtistName(parsed.value);
       if (!name) throw notFound('歌手不存在（该源需要带 name 参数）');
       return {
         artist: {
@@ -328,6 +328,27 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     return songs;
   };
 
+  /**
+   * 从本地库反查歌手名（多源歌手页的 name 兜底）。
+   *
+   * `kg_ar_` / `ne_ar_` 的上游没有「按歌手 id 取详情」的稳定接口，之前要求客户端必须带 `name`，
+   * 少传一处就 404。这里改为：库里任何一条该歌手的曲目都能反推出名字，客户端不必强依赖。
+   */
+  const guessArtistName = (artistId: string): string => {
+    if (!artistId) return '';
+    try {
+      const row = getDatabase()
+        .prepare("SELECT artists_json FROM tracks WHERE artists_json LIKE ? LIMIT 1")
+        .get(`%"mid":"${artistId}"%`) as { artists_json: string } | undefined;
+      if (!row) return '';
+      const ar = JSON.parse(row.artists_json || '[]') as Array<{ mid?: string; name?: string }>;
+      const hit = ar.find(a => String(a?.mid ?? '') === artistId);
+      return String(hit?.name ?? '');
+    } catch {
+      return '';
+    }
+  };
+
   /** 名称归一（歌手过滤用）：去空白/括号/小写 */
   const normName = (s: string): string => {
     let out = String(s ?? '').toLowerCase().replace(/\s+/g, '').replace(/[()（）[\]【】]/g, '');
@@ -401,7 +422,8 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       if (songs.length > 0) upsertTracks(songs);
       return {
         id: `ne_ar_${parsed.value}`,
-        name,
+        // 客户端没带 name 时用库反查，保证页面标题有歌手名
+        name: name || guessArtistName(parsed.value),
         page,
         songs,
         hasMore: songs.length >= limit,
@@ -411,9 +433,11 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
     if (parsed.source === 'kg') {
       // 酷狗没有稳定的「按 singerId 取歌」接口，改用聚合搜索后按歌手过滤：
       // 结果同样带 kg_ 前缀与 kugouMeta，点播可直取流。
-      if (!name) throw notFound('酷狗歌手页需要带 name 参数');
-      const agg = await searchSongsMulti(name, limit);
-      const target = normName(name);
+      // name 缺失时从本地库反查（客户端少传一处也不会 404）。
+      const singerName = name || guessArtistName(parsed.value);
+      if (!singerName) throw notFound('酷狗歌手页需要带 name 参数（本地库也没有该歌手曲目）');
+      const agg = await searchSongsMulti(singerName, limit);
+      const target = normName(singerName);
       const songs = backfillCovers(
         agg.songs.filter(t =>
           (t.ar ?? []).some(a => {
@@ -424,7 +448,7 @@ export function registerCatalogRoutes(app: FastifyInstance): void {
       );
       return {
         id: `kg_ar_${parsed.value}`,
-        name,
+        name: singerName,
         page,
         songs,
         hasMore: false,
