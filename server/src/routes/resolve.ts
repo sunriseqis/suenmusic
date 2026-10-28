@@ -56,6 +56,7 @@ function shape(
   outcome: ResolveOutcome,
   meta: TrackMeta = null,
   preferMp3 = false,
+  quality?: string,
 ): Record<string, unknown> {
   const row = outcome.ok
     ? (preferMp3 ? (getSource(`${outcome.trackId}:mp3`) ?? getSource(outcome.trackId)) : getSource(outcome.trackId))
@@ -139,6 +140,16 @@ function shape(
      * 搜索召回行，客户端用这份把缺的封面/专辑现场补上。
      */
     track: meta?.raw ?? null,
+    /** 当前实际生效音质：lossless / exhigh / high / standard */
+    currentQuality:
+      (outcome as any).currentQuality ??
+      (quality === 'standard' ? 'standard' : ((row?.source ?? outcome.source) === 'bilibili' ? 'high' : 'lossless')),
+    /** 本曲可用音质档位列表 */
+    availableQualities:
+      ((outcome as any).availableQualities ??
+      ((row?.source ?? outcome.source) === 'bilibili'
+        ? ['standard', 'high']
+        : ['standard', 'high', 'exhigh', 'lossless'])),
   };
 }
 
@@ -225,6 +236,7 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     const trackId = parsed.raw;
     const force = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.force).toLowerCase());
     const retry = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.retry).toLowerCase());
+    const quality = strParam((req.query as any)?.quality);
     const preferMp3 = isIosClient(req);
 
     const meta = await loadTrack(trackId);
@@ -239,14 +251,14 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         // 无 Q 音专辑封面时网易云路径会去取网易云侧专辑封面（显示层兜底）
         hasAlbumCover: Boolean(meta.albumPic),
       },
-      { force, retry, preferMp3 }
+      { force, retry, preferMp3, quality }
     );
 
     log.debug(
       `resolve ${trackId} ok=${outcome.ok} hit=${outcome.hitLevel} ${outcome.costMs}ms`
     );
 
-    return shape(outcome, meta, preferMp3);
+    return shape(outcome, meta, preferMp3, quality);
   });
 
   /**

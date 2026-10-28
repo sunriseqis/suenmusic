@@ -113,6 +113,10 @@ export interface ResolveResult {
   message?: string;
   /** 音源来源。代理层据此决定出网请求头（B 站要 Referer，网易云不要）。缺省视为 bilibili */
   source?: 'bilibili' | 'netease' | 'kugou';
+  /** 当前实际生效音质：lossless / exhigh / high / standard */
+  currentQuality?: string;
+  /** 本曲可用音质档位列表 */
+  availableQualities?: string[];
 }
 
 export interface ResolveInput {
@@ -296,6 +300,7 @@ export interface AudioStream {
   fallback: boolean;
   /** 视频封面（https）。无 Q 音专辑封面的曲目用它做显示层兜底 */
   pic?: string;
+  quality?: string;
 }
 
 interface BiliViewResponse {
@@ -325,7 +330,10 @@ interface BiliPlayUrlResponse {
  * fnval=4048 表示同时请求 DASH / HDR / 4K / 杜比 / 8K，未登录时自动退化为普通
  * DASH；DASH 里的 audio 数组按码率降序取最高音质，而不是盲取第一项。
  */
-export async function getAudioStream(bvid: string): Promise<AudioStream | null> {
+export async function getAudioStream(
+  bvid: string,
+  options: { preferMp3?: boolean; quality?: string } = {}
+): Promise<AudioStream | null> {
   try {
     upstreamStats.view++;
     const view = await requestJson<BiliViewResponse>(
@@ -359,17 +367,26 @@ export async function getAudioStream(bvid: string): Promise<AudioStream | null> 
     const audios = data?.dash?.audio || [];
 
     if (audios.length) {
-      const best = [...audios].sort(
+      /**
+       * 当用户期望 standard 音质（或 iOS preferMp3 弱网场景）时，取最低码率档（~64k/132k）；
+       * 否则取最高码率档（~192k 30280）。
+       */
+      const sorted = [...audios].sort(
         (a, b) => (b.bandwidth || 0) - (a.bandwidth || 0)
-      )[0];
-      const raw = best?.baseUrl || best?.base_url;
+      );
+      const wantStandard = options.quality === 'standard' || Boolean(options.preferMp3);
+      const chosen = wantStandard
+        ? sorted[sorted.length - 1]
+        : sorted[0];
+      const raw = chosen?.baseUrl || chosen?.base_url;
       if (raw) {
         return {
           url: toHttps(raw),
-          bandwidth: best.bandwidth || 0,
-          mimeType: best.mimeType || best.mime_type || 'audio/mp4',
+          bandwidth: chosen.bandwidth || 0,
+          mimeType: chosen.mimeType || chosen.mime_type || 'audio/mp4',
           fallback: false,
           pic,
+          quality: wantStandard ? 'standard' : 'high',
         };
       }
     }
@@ -383,6 +400,7 @@ export async function getAudioStream(bvid: string): Promise<AudioStream | null> 
         mimeType: 'video/mp4',
         fallback: true,
         pic,
+        quality: 'standard',
       };
     }
 
@@ -403,12 +421,13 @@ function toHttps(url: string): string {
  * 不带缓存，每次调用都会真实访问上游。
  */
 export async function resolveTrackSource(
-  track: ResolveInput
+  track: ResolveInput,
+  options: { preferMp3?: boolean; quality?: string } = {}
 ): Promise<ResolveResult> {
   // 0. 已绑定 BVID 时直接取流，跳过搜索
   const directBvid = track.bvid;
   if (directBvid) {
-    const stream = await getAudioStream(directBvid);
+    const stream = await getAudioStream(directBvid, options);
     if (!stream) return fail('no_stream', '已绑定 BVID 但取流失败', { bvid: directBvid });
     return {
       ok: true,
@@ -419,6 +438,8 @@ export async function resolveTrackSource(
       fallbackStream: stream.fallback,
       coverUrl: stream.pic,
       source: 'bilibili',
+      currentQuality: stream.quality ?? 'high',
+      availableQualities: ['standard', 'high'],
     };
   }
 
@@ -471,7 +492,7 @@ export async function resolveTrackSource(
     );
   }
 
-  const stream = await getAudioStream(best.bvid);
+  const stream = await getAudioStream(best.bvid, options);
   if (!stream) {
     return fail('no_stream', '匹配成功但取流失败', {
       bvid: best.bvid,
@@ -493,13 +514,9 @@ export async function resolveTrackSource(
     fallbackStream: stream.fallback,
     coverUrl: stream.pic,
     topCandidates,
-    /**
-     * 必须显式带上：这是**搜索路径**，而锚点路径（见上方 bvid 直取分支）一直都有。
-     * 漏了它，`resolveTrack()` 出来的 source 就是 undefined，调用方只能各写一处
-     * `?? 'bilibili'` 兜底 —— 2026-10-20 审计的测试红灯正是这条
-     * （`resolver-test` 的「多源解析命中有效源」）。
-     */
     source: 'bilibili',
+    currentQuality: stream.quality ?? 'high',
+    availableQualities: ['standard', 'high'],
   };
 }
 

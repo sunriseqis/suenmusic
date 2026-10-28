@@ -19,6 +19,7 @@ import { createLogger } from '../../logger.ts';
 import { getSetting } from '../../db/repo/settings.ts';
 import { getKugouDevice, ensureDfid, markKugouCredentialInvalid } from '../../services/kugou-login.ts';
 import { ensureKugouCheckin, isKugouCheckedInToday } from '../../services/kugou-checkin.ts';
+import { readKugouLoginState } from '../../services/kugou-status.ts';
 import {
   APPID_LITE,
   CLIENTVER_LITE,
@@ -376,11 +377,16 @@ export interface KugouStoredMeta {
  */
 export async function resolveKugouDirect(
   meta: KugouStoredMeta,
-  options?: { preferMp3?: boolean },
+  options?: { preferMp3?: boolean; quality?: string },
 ): Promise<ResolveResult> {
   const creds = readCreds();
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
   if (!meta.hash || !meta.albumAudioId) return fail('no_candidates', '缺少酷狗播放凭证');
+
+  const kgStatus = await readKugouLoginState();
+  if (kgStatus.state !== 'ok') {
+    return fail('below_threshold', `酷狗无有效会员（state=${kgStatus.state}），跳过转 B 站`);
+  }
 
   const cand: KugouTrack = {
     id: 'kg_' + String(meta.albumAudioId),
@@ -408,7 +414,7 @@ export async function resolveKugouDirect(
     return fail('rejected', (err as Error).message);
   }
 
-  const hit = await streamFirstPlayable([cand], cand.durationSec, creds, dfid, userAuth, options);
+  const hit = await streamFirstPlayable([cand], cand.durationSec, creds, dfid, userAuth, options, kgStatus.svipActive);
   return hit ?? fail('below_threshold', '酷狗直取无可播音质');
 }
 
@@ -424,14 +430,37 @@ async function streamFirstPlayable(
   creds: KugouCreds,
   dfid: string,
   userAuth: string,
-  options?: { preferMp3?: boolean },
+  options?: { preferMp3?: boolean; quality?: string },
+  svip = false,
 ): Promise<ResolveResult | null> {
-  const qualityOrder = options?.preferMp3
-    ? (['320', '128'] as const)
-    : QUALITY_ORDER;
+  let qualityOrder: readonly string[];
+  const reqQ = options?.quality?.toLowerCase();
+
+  // 若无概念 SVIP（仅普通畅听 VIP），上游无 320k/FLAC 权限，锁定仅尝试 128k 完整版
+  if (!svip) {
+    qualityOrder = ['128'];
+  } else if (reqQ === 'standard' || reqQ === 'high') {
+    qualityOrder = ['128'];
+  } else if (reqQ === 'exhigh' || options?.preferMp3) {
+    qualityOrder = ['320', '128'];
+  } else if (reqQ === 'lossless') {
+    qualityOrder = ['flac', 'high', '320', '128'];
+  } else {
+    qualityOrder = QUALITY_ORDER;
+  }
 
   for (const cand of candidates) {
     const priv = await fetchPrivilegeInfo(cand, creds, dfid);
+
+    const availableQualities: string[] = ['standard'];
+    if (svip) {
+      if (priv.goodsByQuality.has('320')) {
+        availableQualities.push('high', 'exhigh');
+      }
+      if (!options?.preferMp3 && (priv.goodsByQuality.has('flac') || priv.goodsByQuality.has('high'))) {
+        availableQualities.push('lossless');
+      }
+    }
 
     for (const quality of qualityOrder) {
       const goods = priv.goodsByQuality.get(quality);
@@ -465,6 +494,12 @@ async function streamFirstPlayable(
         }
 
         const actualSec = timeLength > 0 ? timeLength : cand.durationSec;
+        const currentQuality =
+          quality === 'flac' || quality === 'high'
+            ? 'lossless'
+            : quality === '320'
+              ? 'exhigh'
+              : 'standard';
         log.info(
           `酷狗命中 ${cand.id} 「${cand.name}」${quality}@${bitrate || goods.bitrate}kbps ` +
             `时长=${actualSec}s 时长差=${durTarget > 0 ? Math.abs(actualSec - durTarget) : 0}s`,
@@ -480,6 +515,8 @@ async function streamFirstPlayable(
           matchedDurationSec: actualSec,
           durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
           coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
+          currentQuality,
+          availableQualities,
         };
       } catch (err) {
         log.warn(`取流失败 ${cand.id}/${quality}：${(err as Error).message}`);
@@ -491,10 +528,15 @@ async function streamFirstPlayable(
 
 export async function resolveKugouSource(
   track: ResolveInput,
-  options?: { preferMp3?: boolean },
+  options?: { preferMp3?: boolean; quality?: string },
 ): Promise<ResolveResult> {
   const creds = readCreds();
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
+
+  const kgStatus = await readKugouLoginState();
+  if (kgStatus.state !== 'ok') {
+    return fail('below_threshold', `酷狗无有效会员（state=${kgStatus.state}），跳过转 B 站`);
+  }
 
   const name = String(track.name ?? '').trim();
   if (!name) return fail('no_candidates', '曲目无名');
@@ -566,6 +608,7 @@ export async function resolveKugouSource(
     dfid,
     userAuth,
     options,
+    kgStatus.svipActive,
   );
   return hit ?? fail('below_threshold', '候选均无可播音质');
 }

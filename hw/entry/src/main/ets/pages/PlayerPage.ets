@@ -21,7 +21,8 @@ import { media } from '@kit.MediaKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import {
   MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_POS, K_DUR, K_INDEX,
-  K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE
+  K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE,
+  K_PREFERRED_QUALITY, K_CURRENT_QUALITY, K_AVAILABLE_QUALITIES
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
 import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse } from '../core/Models';
@@ -42,8 +43,40 @@ import { WebButton, NeuBtnSize } from '../common/WebButtons';
 
 const TAG = 'SuenMusic_Player';
 
+interface QualityOpt {
+  key: string;
+  name: string;
+  desc: string;
+}
+
 @Component
 export struct PlayerPage {
+  private readonly qualityOptions: QualityOpt[] = [
+    { key: 'lossless', name: '原声', desc: 'FLAC 无损 (~800k-1000k)' },
+    { key: 'exhigh', name: '极高', desc: '320kbps 高保真 MP3/AAC' },
+    { key: 'high', name: '高', desc: '192kbps / 160kbps' },
+    { key: 'standard', name: '标准', desc: '128kbps / 64kbps' }
+  ];
+
+  private qualityIconResource(q: string): Resource {
+    switch (q) {
+      case 'lossless': return $r('app.media.quality_lossless');
+      case 'exhigh': return $r('app.media.quality_exhigh');
+      case 'high': return $r('app.media.quality_high');
+      case 'standard': return $r('app.media.quality_standard');
+      default: return $r('app.media.quality_lossless');
+    }
+  }
+
+  private qualityShortTag(q: string): string {
+    switch (q) {
+      case 'lossless': return 'SQ';
+      case 'exhigh': return 'HQ';
+      case 'high': return '高';
+      case 'standard': return '标';
+      default: return 'SQ';
+    }
+  }
   @StorageLink(K_TITLE) title: string = '';
   @StorageLink(K_ARTIST) artist: string = '';
   @StorageLink(K_COVER) cover: string = '';
@@ -57,6 +90,9 @@ export struct PlayerPage {
   @StorageLink(K_ORIGIN) origin: string = '';
   /** 播放页内部浮层层级（唯一写入方；NativeRoot 返回手势读它逐层关） */
   @StorageLink(K_PLAYER_SHEET) sheet: string = 'none';
+  @StorageLink(K_PREFERRED_QUALITY) preferredQuality: string = 'lossless';
+  @StorageLink(K_CURRENT_QUALITY) currentQuality: string = 'lossless';
+  @StorageLink(K_AVAILABLE_QUALITIES) availableQualities: string[] = ['standard', 'high', 'exhigh', 'lossless'];
 
   // 窗口全屏布局下的系统避让区实时值（顶部收起钮与底部 peek 需避开刘海/手势条）
   /** 当前曲的真实音源（bilibili / netease；空 = 未匹配），由内核每曲发布 */
@@ -121,8 +157,8 @@ export struct PlayerPage {
   }
 
   private onTrackChanged(): void {
-    // 歌词/队列 sheet 跨曲保留（内容跟着新曲刷新）；dislike/more/anchor 随曲收起
-    if (this.sheet === 'dislike' || this.sheet === 'more' || this.sheet === 'anchor') {
+    // 歌词/队列 sheet 跨曲保留（内容跟着新曲刷新）；dislike/more/anchor/quality 随曲收起
+    if (this.sheet === 'dislike' || this.sheet === 'more' || this.sheet === 'anchor' || this.sheet === 'quality') {
       this.sheet = 'none';
     }
     this.stopPreview(true);
@@ -739,18 +775,6 @@ export struct PlayerPage {
         }
         .alignItems(HorizontalAlign.Start)
         .layoutWeight(1)
-
-        // 红心（web info-main plain 键，第 ③ 条）：web 自绘 heart 图标
-        WebIconButton({
-          iconName: this.favored ? WebIconName.HEART_FILLED : WebIconName.HEART,
-          boxSize: 36,
-          glyphColor: this.favored ? Tokens.accent : Tokens.text2,
-          chromeKind: NeuBtnChrome.PLAIN,
-          onTap: () => {
-            this.toggleFav();
-          }
-        })
-          .accessibilityText(this.favored ? '取消收藏' : '收藏')
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
@@ -796,11 +820,12 @@ export struct PlayerPage {
       }
       .width('100%')
 
-      // 五键控制排（web controls：模式翼 | 上一首/播放/下一首 | 队列翼；第 ③⑧ 条 web 图标键）
+      // 七键控制排：模式 | 音质 | 上一首 | 播放/暂停 | 下一首 | 收藏 | 队列
       Row() {
+        // 1. 播放模式
         WebIconButton({
           iconName: this.modeIconName(),
-          boxSize: 36,
+          boxSize: 34,
           glyphColor: this.modeActive() ? Tokens.accent : Tokens.text2,
           chromeKind: NeuBtnChrome.PLAIN,
           onTap: () => {
@@ -811,47 +836,84 @@ export struct PlayerPage {
 
         Blank()
 
-        Row({ space: Dim.s4 }) {
-          WebIconButton({
-            iconName: WebIconName.PREV,
-            boxSize: 44,
-            glyphColor: Tokens.text1,
-            chromeKind: NeuBtnChrome.PLAIN,
-            onTap: () => {
-              MediaPlayerCore.shared().prev();
-            }
-          })
-            .accessibilityText('上一首')
-
-          WebIconButton({
-            iconName: this.playing ? WebIconName.PAUSE : WebIconName.PLAY,
-            boxSize: 60,
-            glyphColor: Tokens.accent,
-            chromeKind: NeuBtnChrome.GRADIENT,
-            onTap: () => {
-              MediaPlayerCore.shared().toggle();
-            }
-          })
-            .accessibilityText(this.playing ? '暂停' : '播放')
-
-          WebIconButton({
-            iconName: WebIconName.NEXT,
-            boxSize: 44,
-            glyphColor: Tokens.text1,
-            chromeKind: NeuBtnChrome.PLAIN,
-            onTap: () => {
-              MediaPlayerCore.shared().next();
-            }
-          })
-            .accessibilityText('下一首')
+        // 2. 音质
+        Row() {
+          Image(this.qualityIconResource(this.currentQuality))
+            .width(36)
+            .height(32)
+            .objectFit(ImageFit.Contain)
+            .fillColor(Tokens.accent)
         }
-        .alignItems(VerticalAlign.Center)
+        .width(38)
+        .height(34)
+        .justifyContent(FlexAlign.Center)
+        .onClick(() => {
+          this.sheet = 'quality';
+        })
+        .accessibilityText(`音质：${MediaPlayerCore.shared().qualityLabel(this.currentQuality)}`)
 
         Blank()
 
+        // 3. 上一首
+        WebIconButton({
+          iconName: WebIconName.PREV,
+          boxSize: 38,
+          glyphColor: Tokens.text1,
+          chromeKind: NeuBtnChrome.PLAIN,
+          onTap: () => {
+            MediaPlayerCore.shared().prev();
+          }
+        })
+          .accessibilityText('上一首')
+
+        Blank()
+
+        // 4. 播放 / 暂停
+        WebIconButton({
+          iconName: this.playing ? WebIconName.PAUSE : WebIconName.PLAY,
+          boxSize: 56,
+          glyphColor: Tokens.accent,
+          chromeKind: NeuBtnChrome.GRADIENT,
+          onTap: () => {
+            MediaPlayerCore.shared().toggle();
+          }
+        })
+          .accessibilityText(this.playing ? '暂停' : '播放')
+
+        Blank()
+
+        // 5. 下一首
+        WebIconButton({
+          iconName: WebIconName.NEXT,
+          boxSize: 38,
+          glyphColor: Tokens.text1,
+          chromeKind: NeuBtnChrome.PLAIN,
+          onTap: () => {
+            MediaPlayerCore.shared().next();
+          }
+        })
+          .accessibilityText('下一首')
+
+        Blank()
+
+        // 6. 收藏 / 取消收藏
+        WebIconButton({
+          iconName: this.favored ? WebIconName.HEART_FILLED : WebIconName.HEART,
+          boxSize: 34,
+          glyphColor: this.favored ? Tokens.accent : Tokens.text2,
+          chromeKind: NeuBtnChrome.PLAIN,
+          onTap: () => {
+            this.toggleFav();
+          }
+        })
+          .accessibilityText(this.favored ? '取消收藏' : '收藏')
+
+        Blank()
+
+        // 7. 播放队列
         WebIconButton({
           iconName: WebIconName.LIST,
-          boxSize: 36,
+          boxSize: 34,
           glyphColor: Tokens.text2,
           chromeKind: NeuBtnChrome.PLAIN,
           onTap: () => {
@@ -971,6 +1033,115 @@ export struct PlayerPage {
       .padding({ top: Dim.s1, bottom: this.avoidVp(this.bottomAvoidHeight) })
       // 分工与 iOS 一致：**遮罩只淡出、抽屉只位移**。
       // （曾试过给抽屉叠 OPACITY 做非对称，长列表下同样有离屏合成开销，两端都回退成纯位移。）
+      .transition(TransitionEffect.translate({ y: '100%' })
+        .animation({ duration: Motion.standard, curve: Motion.curve }))
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  /** 音质选择 sheet */
+  @Builder
+  qualitySheet() {
+    Stack({ alignContent: Alignment.Bottom }) {
+      Column()
+        .width('100%')
+        .height('100%')
+        .backgroundColor(Tokens.scrim)
+        .onClick(() => {
+          this.sheet = 'none';
+        })
+        .transition(TransitionEffect.OPACITY
+          .animation({ duration: Motion.standard, curve: Motion.curve }))
+
+      Column() {
+        Column()
+          .width(36)
+          .height(4)
+          .backgroundColor(Tokens.line)
+          .borderRadius(2)
+          .margin({ top: Dim.s2, bottom: Dim.s3 })
+
+        Row() {
+          Text('音质选择')
+            .fontSize(Dim.fsBody)
+            .fontWeight(FontWeight.Bold)
+            .fontColor(Tokens.text1)
+          Blank()
+          Text(`当前生效：${MediaPlayerCore.shared().qualityLabel(this.currentQuality)}`)
+            .fontSize(Dim.fsCaption)
+            .fontColor(Tokens.text2)
+        }
+        .width('100%')
+        .padding({ left: Dim.s4, right: Dim.s4, bottom: Dim.s3 })
+
+        Column({ space: Dim.s1 }) {
+          ForEach(this.qualityOptions, (opt: QualityOpt) => {
+            Row() {
+              Column({ space: 2 }) {
+                Row({ space: 8 }) {
+                  Image(this.qualityIconResource(opt.key))
+                    .width(36)
+                    .height(22)
+                    .objectFit(ImageFit.Contain)
+                    .fillColor(this.availableQualities.indexOf(opt.key) >= 0
+                      ? (this.preferredQuality === opt.key ? Tokens.accent : Tokens.text2)
+                      : Tokens.text2)
+                    .opacity(this.availableQualities.indexOf(opt.key) >= 0 ? 1 : 0.4)
+                  Text(opt.name)
+                    .fontSize(Dim.fsBody)
+                    .fontWeight(this.preferredQuality === opt.key ? FontWeight.Bold : FontWeight.Medium)
+                    .fontColor(this.availableQualities.indexOf(opt.key) >= 0
+                      ? (this.preferredQuality === opt.key ? Tokens.accent : Tokens.text1)
+                      : Tokens.text2)
+                    .opacity(this.availableQualities.indexOf(opt.key) >= 0 ? 1 : 0.4)
+                  if (this.availableQualities.indexOf(opt.key) < 0) {
+                    Text('不可用')
+                      .fontSize(10)
+                      .fontColor(Tokens.text2)
+                      .opacity(0.6)
+                      .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+                      .backgroundColor(Tokens.panel2)
+                      .borderRadius(3)
+                  }
+                }
+                Text(opt.desc)
+                  .fontSize(Dim.fsCaption)
+                  .fontColor(Tokens.text2)
+                  .opacity(this.availableQualities.indexOf(opt.key) >= 0 ? 1 : 0.3)
+              }
+              .alignItems(HorizontalAlign.Start)
+
+              Blank()
+
+              if (this.preferredQuality === opt.key) {
+                Text('✓')
+                  .fontSize(Dim.fsBody)
+                  .fontWeight(FontWeight.Bold)
+                  .fontColor(Tokens.accent)
+              }
+            }
+            .width('100%')
+            .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s3 })
+            .borderRadius(Dim.radiusMd)
+            .backgroundColor(this.preferredQuality === opt.key ? Tokens.panel2 : Color.Transparent)
+            .onClick(() => {
+              if (this.availableQualities.indexOf(opt.key) >= 0) {
+                MediaPlayerCore.shared().setPreferredQuality(opt.key);
+                this.sheet = 'none';
+              } else {
+                AppToast.show('当前歌曲不支持此音质');
+              }
+            })
+          }, (opt: QualityOpt) => opt.key)
+        }
+        .width('100%')
+        .padding({ left: Dim.s2, right: Dim.s2, bottom: Dim.s4 })
+      }
+      .width('100%')
+      .backgroundColor(Tokens.panel)
+      .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
+      .padding({ bottom: this.avoidVp(this.bottomAvoidHeight) })
       .transition(TransitionEffect.translate({ y: '100%' })
         .animation({ duration: Motion.standard, curve: Motion.curve }))
     }
@@ -1434,6 +1605,9 @@ export struct PlayerPage {
       }
       if (this.sheet === 'queue') {
         this.queueSheet()
+      }
+      if (this.sheet === 'quality') {
+        this.qualitySheet()
       }
       if (this.sheet === 'more') {
         this.moreSheet()

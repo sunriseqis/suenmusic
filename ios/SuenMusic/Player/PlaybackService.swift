@@ -23,12 +23,36 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     @Published private(set) var loading: Bool = false
     /// 仅用于"引擎都起不来"这类**无法归入播放失败语义**的硬错误（不再用于逐曲失败）
     @Published var errorMessage: String?
-    /// 音源角标：bilibili / netease
+    /// 音源角标：bilibili / netease / kugou
     @Published private(set) var source: String = ""
     /// 队列来源（eyebrow「正在播放 · 来源」用，setQueue 装载方写入）
     @Published private(set) var origin: String = ""
     /// 手动点播到无音源曲目：eyebrow 显示「无音源」，**不跳不弹任何按钮**（用户 2026-10-23 定的规格）
     @Published private(set) var noSource: Bool = false
+
+    /// 用户全局偏好音质（存储于本地 UserDefaults，iOS 默认 exhigh 320k）
+    @Published var preferredQuality: String = UserDefaults.standard.string(forKey: "preferred_audio_quality") ?? "exhigh"
+    /// 当前播放曲目的实际生效音质
+    @Published private(set) var currentQuality: String = "exhigh"
+    /// 当前曲目可用的音质档位
+    @Published private(set) var availableQualities: [String] = ["standard", "high", "exhigh"]
+
+    func setPreferredQuality(_ next: String) {
+        guard preferredQuality != next else { return }
+        preferredQuality = next
+        UserDefaults.standard.set(next, forKey: "preferred_audio_quality")
+        ToastCenter.shared.show("已切换至「\(qualityLabel(for: next))」，下一首生效")
+    }
+
+    func qualityLabel(for level: String) -> String {
+        switch level {
+        case "lossless": return "原声"
+        case "exhigh": return "极高"
+        case "high": return "高"
+        case "standard": return "标准"
+        default: return level
+        }
+    }
 
     private var engine: AudioEngine?
     private var sessionToken: String?
@@ -218,11 +242,36 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         ensureRecoReasons()
         currentRecoReason = recoReasons[tracks[index].id]
         armLoadWatchdog()
-        refreshSource(for: tracks[index].id)
 
         NSLog("[Start] play() 进入 id=\(tracks[index].id) origin=\(origin)")
         let token = await validToken()
         NSLog("[Start] 令牌就绪（\(Int(Date().timeIntervalSince1970))）")
+
+        // 优先直链直连 CDN（对齐鸿蒙端：先解析出 directUrl + directHeaders 并注入引擎）
+        let targetId = tracks[index].id
+        let targetQuality = preferredQuality
+        if let r = try? await APIClient.shared.resolve(trackId: targetId, quality: targetQuality) {
+            if r.ok {
+                self.source = r.source ?? ""
+                if let directUrl = r.directUrl, !directUrl.isEmpty {
+                    engine.setDirect(
+                        trackId: targetId,
+                        url: directUrl,
+                        headers: r.directHeaders,
+                        expiresInSec: r.directExpiresInSec ?? 3600
+                    )
+                }
+                if let curQ = r.currentQuality {
+                    self.currentQuality = curQ
+                }
+                if let avail = r.availableQualities {
+                    self.availableQualities = avail
+                }
+            }
+        } else {
+            refreshSource(for: targetId)
+        }
+
         let mapped = tracks.map(Self.toNative)
         do {
             try engine.setQueue(
@@ -255,17 +304,27 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         engine.play()
     }
 
-    /// 手动切歌：失败同样停在目标曲并标「无音源」
+    /// 手动切歌：优先拿到直链再起播，避免走服务端代理流
     func next() {
         manualLoad = true
         armLoadWatchdog()
-        _ = engine?.skipToNext()
+        if let nextIndex = engine?.nextLogicalIndex(), queue.indices.contains(nextIndex) {
+            jumpTo(nextIndex)
+        } else if !queue.isEmpty {
+            let nextIndex = (currentIndex + 1) % queue.count
+            jumpTo(nextIndex)
+        }
     }
 
     func prev() {
         manualLoad = true
         armLoadWatchdog()
-        _ = engine?.skipToPrevious()
+        if let prevIndex = engine?.previousLogicalIndex(), queue.indices.contains(prevIndex) {
+            jumpTo(prevIndex)
+        } else if !queue.isEmpty {
+            let prevIndex = (currentIndex - 1 + queue.count) % queue.count
+            jumpTo(prevIndex)
+        }
     }
     func seek(to ms: Int) { engine?.seek(to: max(0, ms)) }
 
@@ -276,13 +335,35 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 队列快照（播放页队列抽屉的数据源）
     var queueSnapshot: [Track] { queue }
 
-    /// 跳到指定下标并起播（hw `jumpTo(i, true)`）
+    /// 跳到指定下标并起播（hw `jumpTo(i, true)`，优先拿 CDN 直链）
     func jumpTo(_ index: Int) {
         guard queue.indices.contains(index), let engine else { return }
-        // 用户点了某一行 = 显式点播：失败停在当前曲、不自动跳（hw `manualLoad = true`）
         manualLoad = true
         armLoadWatchdog()
-        engine.jumpTo(index, autoplay: true)
+        let targetId = queue[index].id
+        let targetQuality = preferredQuality
+        Task {
+            if let r = try? await APIClient.shared.resolve(trackId: targetId, quality: targetQuality), r.ok {
+                await MainActor.run {
+                    self.source = r.source ?? ""
+                    if let directUrl = r.directUrl, !directUrl.isEmpty {
+                        engine.setDirect(
+                            trackId: targetId,
+                            url: directUrl,
+                            headers: r.directHeaders,
+                            expiresInSec: r.directExpiresInSec ?? 3600
+                        )
+                    }
+                    if let curQ = r.currentQuality { self.currentQuality = curQ }
+                    if let avail = r.availableQualities { self.availableQualities = avail }
+                    engine.jumpTo(index, autoplay: true)
+                }
+            } else {
+                await MainActor.run {
+                    engine.jumpTo(index, autoplay: true)
+                }
+            }
+        }
     }
 
     /// 从队列摘除一项（hw `removeAt` 三种情形）：当前曲之前的只挪下标、摘当前曲原地装
@@ -343,12 +424,48 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 切歌先清空，不拿上一首的音源冒充；失败按「未匹配」。
     private func refreshSource(for trackId: String) {
         source = ""
+        let quality = preferredQuality
         Task { [weak self] in
-            let r = try? await APIClient.shared.resolve(trackId: trackId)
+            let r = try? await APIClient.shared.resolve(trackId: trackId, quality: quality)
             await MainActor.run {
                 guard let self, self.currentTrack?.id == trackId else { return }
                 self.source = (r?.ok ?? false) ? (r?.source ?? "") : ""
+                if let directUrl = r?.directUrl, !directUrl.isEmpty {
+                    self.engine?.setDirect(
+                        trackId: trackId,
+                        url: directUrl,
+                        headers: r?.directHeaders,
+                        expiresInSec: r?.directExpiresInSec ?? 3600
+                    )
+                }
+                if let curQ = r?.currentQuality {
+                    self.currentQuality = curQ
+                }
+                if let avail = r?.availableQualities {
+                    self.availableQualities = avail
+                }
                 self.pushActivity(force: true)
+            }
+        }
+    }
+
+    /// 预解析下一首直链（对齐鸿蒙端）：自动切歌时下一首无需等待解析，直接走 CDN 直链起播
+    private func prefetchNextDirect() {
+        guard let nextIndex = engine?.nextLogicalIndex(), queue.indices.contains(nextIndex) else { return }
+        let nextTrackId = queue[nextIndex].id
+        let quality = preferredQuality
+        Task { [weak self] in
+            guard let self else { return }
+            if let r = try? await APIClient.shared.resolve(trackId: nextTrackId, quality: quality), r.ok,
+               let directUrl = r.directUrl, !directUrl.isEmpty {
+                await MainActor.run {
+                    self.engine?.setDirect(
+                        trackId: nextTrackId,
+                        url: directUrl,
+                        headers: r.directHeaders,
+                        expiresInSec: r.directExpiresInSec ?? 3600
+                    )
+                }
             }
         }
     }
@@ -556,6 +673,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             self.lyricTrackId = id
             self.refreshSource(for: id)
             self.loadLyrics(for: id)   // 换歌即拉歌词（Live Activity 的歌词行靠它）
+            self.prefetchNextDirect()  // 预取下一首 CDN 直链，切歌秒启播
             self.noSource = false
             // 进度先归零：否则新歌的卡会带着上一首的位置（emitProgress 下一 tick 才纠正）
             self.positionMs = 0

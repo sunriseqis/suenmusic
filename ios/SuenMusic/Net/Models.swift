@@ -218,16 +218,27 @@ struct ResolveResponse: Codable {
     let ok: Bool
     let reason: String?
     let message: String?
-    let score: Int
+    let score: Int?
     /// `bilibili` / `netease` / `kugou` —— 只用于角标展示
-    let source: String
+    let source: String?
     /// **相对路径**，形如 `/api/stream/qq_xxx?t=<签名令牌>`；必须拼上 baseURL 才能喂给播放器
     let streamUrl: String?
-    let streamTokenExpiresInSec: Int
+    let streamTokenExpiresInSec: Int?
     /// 服务端回源补全的完整元数据（搜索召回行常缺封面/专辑）
     let track: Track?
     let coverUrl: String?
     let durationDiff: Double?
+
+    /// 直链 CDN 地址（若启用直链）
+    let directUrl: String?
+    /// 直链防盗链头（如 B 站 Referer 与桌面 UA）
+    let directHeaders: [String: String]?
+    let directExpiresInSec: Int?
+
+    /// 当前音质档位：lossless / exhigh / high / standard
+    let currentQuality: String?
+    /// 本曲可用音质档位列表
+    let availableQualities: [String]?
 }
 
 // MARK: - 分页

@@ -83,12 +83,22 @@ const STREAM_IDLE_MS = 8_000;
  * 下限 32KB/s（避免极短/未知时长时把速率算得过低导致卡顿）。
  * 算不出（无时长/无字节数）→ 返回 undefined = 不节流（宁可不节，不能卡）。
  */
-function streamRate(upstream: Response, durationMs: number, hasRange: boolean): number | undefined {
+function streamRate(
+  upstream: Response,
+  durationMs: number,
+  hasRange: boolean,
+  isIos = false
+): number | undefined {
   if (process.env.NODE_ENV === 'test') return undefined;
   // 无 Range（全量拉取 / 测试 / 离线下载）不节流：
   // 1. 全量文件慢速拉取会被上游 CDN 连接保护强行切断（Slowloris 防护报 terminated）
   // 2. 只有带 Range 的流式播放才需要防止预缓冲突发打满上行
   if (!hasRange) return undefined;
+  // iOS 客户端豁免限速（2026-09-26 实测，ios/SuenMusic/Player/AudioEngine.swift
+  // 约 1084-1102 行注释）：B 站 fMP4 在本函数算出的 ~40KB/s 下限速率下，
+  // AVPlayer 卡在 EvaluatingBufferingRate 起不了播。iOS 直连回退路径带 Range
+  // 会命中这条限速，直接不限速（iOS 走代理的流量不含并发预缓冲突发，风险可控）。
+  if (isIos) return undefined;
   if (!durationMs || durationMs <= 0) return undefined;
 
   let bytes = Number(upstream.headers.get('content-length'));
@@ -311,12 +321,28 @@ async function forward(
   return throttled;
 }
 
+/** URL 解码兜底：解不开（畸形 % 序列）就原样返回，绝不抛错 */
+function safeDecode(text: string): string {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+}
+
 export function registerStreamRoutes(app: FastifyInstance): void {
   const handler = async (req: any, reply: any): Promise<unknown> => {
     const raw = req.params.trackId as string;
-    const parsed = parseId(raw);
+    // iOS AVPlayer 偶发把路径段原样透传（% 编码未解），先解码再 parse，解不开再拒 ——
+    // 避免频繁切歌时预探测请求直接吃到 400「无法连接」（2026-10-27 报障）
+    const rawDecoded = raw.includes('%') ? safeDecode(raw) : raw;
+    const parsed = parseId(rawDecoded);
     if (!parsed || parsed.kind !== 'track') {
-      throw badRequest(`曲目 id 不合法：${raw}`, 'invalid_id');
+      // 附上收到的原始 id 前 40 字符（URL 解码后），便于真机复测时定位客户端到底发了什么
+      throw badRequest(
+        `曲目 id 不合法：${String(raw ?? '').slice(0, 40)}`,
+        'invalid_id'
+      );
     }
 
     const trackId = parsed.raw;
@@ -471,7 +497,14 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     // MIME 修正：AVPlayer 认 MIME，上游给 octet-stream 时必须改写成真实音频类型（见 sniffAudioType 注释）
     const sniffSourceKind = (row?.source ?? 'bilibili') as 'bilibili' | 'netease' | 'kugou';
     const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream, sniffSourceKind) : null;
-    return forward(reply, upstream, headOnly, streamRate(upstream, sourceMs, Boolean(range)), sourceMs, sniffedType);
+    return forward(
+      reply,
+      upstream,
+      headOnly,
+      streamRate(upstream, sourceMs, Boolean(range), preferMp3),
+      sourceMs,
+      sniffedType
+    );
   };
 
   // fastify 的 exposeHeadRoutes 会给 GET 自动挂 HEAD
@@ -485,10 +518,18 @@ export function registerStreamRoutes(app: FastifyInstance): void {
    * 注册顺序无需关心：Fastify 里静态段 `bvid` 优先于 `:trackId` 参数。
    */
   app.get('/api/stream/bvid/:bvid', async (req: any, reply: any): Promise<unknown> => {
-    const bvid = String(req.params.bvid ?? '');
-    if (!/^BV[0-9A-Za-z]{10}$/.test(bvid)) {
-      throw badRequest(`bvid 不合法：${bvid}`, 'invalid_id');
+    const bvidRaw = String(req.params.bvid ?? '');
+    /**
+     * ⚠️ 不要对整段做全等正则：iOS AVPlayer 的预探测会带尾巴（截断的查询串、
+     * 重定向变体等），历史上 `BV…xxx?t=…` 打进来直接 400「bvid 不合法」
+     * —— 表现为"频繁切歌时报无法连接"（2026-10-27 报障）。放宽为前缀匹配 +
+     * 截取前 12 位，取不到合法 BV 才拒绝。
+     */
+    const bvidMatch = /^BV[0-9A-Za-z]{10}/.exec(bvidRaw);
+    if (!bvidMatch) {
+      throw badRequest(`bvid 不合法：${bvidRaw}`, 'invalid_id');
     }
+    const bvid = bvidMatch[0];
     authorize(req, `bvid:${bvid}`);
 
     const headOnly = req.method === 'HEAD';

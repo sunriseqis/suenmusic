@@ -518,8 +518,9 @@ export class APIClient {
     return this.getBaseUrl() + downloadPath + '?platform=harmony&token=' + encodeURIComponent(token);
   }
 
-  async resolve(trackId: string): Promise<ResolveResponse> {
-    return this.request<ResolveResponse>('/api/resolve/' + encodeURIComponent(trackId),
+  async resolve(trackId: string, quality?: string): Promise<ResolveResponse> {
+    const q = quality && quality.length > 0 ? `?quality=${encodeURIComponent(quality)}` : '';
+    return this.request<ResolveResponse>('/api/resolve/' + encodeURIComponent(trackId) + q,
       http.RequestMethod.GET, '', true, false);
   }
 

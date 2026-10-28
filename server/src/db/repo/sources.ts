@@ -198,6 +198,9 @@ export function rowToResult(row: PlaySourceRow): ResolveResult {
     };
   }
 
+  const qMatch = /:(lossless|exhigh|high|standard)$/.exec(row.trackId);
+  const currentQuality = qMatch ? qMatch[1] : (row.source === 'bilibili' ? 'high' : 'lossless');
+
   return {
     ok: true,
     bvid: row.bvid || null,
@@ -209,6 +212,7 @@ export function rowToResult(row: PlaySourceRow): ResolveResult {
     bandwidth: row.bandwidth || undefined,
     source: row.source,
     coverUrl: row.coverUrl || undefined,
+    currentQuality,
   };
 }
 
@@ -221,7 +225,9 @@ export function pruneSources(): number {
 }
 
 export function deleteSource(trackId: string): void {
-  getDatabase().prepare('DELETE FROM play_sources WHERE track_id = ?').run(trackId);
+  getDatabase()
+    .prepare('DELETE FROM play_sources WHERE track_id = ? OR track_id LIKE ?')
+    .run(trackId, `${trackId}:%`);
 }
 
 export function countSources(): { total: number; positive: number } {

@@ -29,6 +29,7 @@ import {
 import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { biliCooldown, resolveTrackSource } from '../sources/bilibili/stream.ts';
 import { resolveKugouDirect, resolveKugouSource, type KugouStoredMeta } from '../sources/kugou/stream.ts';
+import { readKugouLoginState } from './kugou-status.ts';
 import { getPin } from '../db/repo/pins.ts';
 import { getTracks } from '../db/repo/tracks.ts';
 import { parseId } from '../http/ids.ts';
@@ -137,6 +138,12 @@ function memorySet(key: string, result: ResolveResult, expiresAt: number): void 
 
 function memoryDelete(key: string): void {
   memory.delete(key);
+  const prefix = `${key}:`;
+  for (const k of memory.keys()) {
+    if (k.startsWith(prefix)) {
+      memory.delete(k);
+    }
+  }
 }
 
 export function isFlacUrl(url: string | null | undefined): boolean {
@@ -165,6 +172,8 @@ export interface ResolveOptions {
   retry?: boolean;
   /** 优先使用 MP3（iOS 客户端规避 FLAC 播放器兼容性问题） */
   preferMp3?: boolean;
+  /** 期望的音质档位：lossless / exhigh / high / standard */
+  quality?: string;
 }
 
 /**
@@ -190,7 +199,9 @@ export function resolveTrack(
   }
 
   const preferMp3 = Boolean(options.preferMp3);
-  const cKey = preferMp3 ? `${key}:mp3` : key;
+  const quality = options.quality ? String(options.quality).trim().toLowerCase() : '';
+  const qPart = quality ? `:${quality}` : '';
+  const cKey = preferMp3 ? `${key}:mp3${qPart}` : `${key}${qPart}`;
 
   /**
    * 用户源钉（锚定页「只用某源」）。
@@ -253,7 +264,7 @@ export function resolveTrack(
       }
       if (persisted) deleteSource(cKey);
 
-      return resolveFromAnchor(key, anchor, input, started);
+      return resolveFromAnchor(key, anchor, input, started, options);
     }
 
     const cached = memoryGet(cKey);
@@ -292,7 +303,7 @@ export function resolveTrack(
   // ---- 锚定映射（自动沉淀，永不过期）----
   const anchor = getAnchor(key);
   if (anchor && !pin) {
-    return resolveFromAnchor(key, anchor, input, started);
+    return resolveFromAnchor(key, anchor, input, started, options);
   }
 
   // 冷却窗口内不再打上游：越打窗口越长（钉了非 B 站源时不受 B 站冷却影响）
@@ -331,22 +342,28 @@ export function resolveTrack(
   const source = parseId(String(input.id ?? ''))?.source ?? 'qq';
 
   const kgChain = async (): Promise<ResolveResult> => {
+    const kgStatus = await readKugouLoginState();
+    if (kgStatus.state !== 'ok') {
+      log.debug(`酷狗无有效会员（${kgStatus.state}），直接走 B 站兜底`);
+      return resolveTrackSource(input, { preferMp3, quality: options.quality });
+    }
     const meta = readKugouMeta(key);
     if (meta) {
-      const direct = await resolveKugouDirect(meta, { preferMp3 });
+      const direct = await resolveKugouDirect(meta, { preferMp3, quality: options.quality });
       if (direct.ok) {
         log.info(`音源链 kg → 酷狗直取 ${key} 「${direct.matchedTitle}」 时长差=${direct.durationDiff ?? 0}s`);
         return direct;
       }
       log.debug(`酷狗直取未命中 ${key}：${direct.message ?? ''}，按名搜一次`);
     }
-    const searched = await resolveKugouSource(input, { preferMp3 });
+    const searched = await resolveKugouSource(input, { preferMp3, quality: options.quality });
     if (searched.ok) {
       log.info(`音源链 kg → 酷狗搜索命中 ${key} 「${searched.matchedTitle}」 时长差=${searched.durationDiff ?? 0}s`);
       return searched;
     }
     log.debug(`酷狗未命中 ${key}：${searched.message ?? ''}，转 B 站`);
-    return resolveTrackSource(input);
+    // preferMp3 透传：iOS 分支下 B 站 DASH 也要降档（方案 A 覆盖 B 站链路）
+    return resolveTrackSource(input, { preferMp3, quality: options.quality });
   };
 
   /**
@@ -357,13 +374,13 @@ export function resolveTrack(
    * 拿不到完整地址才落 B 站。很多歌其实是免费可听的，跳过等于白丢一条源。
    */
   const neChain = async (): Promise<ResolveResult> => {
-    const ne = await resolveNeteaseSource(input, { preferMp3 });
+    const ne = await resolveNeteaseSource(input, { preferMp3, quality: options.quality });
     if (ne.ok) {
       log.info(`音源链 ne → 网易云命中 ${key} 「${ne.matchedTitle}」 时长差=${ne.durationDiff ?? 0}s`);
       return ne;
     }
     log.debug(`网易云未命中 ${key}：${ne.message ?? ''}，转 B 站`);
-    return resolveTrackSource(input);
+    return resolveTrackSource(input, { preferMp3, quality: options.quality });
   };
 
   /**
@@ -374,7 +391,12 @@ export function resolveTrack(
    * 在 qq_ 上再试一次网易云只是多打一次上游、多一次错配机会。
    */
   const qqChain = async (): Promise<ResolveResult> => {
-    const kugouResult = await resolveKugouSource(input, { preferMp3 });
+    const kgStatus = await readKugouLoginState();
+    if (kgStatus.state !== 'ok') {
+      log.debug(`酷狗无有效会员（${kgStatus.state}），跳过酷狗直接走 B 站`);
+      return resolveTrackSource(input, { preferMp3, quality: options.quality });
+    }
+    const kugouResult = await resolveKugouSource(input, { preferMp3, quality: options.quality });
     if (kugouResult.ok) {
       log.info(
         `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
@@ -383,15 +405,15 @@ export function resolveTrack(
       return kugouResult;
     }
     log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
-    return resolveTrackSource(input);
+    return resolveTrackSource(input, { preferMp3, quality: options.quality });
   };
 
   const baseChain: Promise<ResolveResult> = pin
     ? (async (): Promise<ResolveResult> => {
         log.info(`源钉 ${key} → 只走 ${pin.source}`);
         return pin.source === 'kugou'
-          ? resolveKugouSource(input, { preferMp3 })
-          : resolveNeteaseSource(input, { preferMp3 });
+          ? resolveKugouSource(input, { preferMp3, quality: options.quality })
+          : resolveNeteaseSource(input, { preferMp3, quality: options.quality });
       })()
     : source === 'kg'
       ? kgChain()
@@ -404,11 +426,15 @@ export function resolveTrack(
       // 成功与失败都落库。负缓存同样重要：否则重启后会把"注定匹配不到"的
       // 曲子重新打一遍上游，而这正是风控的主要来源。
       saveSource(cKey, result);
+      // 失败结果**同键落库**（不带 :mp3 后缀）：iOS(:mp3) 与非 iOS 共享负缓存，
+      // 否则 iOS 每次切歌都要把注定失败的上游链路重打一遍（2026-10-27 报障：启播缓慢）。
+      if (!result.ok) saveSource(key, result);
       const expiresAt = result.ok
         ? computeExpiry(result.sourceUrl ?? '', ts)
         : ts + NEGATIVE_TTL_MS;
 
       memorySet(cKey, result, expiresAt);
+      if (!result.ok) memorySet(key, result, expiresAt);
 
       // 自动沉淀映射：匹配成功的 B 站曲目的 bvid 永久入库。
       // 之后播放只取流、不搜索（见上方锚点分支）；repo 层保证不会覆盖手动锚定。
@@ -464,16 +490,20 @@ async function resolveFromAnchor(
   key: string,
   anchor: { bvid: string; title: string; author: string; durationSec: number; pinned: boolean },
   input: ResolveInput,
-  started: number
+  started: number,
+  options: ResolveOptions = {}
 ): Promise<ResolveOutcome> {
   const ts = Date.now();
-  const result = await resolveTrackSource({
-    id: input.id,
-    name: input.name,
-    artists: input.artists,
-    durationMs: input.durationMs,
-    bvid: anchor.bvid,
-  });
+  const result = await resolveTrackSource(
+    {
+      id: input.id,
+      name: input.name,
+      artists: input.artists,
+      durationMs: input.durationMs,
+      bvid: anchor.bvid,
+    },
+    { preferMp3: Boolean(options.preferMp3), quality: options.quality }
+  );
 
   if (result.ok) {
     const enriched: ResolveResult = {
@@ -502,7 +532,7 @@ async function resolveFromAnchor(
   if (!anchor.pinned) {
     deleteAnchor(key);
     log.warn(`自动沉淀锚定视频已失效（${anchor.bvid}），删除锚点并回退正常解析 ${key}`);
-    return resolveTrack(input);
+    return resolveTrack(input, options);
   }
 
   log.warn(`手动锚定视频取流未成功（${anchor.bvid}），保留锚点并返回失败状态 ${key}`);

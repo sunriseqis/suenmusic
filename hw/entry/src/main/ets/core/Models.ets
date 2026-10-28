@@ -108,6 +108,7 @@ export interface DirectLink {
   url: string;
   headers: Record<string, string>;
   expiresAt: number;
+  quality?: string;
 }
 
 /**
@@ -184,6 +185,10 @@ export interface ResolveResponse {
   streamTokenExpiresInSec: number;
   track?: Track;
   coverUrl?: string;
+  /** 当前生效的音质档位：lossless / exhigh / high / standard */
+  currentQuality?: string;
+  /** 本曲可用音质列表 */
+  availableQualities?: string[];
 }
 
 export interface StreamSessionToken {

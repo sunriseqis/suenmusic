@@ -3,7 +3,7 @@ import SwiftUI
 /// 播放页内部浮层层键（hw `K_PLAYER_SHEET`）：同一时刻只允许一个。
 /// 视觉层级从顶到底：dislike > more > queue > lyrics > 播放页本身。
 enum PlayerSheet: Equatable {
-    case none, lyrics, queue, more, anchor, dislike
+    case none, lyrics, queue, more, anchor, dislike, quality
 }
 
 /// 可指定字形色的图标键。
@@ -488,8 +488,50 @@ struct PlayerView: View {
         .foregroundStyle(p.text2)
     }
 
+    private var qualityButton: some View {
+        Button {
+            openSheet(.quality)
+        } label: {
+            HStack(spacing: 2) {
+                if let uiImage = UIImage(named: "quality_\(player.currentQuality)") {
+                    Image(uiImage: uiImage)
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 32, height: 20)
+                } else {
+                    Text(qualityShortTag(player.currentQuality))
+                        .font(.system(size: 11, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 4)
+                                .stroke(p.accent, lineWidth: 1.2)
+                        )
+                }
+            }
+            .foregroundStyle(p.accent)
+            .frame(width: Dim.btnMd, height: Dim.btnMd)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("音质：\(player.qualityLabel(for: player.currentQuality))")
+    }
+
+    private func qualityShortTag(_ q: String) -> String {
+        switch q {
+        case "lossless": return "SQ"
+        case "exhigh": return "HQ"
+        case "high": return "高"
+        case "standard": return "标"
+        default: return "HQ"
+        }
+    }
+
+    /// 底部控制栏重排：播放顺序 / 音质 / 上一曲 / 播放 / 下一曲 / 收藏 / 播放列表
     private var controls: some View {
         HStack(spacing: 0) {
+            // 1. 播放顺序
             GlyphKey(modeIcon, box: Dim.btnMd, color: modeActive ? p.accent : p.text2) {
                 player.cycleMode()
                 ToastCenter.shared.show("播放模式：\(player.playModeLabel)")
@@ -498,18 +540,40 @@ struct PlayerView: View {
 
             Spacer(minLength: 0)
 
-            HStack(spacing: Dim.s4) {
-                WebIconButton(.prev, box: Dim.touchMin, style: .plain) { player.prev() }
-                    .accessibilityLabel("上一首")
-                WebIconButton(player.playing ? .pause : .play,
-                              box: PlayerSpec.playKey, style: .gradient) { player.toggle() }
-                    .accessibilityLabel(player.playing ? "暂停" : "播放")
-                WebIconButton(.next, box: Dim.touchMin, style: .plain) { player.next() }
-                    .accessibilityLabel("下一首")
-            }
+            // 2. 音质
+            qualityButton
 
             Spacer(minLength: 0)
 
+            // 3. 上一首
+            WebIconButton(.prev, box: Dim.btnMd, style: .plain) { player.prev() }
+                .accessibilityLabel("上一首")
+
+            Spacer(minLength: 0)
+
+            // 4. 播放 / 暂停
+            WebIconButton(player.playing ? .pause : .play,
+                          box: PlayerSpec.playKey, style: .gradient) { player.toggle() }
+                .accessibilityLabel(player.playing ? "暂停" : "播放")
+
+            Spacer(minLength: 0)
+
+            // 5. 下一首
+            WebIconButton(.next, box: Dim.btnMd, style: .plain) { player.next() }
+                .accessibilityLabel("下一首")
+
+            Spacer(minLength: 0)
+
+            // 6. 收藏 / 取消收藏
+            GlyphKey(favored ? .heartFilled : .heart, box: Dim.btnMd,
+                     color: favored ? p.accent : p.text2) {
+                Task { await toggleFav() }
+            }
+            .accessibilityLabel(favored ? "取消收藏" : "收藏")
+
+            Spacer(minLength: 0)
+
+            // 7. 播放列表
             WebIconButton(.list, box: Dim.btnMd, style: .plain) { openSheet(.queue) }
                 .accessibilityLabel("播放队列")
         }
@@ -574,6 +638,9 @@ struct PlayerView: View {
                           onTrack: { Task { await dislikeTrack() } },
                           onArtist: { Task { await dislikeArtist() } },
                           onCancel: { closeSheet() })
+                .transition(.opacity)
+        case .quality:
+            QualitySheet(onClose: { closeSheet() })
                 .transition(.opacity)
         case .none:
             EmptyView()
@@ -704,5 +771,118 @@ struct PlayerView: View {
     private static func mmss(_ ms: Int) -> String {
         let total = max(0, ms) / 1000
         return String(format: "%d:%02d", total / 60, total % 60)
+    }
+}
+
+/// 音质选择浮层
+struct QualitySheet: View {
+    @Environment(\.colorScheme) private var scheme
+    @ObservedObject private var player = PlaybackService.shared
+    let onClose: () -> Void
+
+    private var p: Palette { Palette(scheme) }
+
+    // iOS 平台可用选项（排除了 iOS AVPlayer 不支持的 HTTP 裸 FLAC 原声）
+    private let qualityOptions: [(key: String, name: String, desc: String)] = [
+        ("exhigh", "极高", "320kbps 高保真 MP3/AAC"),
+        ("high", "高", "192kbps / 160kbps"),
+        ("standard", "标准", "128kbps / 64kbps")
+    ]
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            p.scrim
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onClose)
+
+            VStack(spacing: 0) {
+                Capsule()
+                    .fill(p.line)
+                    .frame(width: 36, height: 4)
+                    .padding(.top, Dim.s2)
+                    .padding(.bottom, Dim.s3)
+
+                HStack {
+                    Text("音质选择")
+                        .font(.system(size: Dim.fsBody, weight: .semibold))
+                        .foregroundStyle(p.text1)
+                    Spacer()
+                    Text("当前生效：\(player.qualityLabel(for: player.currentQuality))")
+                        .font(.system(size: Dim.fsCaption))
+                        .foregroundStyle(p.text2)
+                }
+                .padding(.horizontal, Dim.s4)
+                .padding(.bottom, Dim.s3)
+
+                VStack(spacing: Dim.s1) {
+                    ForEach(qualityOptions, id: \.key) { opt in
+                        let isAvailable = player.availableQualities.contains(opt.key)
+                        let isSelected = player.preferredQuality == opt.key
+
+                        Button {
+                            if isAvailable {
+                                player.setPreferredQuality(opt.key)
+                                onClose()
+                            } else {
+                                ToastCenter.shared.show("当前歌曲不支持此音质")
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(spacing: 8) {
+                                        if let uiImage = UIImage(named: "quality_\(opt.key)") {
+                                            Image(uiImage: uiImage)
+                                                .renderingMode(.template)
+                                                .resizable()
+                                                .scaledToFit()
+                                                .frame(width: 32, height: 20)
+                                                .foregroundStyle(isAvailable ? (isSelected ? p.accent : p.text2) : p.text2)
+                                                .opacity(isAvailable ? 1.0 : 0.4)
+                                        }
+                                        Text(opt.name)
+                                            .font(.system(size: Dim.fsBody, weight: isSelected ? .semibold : .medium))
+                                            .foregroundStyle(isAvailable ? (isSelected ? p.accent : p.text1) : p.text2.opacity(0.4))
+                                        if !isAvailable {
+                                            Text("不可用")
+                                                .font(.system(size: 10))
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(p.line.opacity(0.5))
+                                                .foregroundStyle(p.text2.opacity(0.6))
+                                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                                        }
+                                    }
+                                    Text(opt.desc)
+                                        .font(.system(size: Dim.fsCaption))
+                                        .foregroundStyle(isAvailable ? p.text2 : p.text2.opacity(0.3))
+                                }
+                                Spacer()
+                                if isSelected {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: Dim.fsBody, weight: .bold))
+                                        .foregroundStyle(p.accent)
+                                }
+                            }
+                            .padding(.vertical, Dim.s3)
+                            .padding(.horizontal, Dim.s4)
+                            .background(
+                                RoundedRectangle(cornerRadius: Dim.radiusMd)
+                                    .fill(isSelected ? p.accent.opacity(0.08) : Color.clear)
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, Dim.s2)
+                .padding(.bottom, Dim.s4)
+            }
+            .padding(.bottom, Dim.safeBottom)
+            .background(
+                RoundedRectangle(cornerRadius: Dim.radiusLg, style: .continuous)
+                    .fill(p.panel)
+            )
+        }
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
 }

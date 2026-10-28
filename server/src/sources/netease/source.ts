@@ -71,10 +71,57 @@ interface NeteaseSong {
 }
 
 interface SongUrlEntry {
+  /** data[0].code：404 = 无版权/无该音质（实测伴随 url:null 出现） */
+  code?: number;
   url?: string | null;
   freeTrialInfo?: unknown;
   level?: string;
   type?: string;
+  br?: number;
+  size?: number;
+}
+
+/** 成功获取的音频直链与音质规格 */
+interface PlayableUrlResult {
+  url: string;
+  level: string;
+  bitrate?: number;
+}
+
+/** 根据用户期望音质与 VIP 能力决定尝试档位列表，非 VIP 绝不请求 lossless */
+function computeNeteaseLevels(vip: boolean, quality?: string): string[] {
+  const q = String(quality ?? '').trim().toLowerCase();
+  if (q === 'standard') {
+    return ['standard'];
+  }
+  if (q === 'high') {
+    return ['standard', 'exhigh'];
+  }
+  if (q === 'exhigh') {
+    return ['exhigh', 'standard'];
+  }
+  if (q === 'lossless') {
+    return vip ? ['lossless', 'exhigh', 'standard'] : ['exhigh', 'standard'];
+  }
+  return vip ? ['lossless', 'exhigh', 'standard'] : ['exhigh', 'standard'];
+}
+
+/** 映射网易 level 到本项目通用音质档位 */
+function mapNeteaseQuality(rawLevel?: string, reqLevel?: string): string {
+  const norm = String(rawLevel ?? reqLevel ?? '').toLowerCase();
+  if (norm === 'lossless' || norm === 'hires' || norm === 'jymaster') {
+    return 'lossless';
+  }
+  if (norm === 'exhigh' || norm === 'higher') {
+    return 'exhigh';
+  }
+  if (norm === 'high') {
+    return 'high';
+  }
+  if (norm === 'standard') {
+    return 'standard';
+  }
+  return reqLevel === 'lossless' ? 'lossless' : reqLevel === 'exhigh' ? 'exhigh' : 'standard';
 }
 
 /** 失败结果。reason 归入 B 站同款枚举，客户端无需感知来源差异 */
@@ -94,12 +141,9 @@ function fail(reason: ResolveResult['reason'], message: string): ResolveResult {
 async function fetchPlayableUrl(
   songId: number,
   vip: boolean,
-  options?: { preferMp3?: boolean },
-): Promise<string | null> {
-  const levels = options?.preferMp3
-    ? ['exhigh', 'standard']
-    : (vip ? ['lossless', 'exhigh', 'standard'] : ['standard', 'exhigh']);
-  const cookie = currentNeteaseCookie();
+  options?: { preferMp3?: boolean; quality?: string },
+): Promise<PlayableUrlResult | null> {
+  const levels = computeNeteaseLevels(vip, options?.quality);
 
   for (const level of levels) {
     try {
@@ -108,12 +152,23 @@ async function fetchPlayableUrl(
       );
       const entries = (res?.body?.data as unknown as SongUrlEntry[] | undefined) ?? [];
       const entry = entries[0];
-      if (!entry) continue;
+      // data[0].code 404 = 「无版权/无该音质」，当档没有完整 URL，直接试下一档
+      if (!entry || entry.code === 404) continue;
       // freeTrialInfo 非空 = 该档位只有试听，往下一档试
       if (entry.freeTrialInfo) continue;
       if (!entry.url) continue;
-      return String(entry.url);
+      return {
+        url: String(entry.url),
+        level: mapNeteaseQuality(entry.level, level),
+        bitrate: typeof entry.br === 'number' ? entry.br : undefined,
+      };
     } catch (err) {
+      const status = (err as { status?: number })?.status;
+      // 301 = cookie 失效，继续逐级打也是同样的拒绝
+      if (status === 301) {
+        log.warn(`网易云凭证失效（301），跳过剩余音质档 songId=${songId}`);
+        break;
+      }
       log.warn(`取流失败 songId=${songId} level=${level}: ${(err as Error)?.message ?? err}`);
     }
   }
@@ -129,29 +184,35 @@ async function fetchPlayableUrl(
  */
 export async function resolveNeteaseSource(
   track: ResolveInput,
-  options?: { preferMp3?: boolean },
+  options?: { preferMp3?: boolean; quality?: string },
 ): Promise<ResolveResult> {
   const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const rawId = String(track.id ?? '').trim();
+  const availableQualities: string[] = ['standard', 'high', 'exhigh'];
+  if (vip && !options?.preferMp3) {
+    availableQualities.push('lossless');
+  }
 
   // ---- 直取快径：`ne_<songId>` 自带网易云 songId，直接调 songUrlV1（0 次搜索） ----
   if (rawId.startsWith('ne_')) {
     const directId = Number(rawId.slice(3));
     if (Number.isFinite(directId) && directId > 0) {
-      const directUrl = await fetchPlayableUrl(directId, vip, options);
-      if (directUrl) {
-        log.info(`网易云直取命中 ${directId} 「${track.name ?? ''}」 vip=${vip ? '是' : '否'}`);
+      const direct = await fetchPlayableUrl(directId, vip, options);
+      if (direct) {
+        log.info(`网易云直取命中 ${directId} 「${track.name ?? ''}」 quality=${direct.level} vip=${vip ? '是' : '否'}`);
         return {
           ok: true,
           reason: undefined,
           bvid: null,
-          sourceUrl: directUrl,
+          sourceUrl: direct.url,
           score: 100,
           matchedTitle: String(track.name ?? ''),
           matchedAuthor: (track.artists ?? []).join('/'),
           durationDiff: 0,
-          bandwidth: undefined,
+          bandwidth: direct.bitrate,
           source: 'netease',
+          currentQuality: direct.level,
+          availableQualities,
         };
       }
       log.debug(`网易云直取无完整流 songId=${directId}，回退按歌名搜索`);
@@ -172,6 +233,11 @@ export async function resolveNeteaseSource(
       cookie => netease.search({ keywords, type: 1, limit: 30, cookie }, neteaseRequest)
     );
     const body = res?.body as { code?: number; result?: { songs?: NeteaseSong[] } };
+    // 301 = 凭证失效。继续发搜索只会得到同样的拒绝（2026-10-27 报障：反复打上游拖慢启播），
+    // 立即失败交 B 站兜底，等设置页重新扫码。
+    if (body?.code === 301) {
+      return fail('rejected', '网易云登录已失效（301），请在设置页重新扫码');
+    }
     if (body?.code !== 200) {
       return fail('rejected', `搜索被拒（code=${body?.code ?? '?'}）`);
     }
@@ -216,8 +282,8 @@ export async function resolveNeteaseSource(
   }
 
   // ---- 取流（试听逐级降档）----
-  const url = await fetchPlayableUrl(best.id, vip, options);
-  if (!url) {
+  const playable = await fetchPlayableUrl(best.id, vip, options);
+  if (!playable) {
     return fail('no_stream', `匹配到「${best.name}」但拿不到完整音频（VIP 不足或歌曲无版权）`);
   }
 
@@ -243,19 +309,21 @@ export async function resolveNeteaseSource(
     ok: true,
     reason: undefined,
     bvid: null,
-    sourceUrl: url,
+    sourceUrl: playable.url,
     score: 100,
     matchedTitle: best.name,
     matchedAuthor: (best.artists ?? []).map(a => a?.name ?? '').join('/'),
     durationDiff: Number.isFinite(bestDurationDiff) ? Math.round(bestDurationDiff * 100) / 100 : undefined,
-    bandwidth: undefined,
+    bandwidth: playable.bitrate,
     source: 'netease',
     coverUrl,
+    currentQuality: playable.level,
+    availableQualities,
   };
 
   log.info(
     `网易云命中 ${best.id} 「${best.name}」 ${result.matchedAuthor}` +
-      ` 时长差=${result.durationDiff ?? 0}s vip=${vip ? '是' : '否'}`
+      ` quality=${result.currentQuality} 时长差=${result.durationDiff ?? 0}s vip=${vip ? '是' : '否'}`
   );
   return result;
 }

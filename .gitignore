@@ -91,3 +91,5 @@ suenmusic-data/
 .shots/
 hw/.ui-shots/
 hw/.ui-analysis/
+app/
+incoming/

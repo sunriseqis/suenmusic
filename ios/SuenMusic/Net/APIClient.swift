@@ -345,8 +345,12 @@ final class APIClient {
         try await get("/api/home")
     }
 
-    func resolve(trackId: String) async throws -> ResolveResponse {
-        try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)", query: ["platform": "ios"])
+    func resolve(trackId: String, quality: String? = nil) async throws -> ResolveResponse {
+        var query = ["platform": "ios"]
+        if let quality, !quality.isEmpty {
+            query["quality"] = quality
+        }
+        return try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)", query: query)
     }
 
     // MARK: 集合页

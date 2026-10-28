@@ -25,6 +25,7 @@ import { Track, artistLine, ResolveResponse, DirectLink } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
 import { Notifier } from '../common/Notifier';
+import { AppToast } from '../common/AppToast';
 import { APIClient } from './APIClient';
 
 const TAG = 'SuenMusic_Player';
@@ -88,6 +89,11 @@ export const K_PLAY_MODE = 'np_play_mode';
 /** 队列来源（T10 收官第 ④ 条）：setQueue 时由装载方写入（搜索/收藏/每日推荐/歌单/首页…），
  *  播放页 eyebrow 用「状态 · 来源」口径展示；队列内切歌不改写（web FullPlayer 同口径） */
 export const K_ORIGIN = 'np_origin';
+
+/** 音质控制常量 */
+export const K_PREFERRED_QUALITY = 'np_preferred_quality';
+export const K_CURRENT_QUALITY = 'np_current_quality';
+export const K_AVAILABLE_QUALITIES = 'np_available_qualities';
 
 export class MediaPlayerCore {
   private static instance: MediaPlayerCore | null = null;
@@ -177,6 +183,10 @@ export class MediaPlayerCore {
       if (typeof saved === 'string' && PLAY_MODES.indexOf(saved) >= 0) {
         this.playMode = saved;
       }
+      const savedQ = this.prefs.getSync('quality', 'lossless');
+      AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY, typeof savedQ === 'string' ? savedQ : 'lossless');
+      AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, 'lossless');
+      AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, ['standard', 'high', 'exhigh', 'lossless']);
     } catch (e) {
       hilog.warn(DOMAIN, TAG, '打开播放会话偏好失败: %{public}s', JSON.stringify(e));
     }
@@ -874,7 +884,9 @@ export class MediaPlayerCore {
     // 音源标签（用户 2026-10-23 裁定：显示 bilibili / 网易云 / 未匹配）
     this.refreshSourceLabel(track);
     // 切歌即重置持久化位置：否则自动接续（endOfStream）后恢复会拿旧位置 seek 新曲
-    this.persistPosition(0);
+    if (this.pendingSeekMs < 0) {
+      this.persistPosition(0);
+    }
 
     try {
       if (this.player === null) {
@@ -892,23 +904,27 @@ export class MediaPlayerCore {
         this.pendingFile = null;
       }
       this.currentUrl = url;
-      // 直链优先：设备直接向 CDN 取流，服务端只做解析（省上行带宽、少一跳）。
-      // 失败一律回退代理：代理是兜命通道，永不删。
-      const direct = this.proxyFallbackUsed ? null : await this.resolveDirect(track);
-      let usedDirect = false;
-      if (direct !== null) {
-        try {
-          const ms = media.createMediaSourceWithUrl(direct.url, direct.headers);
-          await p.setMediaSource(ms);
-          usedDirect = true;
-          hilog.info(DOMAIN, TAG, '直链装载 track=%{public}s exp=%{public}dms',
-            track.id, direct.expiresAt - Date.now());
-        } catch (e) {
-          hilog.warn(DOMAIN, TAG, '直链装载失败，回退代理: %{public}s', JSON.stringify(e));
-        }
-      }
-      if (!usedDirect) {
+      // 本地有缓存直接拿本地缓存（fd://），不管音质，秒播零流量
+      if (url.startsWith('fd://')) {
         p.url = url;
+      } else {
+        // 没缓存的带音质请求找服务端拿直链，服务端下发对应链接，播放器启播
+        const direct = this.proxyFallbackUsed ? null : await this.resolveDirect(track);
+        let usedDirect = false;
+        if (direct !== null) {
+          try {
+            const ms = media.createMediaSourceWithUrl(direct.url, direct.headers);
+            await p.setMediaSource(ms);
+            usedDirect = true;
+            hilog.info(DOMAIN, TAG, '直链装载 track=%{public}s exp=%{public}dms',
+              track.id, direct.expiresAt - Date.now());
+          } catch (e) {
+            hilog.warn(DOMAIN, TAG, '直链装载失败，回退代理: %{public}s', JSON.stringify(e));
+          }
+        }
+        if (!usedDirect) {
+          p.url = url;
+        }
       }
     } catch (e) {
       this.fail('赋流地址', e);
@@ -929,13 +945,20 @@ export class MediaPlayerCore {
     const id = track.id;
     // 切歌先清空：不拿上一首的音源冒充这一首（空 = 未匹配）
     AppStorage.setOrCreate<string>(K_SOURCE, '');
-    APIClient.shared().resolve(id)
+    const prefQ = AppStorage.get<string>(K_PREFERRED_QUALITY) ?? 'lossless';
+    APIClient.shared().resolve(id, prefQ)
       .then((r: ResolveResponse): void => {
         const cur = this.current;
         if (cur === null || cur.id !== id) {
           return;
         }
         AppStorage.setOrCreate<string>(K_SOURCE, r.ok ? r.source : '');
+        if (r.currentQuality !== undefined) {
+          AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, r.currentQuality);
+        }
+        if (r.availableQualities !== undefined) {
+          AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, r.availableQualities);
+        }
       })
       .catch((): void => {
         const cur = this.current;
@@ -947,48 +970,67 @@ export class MediaPlayerCore {
   }
 
   /**
-   * 统一的失败出口。
-   *
-   * 关键行为对齐 Web 端（`player.ts` 的 handlePlaybackError）：
-   *   · 单首失败**不是**致命错误 —— 记一次失败、跳下一首；
-   *   · 连续失败达到上限才停下并给用户明确提示（否则整条队列会被瞬间跳空）；
-   *   · 界面只显示**人话**，错误码只进日志。
-   *
-   * 触发场景举例（真机实测）：服务端 `/api/resolve` 对某些冷门曲目返回
-   * `below_threshold`（B 站搜不到，置信度 0 分）→ `/api/stream` 回 503 →
-   * AVPlayer 报 5411004 "IO Network Unavailable"。对用户来说这只是"这首没有音源"。
-   */
-  /**
    * 取当前曲的直链（服务端 `/api/resolve` 下发）。
    *
    * 约束：**最多等 1.2 秒**（起播不能被解析拖住）——超时直接回 proxy；
    * 结果按 id 缓存，同一首只问一次；服务端关掉直链时返回 null。
    */
   private async resolveDirect(track: Track): Promise<DirectLink | null> {
+    const prefQ = AppStorage.get<string>(K_PREFERRED_QUALITY) ?? 'lossless';
     const cached = this.direct;
-    if (cached !== null && cached.id === track.id && cached.expiresAt > Date.now() + 60_000) {
+    if (cached !== null && cached.id === track.id && cached.quality === prefQ && cached.expiresAt > Date.now() + 60_000) {
       return cached;
     }
     try {
       const r = await Promise.race([
-        APIClient.shared().resolve(track.id),
+        APIClient.shared().resolve(track.id, prefQ),
         new Promise<ResolveResponse | null>((resolve) => {
-          // 800ms：服务端 resolve 命中缓存通常 <50ms；不能让解析拖慢起播
-          setTimeout(() => { resolve(null); }, 800);
+          // 3000ms：冷解析或跨源搜索需 600-1200ms，放宽超时避免过早放弃直链退化为代理
+          setTimeout(() => { resolve(null); }, 3000);
         }),
       ]);
       if (r === null || r.ok !== true || r.directUrl === undefined || r.directUrl.length === 0) {
         this.direct = null;
         return null;
       }
+      if (r.currentQuality !== undefined) {
+        AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, r.currentQuality);
+      }
+      if (r.availableQualities !== undefined) {
+        AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, r.availableQualities);
+      }
       const expiresAt = Date.now() + Math.max(0, (r.directExpiresInSec ?? 0)) * 1000;
-      const item: DirectLink = { id: track.id, url: r.directUrl, headers: r.directHeaders ?? {}, expiresAt };
+      const item: DirectLink = { id: track.id, url: r.directUrl, headers: r.directHeaders ?? {}, expiresAt, quality: prefQ };
       this.direct = item;
       return item;
     } catch (e) {
       hilog.warn(DOMAIN, TAG, '直链解析失败，回退代理: %{public}s', JSON.stringify(e));
       this.direct = null;
       return null;
+    }
+  }
+
+  /** 切换偏好音质（下首生效） */
+  setPreferredQuality(quality: string): void {
+    const cur = AppStorage.get<string>(K_PREFERRED_QUALITY) ?? 'lossless';
+    if (cur === quality) {
+      return;
+    }
+    AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY, quality);
+    if (this.prefs !== null) {
+      this.prefs.putSync('quality', quality);
+      this.prefs.flush();
+    }
+    AppToast.show(`已切换至「${this.qualityLabel(quality)}」，下一首生效`);
+  }
+
+  qualityLabel(level: string): string {
+    switch (level) {
+      case 'lossless': return '原声';
+      case 'exhigh': return '极高';
+      case 'high': return '高';
+      case 'standard': return '标准';
+      default: return level;
     }
   }
 
@@ -1273,7 +1315,9 @@ export class MediaPlayerCore {
     AppStorage.setOrCreate<string>(K_TRACKID, track.id);
     AppStorage.setOrCreate<number>(K_INDEX, this.index);
     AppStorage.setOrCreate<number>(K_DUR, track.dt);
-    AppStorage.setOrCreate<number>(K_POS, 0);
+    if (this.pendingSeekMs < 0) {
+      AppStorage.setOrCreate<number>(K_POS, 0);
+    }
     AppStorage.setOrCreate<boolean>(K_HAS_TRACK, true);
 
     const meta: MusicMetadataParam = {

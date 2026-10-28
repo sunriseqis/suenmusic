@@ -61,6 +61,25 @@ final class AudioEngine: NSObject {
     private let player = AVQueuePlayer()
     private var timeObserver: Any?
 
+    struct DirectMediaLink {
+        let url: String
+        let headers: [String: String]?
+        let expiresAt: Date
+    }
+    private var directLinks: [String: DirectMediaLink] = [:]
+
+    func setDirect(trackId: String, url: String?, headers: [String: String]?, expiresInSec: Int = 3600) {
+        if let url, !url.isEmpty {
+            directLinks[trackId] = DirectMediaLink(
+                url: url,
+                headers: headers,
+                expiresAt: Date().addingTimeInterval(Double(max(60, expiresInSec)))
+            )
+        } else {
+            directLinks.removeValue(forKey: trackId)
+        }
+    }
+
     /// KVO token **必须持有**。
     ///
     /// `observe(_:options:changeHandler:)` 返回的 `NSKeyValueObservation` 一旦
@@ -255,12 +274,6 @@ final class AudioEngine: NSObject {
         self.baseUrl = normalizedBase(baseUrl)
         self.sessionToken = token
         logicalIndex = startIndex
-        // ⚠️ 必须配置本地代理（2026-10-25 修的断线）：
-        // 旧仓 2026-09-26 实测过「服务端对带 Range 的请求按码率限速（下限 40KB/s），
-        // AVFoundation 在 40KB/s 下打不开 B 站 fMP4，永远停在 EvaluatingBufferingRate」。
-        // 修法是让播放**走本地代理**，而代理的首次整卡拉取不带 Range（服务端对无 Range 的全量下载不节流）。
-        // 这里一直漏了 configure → 代理 upstreamBase 为空 → 播放全程直连 → 被限速 → 点了不出声。
-        LocalStreamProxy.shared.configure(base: self.baseUrl, token: token)
 
         suppressTransitionEvent = true
         defer { suppressTransitionEvent = false }
@@ -317,31 +330,21 @@ final class AudioEngine: NSObject {
                     player.remove(stale)
                 }
             }
-            var lastInserted = current
-            for (offset, track) in tracks.enumerated() {
-                let item = makeItem(for: track)
-                itemIndex[ObjectIdentifier(item)] = startIndex + offset
-                player.insert(item, after: lastInserted)
-                lastInserted = item
-            }
+            insertedThrough = startIndex - 1
+            ensureLookahead()
             // 对齐 Android：tailOnly 路径不动播放状态（不 seek、不 play）
             lastCurrentItem = player.currentItem
             return
         }
 
-        // 整队列重发：全量重建。player 队列装载 [startIndex, 队尾) 全部条目，
+        // 整队列重发：全量重建。player 队列装载 [startIndex, 队尾) 必要条目，
         // 由 AVQueuePlayer 原生接续，锁屏熄屏不依赖 JS 唤醒。
         self.tracks = effectiveTracks
         player.removeAllItems()
         itemIndex.removeAll()
         let start = min(max(0, startIndex), max(0, effectiveTracks.count - 1))
-        var previous: AVPlayerItem?
-        for i in start..<effectiveTracks.count {
-            let item = makeItem(for: effectiveTracks[i])
-            itemIndex[ObjectIdentifier(item)] = i
-            player.insert(item, after: previous)
-            previous = item
-        }
+        insertedThrough = start - 1
+        ensureLookahead()
         if startPositionMs > 0 {
             player.seek(to: CMTime(seconds: Double(startPositionMs) / 1000.0, preferredTimescale: 600))
         } else {
@@ -856,7 +859,7 @@ final class AudioEngine: NSObject {
     }
 
     /// 下一首的逻辑下标；nil = 到头且不允许回绕
-    private func nextLogicalIndex() -> Int? {
+    func nextLogicalIndex() -> Int? {
         guard !tracks.isEmpty else { return nil }
         if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
         let pos = orderPosition
@@ -874,7 +877,7 @@ final class AudioEngine: NSObject {
     }
 
     /// 上一首的逻辑下标；nil = 到头部且不允许回绕
-    private func previousLogicalIndex() -> Int? {
+    func previousLogicalIndex() -> Int? {
         guard !tracks.isEmpty else { return nil }
         if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
         let pos = orderPosition
@@ -957,11 +960,29 @@ final class AudioEngine: NSObject {
     }
 
     private func makeItem(for track: SuenTrack) -> AVPlayerItem {
-        let raw = streamUrl(track)
+        let raw: String
+        var headers: [String: String]? = nil
+
+        // 优先 CDN 直链（对齐鸿蒙端直连体系，零服务端带宽）
+        if let direct = directLinks[track.id], direct.expiresAt > Date() {
+            raw = direct.url
+            headers = direct.headers
+            NSLog("%@", "[DirectCDN] makeItem id=\(track.id) directUrl=\(raw.prefix(200))")
+        } else {
+            raw = directStreamUrl(track.id)
+            NSLog("%@", "[StreamUrl] makeItem id=\(track.id) proxyUrl=\(raw.prefix(200))")
+        }
+
         let url = URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 }
             ?? URL(string: "suenmusic://invalid-stream/\(track.id)")!
-        NSLog("%@", "[StreamUrl] makeItem id=\(track.id) url=\(raw.prefix(300))")
-        let item = AVPlayerItem(asset: AVURLAsset(url: url))
+
+        var assetOptions: [String: Any] = [:]
+        if let headers = headers, !headers.isEmpty {
+            assetOptions["AVURLAssetHTTPHeaderFieldsKey"] = headers
+        }
+        let asset = AVURLAsset(url: url, options: assetOptions)
+        let item = AVPlayerItem(asset: asset)
+
         // ⚠️ 2026-10-25：**必须监听 item.status**，不能只靠进度 tick 里的失败检测。
         // 服务端 503（曲目真没音源）时 item 会立刻 failed，而吃不上饭的播放器**根本没有时间轴** ——
         // 周期时间观察者永不回调 → 失败传不出去 → 上层「无音源」三分支（停住/跳过/通知）全都不会执行。
@@ -980,20 +1001,6 @@ final class AudioEngine: NSObject {
         }
         itemObservations.append(obs)
         return item
-    }
-
-    /// 组装流地址：本地回环代理优先（本地 4GB 磁盘 LRU 缓存与断点续拉），服务端代理兜底
-    private func streamUrl(_ track: SuenTrack) -> String {
-        // 2026-10-25 v4（实测：列表逐首点，起播 10s 左右）：
-        //   直连时 AVFoundation 会连发多次 Range 请求，而冷曲目每次都要服务端现场去上游取（1-2s/次），
-        //   攒到 9-10s item 才 ready。日志证据：playWhenReady 后 item=unknown 持续 9.8s。
-        //   修法：走**本地代理**（它按整首顺序预拉，一次全速），AVPlayer 的区间请求全部从本地磁盘秒回。
-        //   代理的首次整拉不带 Range → 服务端不限速（旧仓 §九-10），所以又快又对。
-        _ = LocalStreamProxy.shared.entry(trackId: track.id)   // 立刻开始后台整首预拉
-        if let local = LocalStreamProxy.shared.localURL(trackId: track.id) {
-            return local
-        }
-        return directStreamUrl(track.id)
     }
 
     /// 直连上游（对齐 Android SuenAudio.streamUrlFor，防御双斜杠）

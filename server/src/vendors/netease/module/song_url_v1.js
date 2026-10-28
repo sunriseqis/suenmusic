@@ -8,10 +8,11 @@ const logger = require('../util/logger.js')
 const createOption = require('../util/option.js')
 const { cookieToJson } = require('../util/index.js')
 module.exports = async (query, request) => {
+  const isLossless = query.level === 'lossless' || query.level === 'hires'
   const data = {
     ids: '[' + query.id + ']',
     level: query.level,
-    encodeType: 'flac',
+    encodeType: query.encodeType || (isLossless ? 'flac' : 'mp3'),
   }
   const options = createOption(query, 'xeapi')
   if (data.level == 'sky') {
