@@ -62,6 +62,8 @@ xcodebuild -project App.xcodeproj -target App -configuration Debug -sdk iphonesi
 | **P3** | 全量切 mpv，删 AVPlayer 路径（不做双引擎） | 无 AVPlayer 残留 |
 | **P4** | 回归：FLAC / OGG / B 站 fMP4 / 酷狗 mp3 / 后台播放 / 锁屏控制 / 缓存本地文件 | 逐项实听验过 |
 | **P5** | 放开 iOS lossless（去掉 `preferMp3` 对无损的屏蔽）+ 解析 `backupUrl` 多镜像 | iOS 可选无损；单节点故障自动换镜像 |
+| **P7** | **真机待验批次**：第七节 checklist 里模拟器验不了的全部条目（锁屏/灵动岛渲染、10s 停滞自愈、媒体服务重置重建、AirPlay、耳机线控、后台播放） | 真机上逐条实听实点，日志佐证 |
+| **P6** | **MVP 内核精简**：自建 audio-only 的 ffmpeg + libmpv，替换 MPVKit 全量包（详见[第九节](#九mvp-内核精简p6独立阶段)） | 四种格式仍全可播 + Release/arm64 增量从 +32M 压到 ≤ +12M |
 
 ## 五、包体积与「只要音频」
 
@@ -143,6 +145,66 @@ Live Activity 与 Widget Extension 已在 `60ecdcd` 彻底移除，**灵动岛�
 - [ ] 后台播放（锁屏后继续出声）
 - [ ] 缓冲态有 UI 反馈（mpv `paused-for-cache` → loading）
 
+## 十、P7 · 真机待验批次
+
+模拟器验不了、必须真机的部分（第七节 checklist 的剩余项）。**在真机过完之前，不认为 P2 的系统集成已完成。**
+
+| # | 待验项 | 为什么模拟器验不了 |
+| :-- | :-- | :-- |
+| 1 | 锁屏显示元数据 + 进度推进 | 模拟器不渲染锁屏媒体控件 |
+| 2 | 灵动岛媒体卡片与按钮 | 同上 |
+| 3 | `playbackState` 图标翻转（播放/暂停/缓冲） | 同上；且 buffering 用 `playbackState=.playing + rate=0` 是权宜，真机可能画成播放态 |
+| 4 | seek 后进度不漂 | 需要真实拖动 + 锁屏对照 |
+| 5 | 10s 停滞自愈 | 要造断流（切飞行模式 / 换劣质 CDN） |
+| 6 | 媒体服务重置后重建 MpvPlayer | 模拟器难稳定触发 Reset Media Services |
+| 7 | AirPlay 路由切换不断音 | 模拟器无 AirPlay |
+| 8 | 耳机线控 / AirPods 双击 | 模拟器无实体键 |
+| 9 | 拔耳机自动暂停、来电打断恢复策略 | 同上 |
+| 10 | 后台播放（锁屏后继续出声） | 需要真机后台调度 |
+
+## 九、MVP 内核精简（P6，独立阶段）
+
+### 为什么要做
+
+MPVKit 是**预编译全量 ffmpeg**：视频解码器、滤镜链、libplacebo/MoltenVK/Vulkan、字体渲染、字幕渲染都在里面，
+而我们是纯音频 App，一个都用不到。实测 Release/arm64 从 9M 涨到 41M（**+32M**）。
+MVP（最小可用内核）的目标：**只留能播四类音频格式的那一小部分**，把增量压到 ≤ +12M。
+
+### MVP 能力清单（少一个都不行）
+
+| 类别 | 需要保留 |
+| :-- | :-- |
+| decoder | `mp3`, `mp3float`, `aac`, `flac`, `vorbis`, `opus`, `alac`, `pcm_s16le` |
+| demuxer | `mp3`, `mov`（**B 站 m4s 靠它**）、`flac`, `ogg`, `wav`, `aac` |
+| parser | `mpegaudio`, `aac`, `flac`, `vorbis`, `opus` |
+| protocol | `http`, `https`, `file`, `tcp`（https 需 TLS 库：gnutls / openssl / mbedtls 选一） |
+| 关闭 | 全部视频编解码与滤镜、`--disable-programs --disable-doc --disable-postproc --disable-avdevice --disable-swscale`、encoders/muxers |
+
+libmpv 侧同样裁：`--disable-video --disable-gl --disable-caca --disable-libplacebo`，
+**但绝不能关掉 demux 能力**（fmp4/m4s 靠 ffmpeg 的 mov demuxer）。
+
+### 构建步骤（在 Mac 上）
+
+1. 准备 iOS 交叉编译环境（`iPhoneOS arm64` + `iPhoneSimulator x86_64/arm64` 两套）
+2. 编 ffmpeg：`--enable-cross-compile --target-os=darwin --enable-static --disable-shared` + 上面的白名单
+3. 编 libmpv：用第 2 步产出的 `.pc` 文件，`--enable-static --disable-shared`
+4. 打成 `xcframework`，以**本地 SPM 包 / binaryTarget** 形式接入
+5. 生成器里把 `MPVKIT_URL` 换成本地包路径（`scripts/gen-ios-project.mjs:32-34`）
+
+### 风险
+
+1. **编译链是最大风险**：ffmpeg + mpv 的 iOS 交叉编译要反复试，可能耗掉一整天
+2. TLS 库会吃掉一部分体积收益 —— 若要极致可以只留 https 单协议
+3. 以后升级 mpv / ffmpeg 要自己重编，不能再 `Package.resolved` 一拉了事
+4. **精简过头的代价很高**：少留一个 demuxer 就是某种格式播不了，必须靠回归清单兜住
+
+### 验收
+
+- [ ] 酷狗 mp3 / 酷狗 flac / 酷狗 ogg / B 站 m4s 四种全部出声有进度
+- [ ] Release/arm64 体积增量 ≤ +12M（目标；全量基线是 +32M）
+- [ ] `nm` 里仍有 `mpv_` 符号（防 wholemodule DCE）
+- [ ] 后台播放、锁屏控制不因裁剪而退化
+
 ## 附：构建机环境残留（2026-10-28，有意保留）
 
 Mac（`suenqi@suenqideimac.lan`）上为拉 MPVKit 留下的两样，**保留不清**——后续 P1/P2 还要反复 resolve：
@@ -166,9 +228,15 @@ Mac（`suenqi@suenqideimac.lan`）上为拉 MPVKit 留下的两样，**保留不
 
 ## 八、当前进度
 
-- [ ] P0 生成器 SPM + MPVKit 编译通过（进行中）
-- [ ] P1 MpvEngine 起播
-- [ ] P2 接口对齐
+- [x] P0 生成器 SPM + MPVKit 编译通过（`nm` 155 个 mpv_ 符号，Release 有 DCE 陷阱已记录）
+- [x] P1 MpvEngine 起播（B 站 m4s 出声有进度；mpv 头部坑：Referer 必须用 `referrer` 专用选项）
+- [x] P2 接口对齐 + 系统集成收口（playbackState / time-pos 1s 节流 / 缓冲态 UI / 10s 停滞看门狗 / 媒体服务重置重建）
+- [x] P3 移除 AVPlayer（AudioEngine 1588 → 1120 行，AVPlayer 只剩注释）
+- [x] P4 回归（mp3 / flac / ogg / m4s 均实测出声；flac 用曲目自己的音频验过内容正确）
+- [x] P5 放开 iOS lossless + backupUrls 下发（服务端已重启，晴天实测 .flac 并出声）
+- [ ] **P6 MVP 内核精简（音频专用 ffmpeg + libmpv）** ← 下一步
+- [ ] **P7 真机待验批次**（锁屏/灵动岛/自愈/重置/AirPlay/线控/后台，见第十节）
+- [ ] backupUrls 客户端侧换镜像（服务端已下发，iOS 尚未消费）
 - [ ] P3 移除 AVPlayer
 - [ ] P4 回归
 - [ ] P5 放开无损 + 多镜像
