@@ -1,74 +1,74 @@
-# hw/ —— HarmonyOS NEXT (鸿蒙纯血) 原生客户端工程
+# hw/ —— HarmonyOS NEXT (鸿蒙纯血) 全原生客户端工程
 
-本目录是 **SuenMusic 鸿蒙 NEXT 客户端原生工程**（基于 HarmonyOS NEXT / OpenHarmony API 11/12+ Stage 模型，ArkTS / ArkUI 体系构建）。
+本目录是 **SuenMusic 鸿蒙全原生工程**（基于 HarmonyOS NEXT / OpenHarmony API 11/12+ Stage 模型，100% 采用 ArkTS / ArkUI 纯原生渲染，零 WebView 依赖）。
 
-## 这里放什么
+## 架构定位
 
-DevEco Studio 维护的鸿蒙原生工程。构建与运行流水线：
+- **纯原生 UI**：基于 ArkUI 声明式范式重构，主页面入口为 `pages/NativeRoot`，无任何 Web 容器与混合桥接；
+- **原生音频播放核心**：基于系统 `@ohos.multimedia.media` 的 `AVPlayer` 构建 `MediaPlayerCore`，支持直连 CDN 流、音质动态切换、本地 `fd://` 零拷贝极速起播；
+- **桌面服务卡片**：支持 ArkTS Form 架构的 2x2 与 2x4 桌面常驻服务卡片，实时展示曲目、封面、歌词进度与交互式播控；
+- **系统 AVSession 播控**：集成鸿蒙系统播控中心（控制中心、锁屏播控、蓝牙外设联动）。
 
-```
-suenmusic-server/web/（Vue 源码） → vite build → web/dist/ → npm run hw:sync → hw/.../rawfile/ → DevEco Studio / Hvigor → HAP
-```
+---
 
-## 工程结构与关键文件
+## 目录结构
 
 ```
 hw/
-├── build-profile.json5         # 工程级构建配置（API 11/12 Stage 模型，compileSdkVersion: 26.0.0）
+├── build-profile.json5         # 工程级构建配置（API 11/12 Stage 模型）
 ├── hvigorfile.ts               # Hvigor 构建系统入口
-├── oh-package.json5            # 工程级依赖清单 (modelVersion: 5.0.0)
-├── README.md                   # 本说明文件
-├── AppScope/                   # 全局元数据（包名、图标、全局配置）
-│   ├── app.json5               # bundleName: com.suenmusic.app，版本注入节点
-│   └── resources/              # 全局多语言与应用母版图标
-└── entry/                      # 主入口模块 (HAP)
-    ├── build-profile.json5     # 模块构建配置
-    ├── hvigorfile.ts           # 模块构建脚本
-    ├── oh-package.json5        # 模块依赖清单
+├── oh-package.json5            # 工程级依赖清单
+├── AppScope/                   # 全局元数据（包名 com.suenmusic.app、图标、版本号）
+└── entry/                      # 主应用模块 (HAP)
     └── src/main/
-        ├── module.json5        # 模块配置（EntryAbility、网络权限 INTERNET、后台音频权限 KEEP_BACKGROUND_RUNNING、backgroundModes: audioPlayback）
-        ├── resources/          # 鸿蒙资源目录
-        │   ├── base/element/   # 字符常量 string.json、启动色 color.json
-        │   ├── base/media/     # 应用母版图标 app_icon.png
-        │   ├── base/profile/   # 页面路由清单 main_pages.json
-        │   └── rawfile/        # Web 编译产物存放目录（通过 npm run hw:sync 同步，已被 .gitignore 忽略）
-        └── ets/                # ArkTS 源码
+        ├── module.json5        # 权限声明（INTERNET、KEEP_BACKGROUND_RUNNING、audioPlayback）
+        ├── resources/          # 原生资源目录（基础色板、矢量图标、音质 SVG、多语言）
+        └── ets/
             ├── entryability/
-            │   └── EntryAbility.ets  # 应用生命周期、沉浸式全屏布局、状态栏样式、安全区高度计算
-            └── pages/
-                └── Index.ets         # 主页面：ArkWeb 容器、虚拟域名本地拦截、SPA 路由回退、媒体无手势连播、JSBridge 桥接
+            │   └── EntryAbility.ets   # 应用入口生命周期、沉浸式窗口与深浅主题初始化
+            ├── core/
+            │   ├── MediaPlayerCore.ets # 原生播放引擎核心（AVPlayer / 直连 CDN / 缓存 / 熔断）
+            │   ├── APIClient.ets       # RESTful API 客户端（单例 / 超时熔断 / 令牌自动续签）
+            │   └── Models.ets          # 数据模型与音质枚举
+            ├── pages/
+            │   ├── NativeRoot.ets      # 根路由与底部 Tab 容器（无过度切页动效，瞬时切换）
+            │   ├── PlayerPage.ets      # 完整沉浸式播放页（封面光晕/歌词 Sheet/音质切换弹层）
+            │   ├── HomePage.ets        # 发现主页（AI 专属歌单/每日推荐/新碟上架）
+            │   ├── SearchPage.ets      # 多源聚合搜索页
+            │   ├── FavoritesPage.ets   # 收藏列表页
+            │   └── SettingsPage.ets    # 设置与多服务器管理页
+            ├── form/                   # 桌面服务卡片组件与 FormExtensionAbility
+            └── common/                 # 品牌主题 Tokens、自绘弹窗、图标、工具类
 ```
 
-## 移植核心攻坚与踩坑解决方案（对齐 suenmoney 经验）
+---
 
-1. **ArkWeb 离线加载白屏与 CORS 阻断解决**：
-   - **痛点**：若使用 `src: $rawfile('index.html')`，页面运行在 `resource://rawfile/` 协议下，ArkWeb 内核对 `<script type="module">` 会执行严格的 CORS 阻断，且绝对路径 `/assets/xxx.js` 会解析到系统根目录导致 404 资源丢失。
-   - **方案**：将入口设为虚拟域名 `http://localhost/index.html`（与 Capacitor 标准对齐），在 `Index.ets` 的 `onInterceptRequest` 中拦截 `http://localhost/` 请求，直接从 `rawfile` 读取流并封装标准 `WebResourceResponse`（带完整 MIME 类型），同时引入 SPA 路由回退（无后缀请求统一返回 `index.html`）。
+## 核心技术与踩坑沉淀
 
-2. **音频连播与手势阻断**：
-   - 配置 `mediaPlayGestureAccess(false)`，允许切歌和播放列表轮转时由脚本自动连播音频，避免每次换歌都需要触发物理手势。
-   - 在 `module.json5` 声明 `ohos.permission.KEEP_BACKGROUND_RUNNING` 与 `backgroundModes: ["audioPlayback"]`，保障后台播放能力。
+1. **纯 CDN 直连流与音质切换**：
+   - 使用 `media.createMediaSourceWithUrl(direct.url, direct.headers)` 直连上游 CDN（携带防盗链 Referer 等 Header），彻底绕过服务端中间代理带宽；
+   - 音质切换严格遵守「下一首生效」准则，用户在播放页切换音质只修改全局期望，绝不原地打断正在播放的媒体流；
+   - 本地缓存绝对优先：当 `fd://` 本地沙箱缓存命中时，绕过网络与音质决议，直接秒播。
 
-3. **沉浸式与安全区自适应**：
-   - `EntryAbility.ets` 监听系统状态栏避让区与底部手势导航条避让区高度；
-   - `Index.ets` 在 `onPageEnd` 时动态向前端注入 `--safe-top` 和 `--safe-bottom` CSS 变量，确保贴合打孔屏、折叠屏与刘海屏。
+2. **静态门禁检查 (0E/4W 基线)**：
+   - 鸿蒙工程设置有严格的 ArkTS 静态语法门禁脚本（`scripts/check-arkts.mjs`）；
+   - 代码提交前需确保通过 `npm run hw:check`（维持 0 Error / 4 Warnings 的基线，禁止产生任何新 warning）。
 
-4. **Hvigor 6.26+ 与 API 26 Schema 合规**：
-   - 补齐 `AppScope/app.json5` 避免 `app.json5 file not found`；
-   - 顶层与各模块统一声明 `modelVersion: "5.0.0"`；
-   - `build-profile.json5` 中收敛 `compileSdkVersion` 与 `compatibleSdkVersion` 至规范的字符串形式 `"26.0.0"`。
+3. **桌面卡片深浅色同步**：
+   - 桌面服务卡片由系统的 FormRender 进程绘制，无法直接借用 App 内存中的动态色；
+   - 通过在卡片推送 payload 中注入 `suen_dark`，配合色板字面量转换与 `AVSessionManager.refreshCard()` 广播，确保卡片与 App 主题精准对齐。
 
-## 本地开发与构建指南
+---
 
-### 1. 同步 Web 最新构建产物
-在 `suenmusic-mobile` 仓库根目录下执行：
+## 开发与构建
+
 ```bash
-npm run hw:sync
-```
-该命令会自动编译同级 `suenmusic-server/web`（若未构建）并将静态文件同步至 `hw/entry/src/main/resources/rawfile/`。
+# 1. 静态语法门禁自检
+npm run hw:check
 
-### 2. 使用 DevEco Studio 运行或打包
-1. 打开 **DevEco Studio**（推荐 4.1 Release / 5.0 Release 或更高版本，兼容 HarmonyOS NEXT）；
-2. 选择 **File → Open...**，选择本项目下的 `hw` 目录导入；
-3. 连接 HarmonyOS NEXT 真机或启动模拟器，点击 **Run 'entry'** (Shift + F10) 即可运行；
-4. 构建未签名 HAP：菜单选择 **Build → Build Hap(s)/APP(s) → Build Hap(s)** 即可产出安装包。
+# 2. 命令行打包未签名 HAP（产物：output/suenmusic-<版本>.hap）
+npm run hw:build
+
+# 3. DevEco Studio 导入与调试
+# 直接在 DevEco Studio 中打开 hw/ 目录，连接 HarmonyOS NEXT 模拟器或真机即可运行调试。
+```

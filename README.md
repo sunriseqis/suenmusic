@@ -1,94 +1,122 @@
 # SuenMusic
 
-自托管音乐服务器 + Web（PC 端客户端 / 管理面板）+ 鸿蒙原生客户端 + iOS 原生客户端 + fnOS 套件。
+自托管音乐服务器 + Web（PC 端客户端 / 管理面板）+ 鸿蒙原生客户端 + iOS 原生客户端 + 飞牛 fnOS 套件。
 
 ## 平台矩阵
 
 | 端 | 状态 | 说明 |
 |---|---|---|
-| 服务端 `server/` | ✅ 主线 | 单一真相源；多音源解析（酷狗 VIP / 网易云 / B 站）、直链与流代理、多用户、AI 推荐 |
-| Web `web/` | ✅ 主线 | **PC 端唯一客户端 + 管理面板**（同一份 SPA） |
-| 鸿蒙 `hw/` | ✅ 主线 | ArkUI 原生客户端（`pages/NativeRoot`）+ 2x2/2x4 桌面卡片，无 WebView |
-| iOS `ios/SuenMusic/` | ✅ 主线 | SwiftUI 原生客户端 + 灵动岛 Live Activity，已对齐鸿蒙端（v2.0.0） |
-| Android `android/` | ❄️ **已封库** | 2026-10-21 起不再更新/构建/分发/上架，见 `android/README.md` |
-| fnOS `fn/` | ✅ 主线 | 服务端 + Web + Node 22 运行时自包含打进 `.fpk`，面向飞牛应用中心 |
-单仓（monorepo），Node 22 起步，无原生编译依赖的服务端（`node:sqlite`）。
+| 服务端 `server/` | ✅ 主线 | 单一真相源；多音源解析（酷狗 VIP 自动升级 / 网易云 / B 站）、三级会员熔断、CDN 直链下发、多用户、AI 推荐 |
+| Web `web/` | ✅ 主线 | **PC 端唯一客户端 + 完整管理面板**（基于 Vue 3 + Vite 的高保真哑光质感 SPA） |
+| 鸿蒙 `hw/` | ✅ 主线 | **全原生 ArkUI 客户端**（`pages/NativeRoot`）+ 原生 `MediaPlayerCore` + 2x2/2x4 桌面卡片（ArkTS Form）+ AVSession 播控，无 WebView |
+| iOS `ios/` | ✅ 主线 | **纯原生 SwiftUI 客户端**（`ios/SuenMusic/`）+ 单一 Target 架构 + 系统原生 Now Playing（灵动岛 / 锁屏 / 控制中心 / AirPods / CarPlay 深度集成） |
+| fnOS `fn/` | ✅ 主线 | 服务端 + Web + Node 22 运行时自包含打进 `.fpk`，面向飞牛应用中心一键安装与 systemd 守护运行 |
+| Android `android/` | ❄️ **已封库** | 2026-10-21 起不再维护/更新/构建/分发，归档留底见 `android/README.md` |
 
-## 结构
+单仓（Monorepo）管理，基于 Node 22 运行时，服务端采用零原生编译依赖（内置 `node:sqlite`）。
+
+---
+
+## 目录结构
 
 ```
-server/    Fastify 服务端：node:sqlite 数据库、账号体系、流媒体代理、AI 接口
-web/       Vue 3 + Vite 前端（各端共用同一份 SPA）
-android/   ❄️ 已封库（v1.5 归档，不再更新）：Capacitor 壳 + media3 + AppWidget
-ios/       ios/SuenMusic = SwiftUI 原生客户端（重做中）；ios/App = 旧 Capacitor 壳（待删）
-hw/        鸿蒙 ArkUI 原生客户端 + 桌面卡片（ArkTS Form）
-fn/        飞牛 fnOS 应用套件（fnpack 打包，产物 output/*.fpk）
-scripts/   构建与生成：fpk 打包 / iOS 构建 / 鸿蒙 HAP / 令牌与图标生成 / ArkTS 静态自检
-docs/      memory（实施记录）/ plan（计划与设计定稿）/ dev（构建指南）
+suenmusic/
+├── server/       Fastify 服务端：node:sqlite 数据库、多音源解析与熔断、直链下发、账号体系、AI 推荐
+├── web/          Vue 3 + Vite 前端（PC 端客户端 + 管理面板唯一入口）
+├── hw/           鸿蒙 HarmonyOS NEXT 全原生客户端（ArkTS / ArkUI）+ 桌面卡片 + 播控中心
+├── ios/          iOS 纯原生客户端（SwiftUI / AVFoundation）+ 单一 App Target 工程
+│   ├── SuenMusic/  SwiftUI 纯原生源码（App / Net / Player / UI）
+│   └── App/        Xcode 工程外壳（App.xcodeproj，由脚本自动维护）
+├── fn/           飞牛 fnOS 应用套件（fnpack 打包，产物 output/*.fpk）
+├── android/      ❄️ 已封库归档（v1.5 冻结）：Capacitor 壳 + Media3 + AppWidget
+├── scripts/      自动化构建与工程生成：iOS 工程生成与打包 / 鸿蒙 HAP 构建 / 令牌与图标生成 / ArkTS 门禁
+└── docs/         统一文档库：memory（实施记录与根因）/ plan（架构方案）/ dev（构建与运维）
 ```
+
+---
 
 ## 快速开始
 
 ```bash
-# 服务端
-cd server && npm ci && npm start        # 默认 0.0.0.0:3210，可用 .env 覆盖
+# 1. 启动服务端（默认监听 0.0.0.0:3210，可通过 .env 覆盖）
+cd server && npm ci && npm start
 
-# Web 开发
+# 2. 启动 Web 前端（开发调试环境）
 cd web && npm ci && npm run dev
 ```
 
-> **运行前提**：客户端（Web / 鸿蒙 / iOS）都需要**自建服务端**先行可用——
-> 服务端是音源解析、账号与流代理的单一真相源，脱离服务端客户端只有壳。
+> **运行前提**：
+> 客户端（Web / 鸿蒙 / iOS）均需先行连接**自建 SuenMusic 服务端**。服务端是音源解析、账号体系、元数据聚合与 CDN 直链下发的单一真相源。
+> 
+> 数据库文件与运行数据在首次启动时自动创建（SQLite，WAL 模式）。首个注册账号自动成为管理员；注册通道在首账号落地后自动收闭，可在 Web 面板「设置 → 账号管理」中管理。
 
-数据库文件与运行数据在首次启动时自动创建（SQLite，WAL 模式）。
-首个注册账号自动成为管理员；注册通道在首账号落地后自动收闭，
-可在 Web 面板「设置 → 账号管理」重新打开。
+---
 
-## 当前阶段（2026-10-26 · v2.0.0）
+## 核心架构与设计规范（v2.0.0 · 2026-10-28）
 
-- **客户端**：Web 端、鸿蒙 ArkUI 原生端（`hw/`）与 iOS SwiftUI 原生端（`ios/SuenMusic/`）均已对齐 v2.0.0；Android 已封库不再维护。
-- **音源与元数据**：酷狗概念版每日自动签到与 SVIP 24h 自动升级已打通（支持 FLAC 无损 / 320k 直链下发）；下一阶段按 `docs/plan/2026-10-26-多源元数据聚合与零翻唱直取方案.md` 落地「酷狗为主 + 网易云为辅 + QQ 兜底/门面」零翻唱聚合与直取架构。
+### 1. 多源音质精细化与三级会员熔断
+- **酷狗音乐**：
+  - **非会员/未登录**：直接熔断，**零上游请求**立即转哔哩哔哩兜底（彻底消除 60s 试听与无效打点）；
+  - **普通 VIP**：仅请求 128k MP3 完整版，客户端锁定为标准音质，SQ/原声置灰；
+  - **概念版 SVIP**：开放 FLAC 无损、320k、128k 全码率调度（支持每日自动签到保持 VIP 状态）。
+- **网易云音乐**：
+  - 非 VIP 账号永不向上游打 `lossless`；动态适配 `encodeType`（MP3 / FLAC）；404 版权缺失与 301 凭证失效立即短路。
+- **哔哩哔哩**：
+  - UGC DASH 音频流精细分档：标准档选取 `30216`（约 64kbps），高品档选取 `30280`（约 192kbps）。
 
-## 构建产物
+### 2. 直链播放闭环与音质切换准则
+- **音质切换「下一首生效」**：用户在播放页切换音质只修改全局期望档位，绝不原地打断或重载当前在播流；
+- **本地缓存绝对优先级**：鸿蒙 `fd://` 与 iOS 命中完整缓存时直接本地起播，完全绕过网络直连与音质决议；
+- **端到端纯 CDN 直连**：端侧直连上游 CDN 播放（带防盗链 Headers），彻底移除服务端中间代理带宽消耗与客户端并发下载风暴。
 
-```bash
-npm run fn:build                        # fnOS 套件 → output/suenmusic-v<version>.fpk
-npm run hw:build                        # 鸿蒙未签名 HAP → output/SuenMusic-v<版本>-unsigned.hap
-npm run ios:build                       # iOS（需 macOS + Xcode）
-npm run icons                           # 从 MarkBold.vue 重生成全端图标
-```
+### 3. 系统级无缝原生体验
+- **鸿蒙端**：原生 `MediaPlayerCore` 驱动，AVPlayer 直连播放，支持 2x2/2x4 桌面服务卡片与系统 AVSession 播控；
+- **iOS 端**：采用纯原生单一 Target 架构，彻底剥离冗余的 Live Activity 扩展，全面由 iOS 系统级 `MPNowPlayingInfoCenter` 与 `MPRemoteCommandCenter` 原生驱动。锁屏、灵动岛（原生单胶囊音浪）、控制中心、AirPods 耳机触控及 CarPlay 车机实现 100% 官方标准体验。
 
-Android（`android/`）已封库：不再有构建指引与 CI，历史构建方式见
-`android/README.md`。产物一律落在本地 `output/`（正式）与 `output/test/`（测试），**不入库**。
+---
 
-> fnOS 套件的安装布局、启停/守护行为、密钥与数据库落点，以及**命令行运维必须显式
-> 指定 `SUENMUSIC_DB`** 这个坑，见 `docs/dev/fnos-ops.md`。
+## 构建与发布命令
 
-## 服务器配置类操作的边界
-
-账号管理、AI 模型增删改与分配、音源扫码授权、数据库备份/恢复等
-「服务器配置」操作**只接受 Web 面板**发起的同源 cookie 会话
-（Bearer 令牌一律 403）；三个原生壳的设置页不渲染这些区块。
-客户端保留的是播放 / 搜索 / 收藏 / 历史 / 歌单 / 画像 / 调优 /
-音源只读状态 / 多服务端列表。详见
-`docs/memory/2026-10-18-设置页与服务端边界.md`。
-
-## 测试
+SuenMusic 采用单一轴单调递增版本体系（由根目录 `VERSION` 文件决定）。
 
 ```bash
-cd server && npm test    # db / api / cli / business / plaza / resolver 全套件
+# 飞牛 fnOS 套件打包
+npm run fn:build                        # 产物：output/suenmusic-v<版本>.fpk
+
+# 鸿蒙 HarmonyOS NEXT HAP 构建与静态自检
+npm run hw:check                        # 鸿蒙 ArkTS 语法与门禁静态检查 (0E/4W 基线)
+npm run hw:build                        # 鸿蒙 HAP 构建 → output/suenmusic-<版本>.hap
+
+# iOS 原生客户端构建（需 macOS 编译环境）
+node scripts/gen-ios-project.mjs        # 刷新生成纯原生 Xcode 工程 (project.pbxproj)
+npm run ios:build                       # 开发签名 IPA → app/suenmusic-<版本>.ipa
+npm run ios:unsigned                    # 未签名 IPA（侧载适用） → app/unsigned/suenmusic-<版本>.ipa
+
+# 品牌设计与资源生成
+npm run icons                           # 从 MarkBold.vue 一键生成三端各尺寸母版图标
 ```
 
-## 品牌标识
+---
 
-实心折角 S（`web/src/components/brand/MarkBold.vue`，段 0 染琥珀）+
-Gunstop 字体字标。改字形只改 MarkBold.vue 后重跑 `npm run icons`；
-各端图标与启动图由 `scripts/gen-brand-icons.py` 一键重生。
+## 权限与管理边界
 
-## 文档
+- **服务端管理操作**（账号创建/封禁、AI 模型配置、音源扫码授权、系统备份与恢复）：**仅限 Web 桌面管理面板**发起（要求同源 Cookie 鉴权，Bearer Token 默认 403 阻断）；
+- **移动原生端（鸿蒙 / iOS）**：仅保留播放、搜索、收藏、历史、队列、歌手/专辑浏览、修正音源、音源状态只读与多服务端配置切换。
 
-`docs/` 下三类：
+---
 
-- `memory/` —— 每次实施/排障/决策的记录（含踩坑与根因）
-- `plan/` —— 计划与设计定稿（桌面卡片、账号体系、架构方案等）
-- `dev/` —— 构建与运维指南（iOS 构建、iOS 卡片留档、live-reload、fnOS 套件运维）
+## 测试套件
+
+```bash
+cd server && npm test    # 运行 db / api / cli / business / resolver / content-filter / update 全量自动化测试
+```
+
+---
+
+## 记忆与文档索引
+
+所有架构方案、版本决策、问题复盘与实施流水均记录在 `docs/` 目录：
+
+- `docs/memory/MEMORY.md` —— **全库唯一事实与历史索引**
+- `docs/plan/` —— 架构与功能设计方案定稿
+- `docs/dev/` —— 跨平台构建、自动化发布与部署运维指南
