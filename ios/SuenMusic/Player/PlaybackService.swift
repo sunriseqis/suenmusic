@@ -12,13 +12,14 @@ import SwiftUI
 
 /// 音质档位白名单（I-5）。
 ///
-/// iOS 只承认这三档：lossless（HTTP 裸 FLAC）AVPlayer 播不了，服务端若下发一律回落 exhigh。
+/// 内核已换 libmpv，四档都支持（含 lossless = FLAC 无损原声）。
 /// 对外仍然用 String 表示（UI / UserDefaults 不动），只在**读写边界**做校验 ——
-/// 旧版本写进去的脏值（lossless / 空串 / 拼错）不会再被当成请求参数发给服务端。
+/// 旧版本写进去的脏值（空串 / 拼错）不会再被当成请求参数发给服务端。
 enum Quality: String, CaseIterable {
     case standard
     case high
     case exhigh
+    case lossless
 
     /// 兜底档位：用户偏好非法、或服务端下发未知档位时用它
     static let fallback: Quality = .exhigh
@@ -29,7 +30,7 @@ enum Quality: String, CaseIterable {
         return q
     }
 
-    /// 三档全量（String 形态，喂给 UI 的 availableQualities）
+    /// 四档全量（String 形态，喂给 UI 的 availableQualities）
     static var allRawValues: [String] { allCases.map { $0.rawValue } }
 }
 
@@ -54,7 +55,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     @Published private(set) var noSource: Bool = false
 
     /// 用户全局偏好音质（存储于本地 UserDefaults，iOS 默认 exhigh 320k）
-    /// 读取时过一遍白名单：老版本可能存了 lossless / 空串，脏值不许进播放参数（I-5）
+    /// 读取时过一遍白名单：老版本可能存了空串 / 拼错的值，脏值不许进播放参数（I-5）
     @Published var preferredQuality: String = Quality.normalize(UserDefaults.standard.string(forKey: "preferred_audio_quality")).rawValue
     /// 界面显示的音质档位 = **用户当前选择的档位**（`preferredQuality` 经白名单归一）。
     /// 播放页音质按钮（图标 / 短标签 / 无障碍文案）与音质面板「当前生效：X」共用它，
@@ -65,7 +66,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     @Published private(set) var availableQualities: [String] = Quality.allRawValues
 
     func setPreferredQuality(_ next: String) {
-        // 写入路径只接受白名单：拼错或越权（如 lossless）一律回落 exhigh，不落库脏值
+        // 写入路径只接受白名单：拼错或未知档位一律回落 exhigh，不落库脏值
         let normalized = Quality.normalize(next).rawValue
         guard preferredQuality != normalized else { return }
         preferredQuality = normalized
@@ -75,9 +76,9 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
 
     func qualityLabel(for level: String) -> String {
         switch level {
-        case "lossless": return "原声"
-        case "exhigh": return "极高"
-        case "high": return "高"
+        case "lossless": return "无损"
+        case "exhigh": return "超清"
+        case "high": return "高清"
         case "standard": return "标准"
         default: return level
         }
@@ -204,7 +205,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         return 3600
     }
 
-    /// 可用档位白名单过滤：过滤后为空就用三档全量（不让 UI 拿到空列表）
+    /// 可用档位白名单过滤：过滤后为空就用四档全量（不让 UI 拿到空列表）
     private static func sanitizedQualities(_ raw: [String]) -> [String] {
         let kept = raw.filter { Quality(rawValue: $0) != nil }
         return kept.isEmpty ? Quality.allRawValues : kept

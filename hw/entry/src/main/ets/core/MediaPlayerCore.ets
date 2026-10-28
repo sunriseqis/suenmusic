@@ -1212,11 +1212,11 @@ export class MediaPlayerCore {
 
   qualityLabel(level: string): string {
     switch (level) {
-      case 'lossless': return '原声';
-      case 'exhigh': return '极高';
-      case 'high': return '高';
+      case 'lossless': return '无损';
+      case 'exhigh': return '超清';
+      case 'high': return '高清';
       case 'standard': return '标准';
-      default: return level;
+      default: return '超清';
     }
   }
 

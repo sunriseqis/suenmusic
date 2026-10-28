@@ -99,6 +99,56 @@ private enum PlayerSpec {
  * 失败呈现规格（用户 2026-10-23 定稿）：连播失败页面不留报错，手动点播无音源只在
  * eyebrow 显示「无音源」；页面**没有**错误横幅、没有重试/跳过按钮，修音源走「更多 → 修正音源」。
  */
+/// 音质文字胶囊（播放页七键按钮 / 音质面板行内共用）。
+///
+/// 内容 = 短标签（无损 / 超清 / 高清 / 标准）+ 可选的小 chevron；
+/// 内边距 5/2、字号 11 bold、1.2pt 描边、圆角 4，沿用既有胶囊数值，不新造尺寸。
+/// 高度 ≈ 17pt（11pt 行高 + 上下 2），恒落在按钮热区 `Dim.btnMd`(36) 内，绝不溢出；
+/// 宽度按文字自适应、不锁宽（锁宽会把「无损 ^」挤出按钮外）。
+/// 备注：`quality_*.imageset` 的 SVG 资产保留在仓库，但代码不再引用（画布窄、显示小）。
+private struct QualityChip: View {
+    let tag: String
+    let color: Color
+    var opacity: Double = 1
+    /// SF Symbol 名（`chevron.up` / `chevron.down`）；面板行内传 nil，保持清爽。
+    var chevron: String? = nil
+
+    var body: some View {
+        HStack(spacing: 1) {
+            Text(tag)
+                .font(.system(size: 11, weight: .bold))
+            if let chevron {
+                Image(systemName: chevron)
+                    .font(.system(size: 7, weight: .semibold))
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(color, lineWidth: 1.2)
+        )
+        .foregroundStyle(color)
+        .opacity(opacity)
+        .fixedSize()
+        .accessibilityHidden(true)
+    }
+}
+
+/// 音质短标签（胶囊里的文字，用户指定）：
+/// lossless → 无损、exhigh → 超清、high → 高清、standard → 标准。
+/// 与 `PlaybackService.qualityLabel(for:)`、`qualityOptions` 的 name 同一套文案，
+/// 保证播放页按钮 / 面板勾选行 / 「当前生效：X」三处一致。
+private func qualityShortTag(_ q: String) -> String {
+    switch q {
+    case "lossless": return "无损"
+    case "exhigh": return "超清"
+    case "high": return "高清"
+    case "standard": return "标准"
+    default: return "超清"
+    }
+}
+
 struct PlayerView: View {
     @EnvironmentObject private var player: PlaybackService
     @Environment(\.colorScheme) private var scheme
@@ -495,40 +545,18 @@ struct PlayerView: View {
         Button {
             openSheet(.quality)
         } label: {
-            HStack(spacing: 2) {
-                if let uiImage = UIImage(named: "quality_\(player.currentQuality)") {
-                    Image(uiImage: uiImage)
-                        .renderingMode(.template)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(width: 32, height: 20)
-                } else {
-                    Text(qualityShortTag(player.currentQuality))
-                        .font(.system(size: 11, weight: .bold))
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 4)
-                                .stroke(p.accent, lineWidth: 1.2)
-                        )
-                }
-            }
-            .foregroundStyle(p.accent)
-            .frame(width: Dim.btnMd, height: Dim.btnMd)
-            .contentShape(Rectangle())
+            // 只用文字胶囊：短标签 + 向上 chevron（表示点开面板）。
+            // 已删除 `UIImage(named: "quality_\(player.currentQuality)")` 分支（SVG 资产保留但不引用）。
+            QualityChip(tag: qualityShortTag(player.currentQuality),
+                        color: p.accent,
+                        chevron: "chevron.up")
+                // 热区仍是 36×36（`Dim.btnMd`），但宽度不锁死：
+                // 胶囊高度 17pt 落在热区内，宽度按文字自适应，绝不溢出按钮外。
+                .frame(minWidth: Dim.btnMd, minHeight: Dim.btnMd)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("音质：\(player.qualityLabel(for: player.currentQuality))")
-    }
-
-    private func qualityShortTag(_ q: String) -> String {
-        switch q {
-        case "lossless": return "SQ"
-        case "exhigh": return "HQ"
-        case "high": return "高"
-        case "standard": return "标"
-        default: return "HQ"
-        }
     }
 
     /// 底部控制栏重排：播放顺序 / 音质 / 上一曲 / 播放 / 下一曲 / 收藏 / 播放列表
@@ -793,10 +821,11 @@ struct QualitySheet: View {
 
     private var p: Palette { Palette(scheme) }
 
-    // iOS 平台可用选项（排除了 iOS AVPlayer 不支持的 HTTP 裸 FLAC 原声）
+    // 四档（从高到低）
     private let qualityOptions: [(key: String, name: String, desc: String)] = [
-        ("exhigh", "极高", "320kbps 高保真 MP3/AAC"),
-        ("high", "高", "192kbps / 160kbps"),
+        ("lossless", "无损", "FLAC 无损原声"),
+        ("exhigh", "超清", "320kbps 高保真 MP3/AAC"),
+        ("high", "高清", "192kbps / 160kbps"),
         ("standard", "标准", "128kbps / 64kbps")
     ]
 
@@ -845,15 +874,13 @@ struct QualitySheet: View {
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack(spacing: 8) {
-                                        if let uiImage = UIImage(named: "quality_\(opt.key)") {
-                                            Image(uiImage: uiImage)
-                                                .renderingMode(.template)
-                                                .resizable()
-                                                .scaledToFit()
-                                                .frame(width: 32, height: 20)
-                                                .foregroundStyle(isAvailable ? (isSelected ? p.accent : p.text2) : p.text2)
-                                                .opacity(isAvailable ? 1.0 : 0.4)
-                                        }
+                                        // 同一个文字胶囊（不带 chevron，行内更清爽）；
+                                        // 取色沿用原语义：可用=选中 accent / 未选中 text2；不可用 text2 + 0.4 透明。
+                                        QualityChip(
+                                            tag: qualityShortTag(opt.key),
+                                            color: isAvailable ? (isSelected ? p.accent : p.text2) : p.text2,
+                                            opacity: isAvailable ? 1.0 : 0.4
+                                        )
                                         Text(opt.name)
                                             .font(.system(size: Dim.fsBody, weight: isSelected ? .semibold : .medium))
                                             .foregroundStyle(isAvailable ? (isSelected ? p.accent : p.text1) : p.text2.opacity(0.4))

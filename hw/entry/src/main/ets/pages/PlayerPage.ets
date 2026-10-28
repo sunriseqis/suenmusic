@@ -56,12 +56,27 @@ interface QualityOpt {
  */
 function qualityDisplay(key: string): QualityOpt {
   switch (key) {
-    case 'lossless': return { key: key, name: '原声', desc: 'FLAC 无损 (~800k-1000k)' };
-    case 'exhigh': return { key: key, name: '极高', desc: '320kbps 高保真 MP3/AAC' };
-    case 'high': return { key: key, name: '高', desc: '192kbps / 160kbps' };
+    case 'lossless': return { key: key, name: '无损', desc: 'FLAC 无损 (~800k-1000k)' };
+    case 'exhigh': return { key: key, name: '超清', desc: '320kbps 高保真 MP3/AAC' };
+    case 'high': return { key: key, name: '高清', desc: '192kbps / 160kbps' };
     case 'standard': return { key: key, name: '标准', desc: '128kbps / 64kbps' };
     // 兜底：QUALITY_LEVELS 里新增、这里还没写文案的档位 —— 直接显示 key，绝不从面板里消失
     default: return { key: key, name: key, desc: '' };
+  }
+}
+
+/**
+ * 音质短标签（文字胶囊里的字，与 iOS `qualityShortTag` 完全同一套文案）：
+ * lossless → 无损、exhigh → 超清、high → 高清、standard → 标准。
+ * 与 qualityDisplay 的 name 同一套文案（面板行内「胶囊 + name」两处同字，与 iOS 一致）。
+ */
+function qualityShortTag(key: string): string {
+  switch (key) {
+    case 'lossless': return '无损';
+    case 'exhigh': return '超清';
+    case 'high': return '高清';
+    case 'standard': return '标准';
+    default: return '超清';
   }
 }
 
@@ -84,16 +99,6 @@ export struct PlayerPage {
    * 这里只提供展示顺序与文案（见模块顶部的 qualityDisplay / buildQualityOptions）。
    */
   private readonly qualityOptions: QualityOpt[] = buildQualityOptions();
-
-  private qualityIconResource(q: string): Resource {
-    switch (q) {
-      case 'lossless': return $r('app.media.quality_lossless');
-      case 'exhigh': return $r('app.media.quality_exhigh');
-      case 'high': return $r('app.media.quality_high');
-      case 'standard': return $r('app.media.quality_standard');
-      default: return $r('app.media.quality_lossless');
-    }
-  }
 
   /** 用户在音质面板里选择的档位（QUALITY_LEVELS 白名单归一）：按钮与面板「当前生效」都取它 */
   private selectedQuality(): string {
@@ -813,6 +818,37 @@ export struct PlayerPage {
     .justifyContent(FlexAlign.Center)
   }
 
+  /**
+   * 音质文字胶囊（播放页七键的音质按钮 / 音质面板每行行内共用，与 iOS `QualityChip` 同款）。
+   *
+   * 内容 = 短标签（无损 / 超清 / 高清 / 标准，见 qualityShortTag）+ 可选的小 chevron_up；
+   * 内边距 左右 Dim.s1(4) / 上下 Dim.s0(2)、字号 Dim.fsCaption(11) Bold、描边 Dim.hairline、
+   * 圆角 Dim.radiusSm —— 胶囊高约 17vp（11 行高 + 上下 2），恒落在按钮热区（34/36）内，绝不溢出。
+   * 宽度按文字自适应、不锁宽：锁宽会把「无损 ^」裁掉（七键容器已改为 minWidth 约束）。
+   * 备注：`quality_{lossless,exhigh,high,standard}.svg` 资产保留在仓库，但代码不再引用（画布窄、显示小）。
+   */
+  @Builder
+  qualityChip(tag: string, color: ResourceColor, chipOpacity: number, withChevron: boolean) {
+    Row({ space: 1 }) {
+      Text(tag)
+        .fontSize(Dim.fsCaption)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(color)
+        .maxLines(1)
+      if (withChevron) {
+        SymbolGlyph($r('sys.symbol.chevron_up'))
+          .fontSize(8)
+          .fontColor([color])
+          .fontWeight(FontWeight.Medium)
+      }
+    }
+    .padding({ left: Dim.s1, right: Dim.s1, top: Dim.s0, bottom: Dim.s0 })
+    .border({ width: Dim.hairline, color: color })
+    .borderRadius(Dim.radiusSm)
+    .opacity(chipOpacity)
+    .accessibilityLevel('no')
+  }
+
   /** 底部：进度条 + 五键控制排 + 错误重试 + 歌词 peek（web FullPlayer foot） */
   @Builder
   bottomFoot() {
@@ -861,14 +897,13 @@ export struct PlayerPage {
         Blank()
 
         // 2. 音质（显示用户选择的档位：改档立即跟随，与面板里带 ✓ 的偏好项同档）
+        //    只用文字胶囊：短标签 + 向上 chevron（表示点开面板）。已删除 SVG 图标引用
+        //    （quality_*.svg 资产保留，代码不再引用 —— 画布窄，渲染出来又小又窄）。
         Row() {
-          Image(this.qualityIconResource(this.selectedQuality()))
-            .width(36)
-            .height(32)
-            .objectFit(ImageFit.Contain)
-            .fillColor(Tokens.accent)
+          this.qualityChip(qualityShortTag(this.selectedQuality()), Tokens.accent, 1, true)
         }
-        .width(38)
+        // 热区仍按原来 38×34：宽度改成最小宽约束（不锁死），胶囊「无损 ^」超出 38 也不裁切
+        .constraintSize({ minWidth: 38 })
         .height(34)
         .justifyContent(FlexAlign.Center)
         .onClick(() => {
@@ -1106,14 +1141,14 @@ export struct PlayerPage {
             Row() {
               Column({ space: 2 }) {
                 Row({ space: 8 }) {
-                  Image(this.qualityIconResource(opt.key))
-                    .width(36)
-                    .height(22)
-                    .objectFit(ImageFit.Contain)
-                    .fillColor(this.availableQualities.indexOf(opt.key) >= 0
+                  // 同一个文字胶囊（不带 chevron，行内更清爽 —— 右侧已有 ✓）；取色沿用原语义：
+                  // 可用 = 选中 accent / 未选中 text2；不可用 text2 + 0.4 透明。
+                  this.qualityChip(qualityShortTag(opt.key),
+                    this.availableQualities.indexOf(opt.key) >= 0
                       ? (this.preferredQuality === opt.key ? Tokens.accent : Tokens.text2)
-                      : Tokens.text2)
-                    .opacity(this.availableQualities.indexOf(opt.key) >= 0 ? 1 : 0.4)
+                      : Tokens.text2,
+                    this.availableQualities.indexOf(opt.key) >= 0 ? 1 : 0.4,
+                    false)
                   Text(opt.name)
                     .fontSize(Dim.fsBody)
                     .fontWeight(this.preferredQuality === opt.key ? FontWeight.Bold : FontWeight.Medium)
