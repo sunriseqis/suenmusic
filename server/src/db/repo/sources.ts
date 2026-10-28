@@ -55,6 +55,8 @@ export interface PlaySourceRow {
   currentQuality: string;
   /** 该音源真的取得到的档位列表（音源层产出，空数组 = 未知） */
   availableQualities: string[];
+  /** 备用 CDN 地址（多镜像，不含主地址；空数组 = 没有或旧行） */
+  backupUrls: string[];
 }
 
 /**
@@ -98,10 +100,14 @@ interface SourceDbRow {
   cover_url: string;
   current_quality: string;
   available_qualities: string;
+  backup_urls: string;
 }
 
-/** available_qualities 以 JSON 数组文本落库；解不开就当未知（空数组） */
-function parseQualities(text: string | null | undefined): string[] {
+/**
+ * JSON 数组文本 → string[]（available_qualities / backup_urls 共用）。
+ * 解不开就当未知（空数组）—— 宁可少报也不猜。
+ */
+function parseStringArray(text: string | null | undefined): string[] {
   if (!text) return [];
   try {
     const arr = JSON.parse(text) as unknown;
@@ -131,7 +137,8 @@ function toRow(r: SourceDbRow): PlaySourceRow {
     source: r.source === 'netease' || r.source === 'kugou' ? r.source : 'bilibili',
     coverUrl: r.cover_url ?? '',
     currentQuality: r.current_quality ?? '',
-    availableQualities: parseQualities(r.available_qualities),
+    availableQualities: parseStringArray(r.available_qualities),
+    backupUrls: parseStringArray(r.backup_urls),
   };
 }
 
@@ -154,8 +161,8 @@ export function saveSource(
          track_id, ok, bvid, score, audio_url, bandwidth,
          matched_title, matched_author, duration_diff, reason, message,
          resolved_at, expires_at, source, cover_url,
-         current_quality, available_qualities
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         current_quality, available_qualities, backup_urls
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(track_id) DO UPDATE SET
          ok             = excluded.ok,
          bvid           = excluded.bvid,
@@ -172,7 +179,8 @@ export function saveSource(
          source         = excluded.source,
          cover_url      = excluded.cover_url,
          current_quality = excluded.current_quality,
-         available_qualities = excluded.available_qualities`
+         available_qualities = excluded.available_qualities,
+         backup_urls     = excluded.backup_urls`
     )
     .run(
       trackId,
@@ -191,7 +199,8 @@ export function saveSource(
       result.source ?? 'bilibili',
       result.coverUrl ?? '',
       result.currentQuality ?? '',
-      JSON.stringify(result.availableQualities ?? [])
+      JSON.stringify(result.availableQualities ?? []),
+      JSON.stringify(result.backupUrls ?? [])
     );
 }
 
@@ -245,6 +254,7 @@ export function rowToResult(row: PlaySourceRow): ResolveResult {
     coverUrl: row.coverUrl || undefined,
     currentQuality,
     availableQualities: row.availableQualities.length ? row.availableQualities : undefined,
+    backupUrls: row.backupUrls.length ? row.backupUrls : undefined,
   };
 }
 

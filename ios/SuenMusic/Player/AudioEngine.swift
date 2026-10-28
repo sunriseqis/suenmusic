@@ -27,6 +27,14 @@ protocol AudioEngineEvents: AnyObject {
     func emitTrackChange(index: Int, id: String, reason: Int)
     func emitState(playing: Bool)
     func emitError(message: String)
+    /// 缓冲态（mpv 的 paused-for-cache / core-idle）。上层复用**已有的 loading 通道**，
+    /// 不新造一套「缓冲中」状态位（loading 才是「还没真正出声」的唯一表示）。
+    func emitBuffering(_ buffering: Bool)
+}
+
+extension AudioEngineEvents {
+    /// 默认空实现：只有真正关心缓冲的实现（PlaybackService）才需要重写
+    func emitBuffering(_ buffering: Bool) {}
 }
 
 /// 线程助手：系统通知（打断 / 路由）由系统从内部队列投递，线程不确定。
@@ -135,7 +143,24 @@ final class AudioEngine: NSObject {
     /// 也是因为"注册了但没拿到句柄"和"没注册"在现象上无法区分。
     private var remoteCommandTargets: [Any] = []
     private var artworkCache: [String: MPMediaItemArtwork] = [:]
-    private var lastNowPlayingUpdate = Date.distantPast
+
+    /// time-pos 驱动的进度回写节流点（约 1s 一次，见 writeNowPlayingProgress）
+    private var lastNowPlayingProgressAt = Date.distantPast
+    private static let nowPlayingProgressInterval: TimeInterval = 1.0
+
+    // MARK: mpv 侧停滞看门狗（P1 删掉了 AVPlayer 时代的 10s stall 看门狗，这里在 mpv 侧补回来）
+
+    /// playing / buffering 态下 time-pos 多久不推进算「卡死」
+    private static let stallTimeoutSec: TimeInterval = 10
+    /// 看门狗轮询间隔
+    private static let stallPollSec: TimeInterval = 2
+    private var stallTimer: Timer?
+    /// 最近一次 time-pos 真的往前走的时刻
+    private var lastAdvanceAt = Date()
+    private var lastAdvancePosition: Double = 0
+    /// 本轮装载已经自愈重装过几次（只允许 1 次，再失败交给上层失败三分支）
+    private var stallRecoveries = 0
+    private static let maxStallRecoveries = 1
 
     /// 播放**意图** —— 锁屏 / 控制中心 / 灵动岛的按钮与进度条只看这一个值。
     ///
@@ -170,15 +195,7 @@ final class AudioEngine: NSObject {
         // ② libmpv 核心（创建 → 选项 → initialize 全在 MpvPlayer.init 里）
         let player = try MpvPlayer()
         mpv = player
-        player.onTime = { [weak self] seconds in self?.handleTime(seconds) }
-        player.onDuration = { [weak self] seconds in self?.handleDuration(seconds) }
-        player.onState = { [weak self] state in self?.handleMpvState(state) }
-        player.onEnded = { [weak self] in self?.handleFileEnd() }
-        player.onError = { [weak self] message in self?.handleMpvError(message) }
-        player.onFileLoaded = { [weak self] in
-            guard let self = self else { return }
-            NSLog("[Start] mpv 已装载 idx=%d dur=%dms", self.currentIndex, self.currentItemDurationMs())
-        }
+        wire(player)
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(handleInterruption(_:)),
@@ -198,6 +215,8 @@ final class AudioEngine: NSObject {
             name: AVAudioSession.routeChangeNotification, object: nil)
 
         installRemoteCommands()
+        // mpv 侧停滞看门狗：playing 态下 time-pos 长期不推进 → 重装一次 → 再失败走上层失败三分支
+        startStallWatchdog()
 
         // 让本 App 成为系统的 "Now Playing 宿主"。
         //
@@ -211,10 +230,25 @@ final class AudioEngine: NSObject {
     }
 
     deinit {
-        // 先摘通知，再停核心：core 的事件线程会在销毁时刷出最后几帧回调
+        // 先摘通知 / 停看门狗，再停核心：core 的事件线程会在销毁时刷出最后几帧回调
         NotificationCenter.default.removeObserver(self)
+        stallTimer?.invalidate()
+        stallTimer = nil
         mpv?.shutdown()
         mpv = nil
+    }
+
+    /// 把 mpv 的全部回调挂上来（init 与「媒体服务重置后重建核心」共用一处）
+    private func wire(_ player: MpvPlayer) {
+        player.onTime = { [weak self] seconds in self?.handleTime(seconds) }
+        player.onDuration = { [weak self] seconds in self?.handleDuration(seconds) }
+        player.onState = { [weak self] state in self?.handleMpvState(state) }
+        player.onEnded = { [weak self] in self?.handleFileEnd() }
+        player.onError = { [weak self] message in self?.handleMpvError(message) }
+        player.onFileLoaded = { [weak self] in
+            guard let self = self else { return }
+            NSLog("[Start] mpv 已装载 idx=%d dur=%dms", self.currentIndex, self.currentItemDurationMs())
+        }
     }
 
     // MARK: 队列操作
@@ -405,6 +439,10 @@ final class AudioEngine: NSObject {
         guard tracks.indices.contains(index), let mpv = mpv else { return }
         if reason == 2 { consecutiveErrors = 0 }
         logicalIndex = index
+        // 新一轮装载：停滞看门狗的推进基准与自愈额度一起复位
+        stallRecoveries = 0
+        lastAdvanceAt = Date()
+        lastAdvancePosition = Double(max(0, positionMs)) / 1000.0
         // 切歌 = 立即取消未完成的下载并丢弃已下部分（规格 3.1 / 3.2）；
         // 下一首的预约由起播点重新发起。
         cancelCacheTasks()
@@ -465,12 +503,19 @@ final class AudioEngine: NSObject {
 
     private func handleTime(_ seconds: Double) {
         let posMs = max(0, Int(seconds * 1000))
+        // 停滞看门狗的推进基准：time-pos 真的**往前走**了才算有推进
+        // （缓冲 / 暂停时 mpv 根本不会发这个事件，所以这里的更新只可能来自真推进）
+        if seconds > lastAdvancePosition + 0.05 {
+            lastAdvancePosition = seconds
+            lastAdvanceAt = Date()
+        }
         diagTick(posMs)
         events?.emitProgress(index: currentIndex,
                              positionMs: posMs,
                              durationMs: max(0, currentItemDurationMs()),
                              playing: playingIntent)
-        resyncNowPlayingIfStale()
+        // 进度回写改成 time-pos 驱动（约 1s 节流），不再靠系统按 rate 推算 + 10s 校准
+        writeNowPlayingProgress(elapsed: seconds)
     }
 
     private func handleDuration(_ seconds: Double) {
@@ -479,15 +524,24 @@ final class AudioEngine: NSObject {
     }
 
     /// 状态回调只做三件事：
-    /// ① 真正开始出声（含缓冲恢复）→ 补一次"播放中"；② 缓冲只打日志，不动 UI 状态；
+    /// ① 真正开始出声（含缓冲恢复）→ 收起缓冲反馈 + 补一次「播放中」；
+    /// ② 缓冲（paused-for-cache / core-idle）→ 走上层已有的 loading 通道，**不动播放意图**；
     /// ③ 暂停**不在这里上报** —— 暂停一律由 play/pause/stop/打断/曲末这些**意图明确**的路径上报，
     ///    否则 mpv 内部缓冲时的瞬时暂停会把 UI 闪一下。
     private func handleMpvState(_ state: MpvPlayer.PlaybackState) {
         switch state {
         case .playing:
+            // 真正出流：收起缓冲反馈 + 补一次「播放中」
+            events?.emitBuffering(false)
             reportPlaying(true)
+            // 缓冲恢复后意图早已是 true（reportPlaying 会被去重），这里再正面刷一次，
+            // 保证 PlaybackRate 从 0 立刻回 1.0，而不是等下一个 time-pos tick（最多滞后 1s）
+            updateNowPlaying()
         case .buffering:
-            NSLog("%@", "[Mpv] 缓冲中（保持播放意图）")
+            // paused-for-cache / core-idle → 走上层**已有的 loading 通道**
+            // （PlaybackService 的看门狗与失败三分支都挂在 loading 上，不另造状态位）
+            NSLog("%@", "[Mpv] 缓冲中 → loading（播放意图不变）")
+            if playingIntent { events?.emitBuffering(true) }
         case .paused, .idle:
             break
         }
@@ -530,6 +584,62 @@ final class AudioEngine: NSObject {
         consecutiveErrors += 1
         if consecutiveErrors >= Self.maxConsecutiveErrors { consecutiveErrors = 0 }
         reportPlaying(false)
+    }
+
+    // MARK: 私有：mpv 停滞看门狗（失败自愈）
+
+    /// 看门狗轮询：playing / buffering 态下 time-pos 超过 stallTimeoutSec 不推进 → 自愈。
+    ///
+    /// 为什么需要：P1 删掉了 AVPlayer 时代的 10s stall 看门狗之后，mpv 一旦卡死
+    /// （CDN 断流、解码线程挂住、缓冲永远等不到数据）就没有任何恢复手段 ——
+    /// 表现是「进度条冻在那里，按暂停再播放也没用，只能杀 App」。
+    ///
+    /// 恢复阶梯（与上层失败三分支对齐）：
+    ///   ① 重新 load 当前源一次（保留进度）；
+    ///   ② 重装后仍然不推进 → 走 handleMpvError，交给 PlaybackService 的失败三分支
+    ///      （手动点播 = 停住标「无音源」；连播 = 静默跳过；连续失败 = 暂停 + 通知）。
+    ///
+    /// 只在主线程跑：Timer 挂在主 RunLoop，mpv 的回调也已切回主线程。
+    private func startStallWatchdog() {
+        stallTimer?.invalidate()
+        let timer = Timer(timeInterval: Self.stallPollSec, repeats: true) { [weak self] _ in
+            self?.stallWatchdogTick()
+        }
+        // .common：拖拽播放页 / 拖进度条时主 RunLoop 进 tracking mode，用 default 会停摆
+        RunLoop.main.add(timer, forMode: .common)
+        stallTimer = timer
+    }
+
+    private func stallWatchdogTick() {
+        guard let mpv = mpv, playingIntent else {
+            // 没在播（或用户已暂停）→ 停滞无从谈起，基准一直刷新
+            lastAdvanceAt = Date()
+            return
+        }
+        switch mpv.state {
+        case .playing, .buffering:
+            break   // 这两种状态下「该有推进」，继续判定
+        case .paused, .idle:
+            lastAdvanceAt = Date()
+            return
+        }
+        let stalledFor = Date().timeIntervalSince(lastAdvanceAt)
+        guard stalledFor >= Self.stallTimeoutSec else { return }
+
+        if stallRecoveries < Self.maxStallRecoveries {
+            let resumeMs = Int(max(0, mpv.currentTime) * 1000)
+            NSLog("[Watchdog] mpv 停滞 %.0fs（pos=%dms）→ 重新装载当前源一次", stalledFor, resumeMs)
+            let attempt = stallRecoveries + 1
+            loadCurrent(index: currentIndex, positionMs: resumeMs, autoplay: true, reason: 2)
+            // loadCurrent 会把额度清零（新一轮装载），这里压回「已用掉一次」
+            stallRecoveries = attempt
+            lastAdvanceAt = Date()
+            return
+        }
+
+        NSLog("[Watchdog] mpv 停滞 %.0fs，重装后仍未恢复 → 交上层失败三分支", stalledFor)
+        lastAdvanceAt = Date()
+        handleMpvError("播放停滞：mpv 位置超过 \(Int(Self.stallTimeoutSec)) 秒没有推进")
     }
 
     /// 诊断打点（真机排障用）：每 2s 打一次核心真实状态
@@ -769,8 +879,10 @@ final class AudioEngine: NSObject {
               let type = AVAudioSession.InterruptionType(rawValue: typeRaw) else { return }
         switch type {
         case .began:
+            // 来电 / 其它 App 抢焦点：真的落在 mpv 上（mpv 不接管音频会话，必须自己转发）
             mpv?.pause()
             reportPlaying(false)
+            updateNowPlaying()   // 立刻把 playbackState/rate 落到暂停，锁屏图标才跟着变
         case .ended:
             // 不自动恢复播放（对齐 Android 的保守策略：是否继续由用户按播放决定），
             // 但**必须复位音频会话**：系统在打断期间把 AVAudioSession 置为非激活，
@@ -779,6 +891,7 @@ final class AudioEngine: NSObject {
             isActivated = false
             activateIfNeeded()
             reportPlaying(false)
+            updateNowPlaying()
             break
         @unknown default:
             break
@@ -786,21 +899,50 @@ final class AudioEngine: NSObject {
     }
 
     /**
-     * 音频服务被重置：旧的 session 配置与"已激活"标记全部作废。
+     * 音频服务被重置（系统回收音频守护进程 / 设置 → 开发者 → Reset Media Services）：
+     * 旧的 session 配置、「已激活」标记、以及 **libmpv 的 audiounit 输出全部作废**。
      *
-     * 只重建音频环境、**不自动起播** —— 官方明确要求把是否继续播放交回用户。
-     * mpv 的 audiounit 输出同样失效，所以顺手暂停并清掉播放意图。
+     * 只 pause 是不够的：mpv 的输出模块绑的是被系统杀掉的那个音频进程，句柄还活着的旧核心
+     * 再也出不了声 —— 所以这里必须**重建 MpvPlayer**。
+     * 官方同时要求重置后不得自动恢复播放：新核心只把原来的文件与位置装回去并**保持暂停**，
+     * 让用户自己按播放。
      */
     @objc private func handleMediaServicesReset(_ note: Notification) {
         EngineThread.onMain { [weak self] in
             guard let self else { return }
-            NSLog("%@", "[AudioSession] 音频服务被系统重置，重新初始化会话")
+            NSLog("%@", "[AudioSession] 音频服务被系统重置，重新初始化会话并重建播放核心")
             self.isActivated = false
             self.activateIfNeeded()
             self.playingIntent = false
-            self.mpv?.pause()
+            self.rebuildMpvCore()
             self.reportPlaying(false)
             self.updateNowPlaying()
+        }
+    }
+
+    /// 音频服务重置后重建 mpv 核心（不改播放意图、不自动起播）。
+    private func rebuildMpvCore() {
+        let resumeAt = max(0, mpv?.currentTime ?? 0)
+        let old = mpv
+        mpv = nil
+        // 旧核心必须彻底收尾：事件线程 + 句柄一起销毁，否则它会在后台继续吃着失效的输出
+        old?.shutdown()
+        do {
+            let fresh = try MpvPlayer()
+            wire(fresh)
+            mpv = fresh
+            stallRecoveries = 0
+            lastAdvanceAt = Date()
+            lastAdvancePosition = resumeAt
+            NSLog("[AudioSession] 已重建 libmpv 核心，待续位置=%.1fs（保持暂停）", resumeAt)
+            // 把原来那首装回去（paused-for-cache / 分辨率等全部重新协商），但不自动出声
+            if tracks.indices.contains(currentIndex) {
+                let src = resolveSource(for: tracks[currentIndex])
+                fresh.load(url: src.url, headers: src.headers, startAt: resumeAt, autoplay: false)
+            }
+        } catch {
+            NSLog("[AudioSession] 重建 libmpv 失败：%@", error.localizedDescription)
+            events?.emitError(message: "音频服务重置后无法重建播放核心：\(error.localizedDescription)")
         }
     }
 
@@ -814,8 +956,11 @@ final class AudioEngine: NSObject {
               let reasonRaw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonRaw) else { return }
         if reason == .oldDeviceUnavailable {
+            // 拔耳机（含拔 USB/断开车载音频）：暂停到 mpv，且**绝不自动续播**
+            // （对齐 Android 与旧 AVPlayer 行为；这里没有任何恢复分支，用户按播放才继续）
             mpv?.pause()
             reportPlaying(false)
+            updateNowPlaying()
         }
     }
 
@@ -916,30 +1061,75 @@ final class AudioEngine: NSObject {
         center.changePlaybackPositionCommand.isEnabled = hasTracks
     }
 
+    /// Now Playing 的三态 + 停止。
+    ///
+    /// ⚠️ 系统的 MPNowPlayingPlaybackState **没有 buffering** 这一档，所以缓冲映射成
+    /// 「playbackState = .playing + PlaybackRate = 0」：图标留在播放侧（否则锁屏/灵动岛
+    /// 按钮会自己翻成 ▶️，看到的和实际不符），进度条因为 rate=0 停止推算。
+    private enum NowPlayingPlayback {
+        case playing
+        case buffering
+        case paused
+        case stopped
+    }
+
+    /// 当前该往系统报哪一态。
+    ///
+    /// 判据是**播放意图 + mpv 是否真的在出流**：意图为播放但 mpv 还没出流（装载中 /
+    /// paused-for-cache / core-idle）一律算缓冲，绝不落成 paused —— paused 会让系统把
+    /// 锁屏按钮画成「播放」，这正是「点了没反应」这类观感的来源。
+    private func currentNowPlayingPlayback() -> NowPlayingPlayback {
+        guard tracks.indices.contains(currentIndex) else { return .stopped }
+        guard playingIntent else { return .paused }
+        guard let mpv = mpv else { return .paused }
+        // 核心已经回到 idle（stop / 无文件）：报 stopped，别让锁屏停留在暂停面板的推算上
+        if mpv.state == .idle { return playingIntent ? .buffering : .stopped }
+        return mpv.state == .playing ? .playing : .buffering
+    }
+
+    /// 把三态落到 Now Playing 的两件套：playbackState（图标）+ PlaybackRate（进度推算）
+    private func applyNowPlayingPlayback(_ playback: NowPlayingPlayback, to info: inout [String: Any]) {
+        switch playback {
+        case .playing:
+            nowPlaying.playbackState = .playing
+            info[MPNowPlayingInfoPropertyPlaybackRate] = 1.0
+        case .buffering:
+            nowPlaying.playbackState = .playing
+            info[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
+        case .paused:
+            nowPlaying.playbackState = .paused
+            info[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
+        case .stopped:
+            nowPlaying.playbackState = .stopped
+            info[MPNowPlayingInfoPropertyPlaybackRate] = 0.0
+        }
+    }
+
     /// 写 Now Playing 元数据 —— 锁屏、控制中心、灵动岛、CarPlay 面板的**唯一数据源**。
     ///
-    /// 刷新策略是**事件驱动**（play / pause / seek / 换曲），不在进度心跳里逐帧覆写：
-    /// 系统会拿 MPNowPlayingInfoPropertyPlaybackRate 自己推算进度条位置，
-    /// 我们再每 500ms 覆写一次 ElapsedPlaybackTime 反而会让进度条抖动（官方指南列为反模式）。
+    /// 职责：元数据（曲名/歌手/封面/时长）+ playbackState + 一次立即的进度落点。
+    /// 高频进度不在这里推，由 writeNowPlayingProgress 按 1s 节流跟进。
     private func updateNowPlaying() {
-        lastNowPlayingUpdate = Date()
+        lastNowPlayingProgressAt = Date()
 
         guard tracks.indices.contains(currentIndex) else {
             nowPlaying.nowPlayingInfo = nil
+            nowPlaying.playbackState = .stopped
             refreshRemoteCommandAvailability()
             return
         }
         let track = tracks[currentIndex]
+        let playback = currentNowPlayingPlayback()
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: track.title,
             MPMediaItemPropertyArtist: track.artist,
             MPMediaItemPropertyPlaybackDuration: Double(max(1, currentItemDurationMs())) / 1000.0,
             MPNowPlayingInfoPropertyElapsedPlaybackTime: max(0, mpv?.currentTime ?? 0),
-            // 意图，不是瞬时状态（理由见 playingIntent 注释）
-            MPNowPlayingInfoPropertyPlaybackRate: playingIntent ? 1.0 : 0.0,
             MPNowPlayingInfoPropertyDefaultPlaybackRate: 1.0,
             MPNowPlayingInfoPropertyMediaType: MPNowPlayingInfoMediaType.audio.rawValue,
         ]
+        // playbackState 与 PlaybackRate 成对写：rate 跟真实播放态走，不再恒等于播放意图
+        applyNowPlayingPlayback(playback, to: &info)
         if let album = track.album, !album.isEmpty {
             info[MPMediaItemPropertyAlbumTitle] = album
         }
@@ -952,10 +1142,23 @@ final class AudioEngine: NSObject {
         logNowPlayingDiagnostics(reason: "update")
     }
 
-    /// 低频校准：长播时系统按 rate 推算的进度会漂，每 10s 拿真实位置正面覆盖一次。
-    private func resyncNowPlayingIfStale() {
-        guard Date().timeIntervalSince(lastNowPlayingUpdate) >= 10 else { return }
-        updateNowPlaying()
+    /// **time-pos 驱动**的进度回写（约 1s 节流）。
+    ///
+    /// AVPlayer 时代是一招「一次性写 PlaybackRate=1.0 让系统自己往后推算 + 每 10s 校准」，
+    /// mpv 下这条不成立：seek 后推算起点没跟上、缓冲期间推算照走、换源后时长也变，
+    /// 10s 的校准窗口太粗 —— 表现就是「锁屏进度条和实际播放位置对不上」。
+    /// 现在订阅 mpv 的 time-pos，按 1s 节流把**真实位置**正面写回，Rate 与真实播放态一致。
+    ///
+    /// 只在已有 nowPlayingInfo 上做增量覆盖：封面这类重字段不碰，省掉无谓重绘。
+    private func writeNowPlayingProgress(elapsed seconds: Double) {
+        guard tracks.indices.contains(currentIndex), var info = nowPlaying.nowPlayingInfo else { return }
+        let now = Date()
+        guard now.timeIntervalSince(lastNowPlayingProgressAt) >= Self.nowPlayingProgressInterval else { return }
+        lastNowPlayingProgressAt = now
+        info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = max(0, seconds)
+        info[MPMediaItemPropertyPlaybackDuration] = Double(max(1, currentItemDurationMs())) / 1000.0
+        applyNowPlayingPlayback(currentNowPlayingPlayback(), to: &info)
+        nowPlaying.nowPlayingInfo = info
     }
 
     /// Now Playing 自检：把系统侧真正生效的状态打到 Xcode 控制台。
@@ -974,7 +1177,8 @@ final class AudioEngine: NSObject {
         print("[NowPlaying/\(reason)] cat=\(session.category.rawValue) mode=\(session.mode.rawValue) "
               + "opts=\(session.categoryOptions.rawValue) ioSampleRate=\(session.sampleRate) "
               + "intent=\(playingIntent ? "play" : "pause")")
-        print("[NowPlaying/\(reason)] title=\(title) rate=\(num(rate)) elapsed=\(num(elapsed)) "
+        print("[NowPlaying/\(reason)] title=\(title) playbackState=\(nowPlaying.playbackState.rawValue) "
+              + "rate=\(num(rate)) elapsed=\(num(elapsed)) "
               + "dur=\(num(duration)) artwork=\(hasArtwork ? "Y" : "N") "
               + "| cmds play=\(center.playCommand.isEnabled) pause=\(center.pauseCommand.isEnabled) "
               + "toggle=\(center.togglePlayPauseCommand.isEnabled) next=\(center.nextTrackCommand.isEnabled) "

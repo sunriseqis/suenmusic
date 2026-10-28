@@ -113,10 +113,12 @@ const QUALITY_ORDER = ['standard', 'high', 'exhigh', 'lossless'];
 /**
  * 根据用户期望音质与 VIP 能力决定尝试档位列表，非 VIP 绝不请求 lossless。
  *
- * preferMp3（要 mp3 容器，iOS）：网易的无损是 FLAC，AVPlayer 流播不了，
- * 所以必须从候选里**真剔除** lossless/hires/jymaster，而不只是不声明。
+ * ⚠️ 这里曾经按 `preferMp3`（iOS）**真剔除** lossless/hires/jymaster ——
+ * 理由是「网易的无损是 FLAC，AVPlayer 流播不了」。2026-10-28 iOS 播放内核换成
+ * libmpv（ffmpeg 解码）后 FLAC 实测可播（docs/memory/2026-10-28-iOS音频格式实测矩阵.md 第五节），
+ * 该剔除已撤销：能不能取无损只取决于 VIP 与曲目版权，与客户端平台无关。
  */
-function computeNeteaseLevels(vip: boolean, quality?: string, preferMp3 = false): string[] {
+function computeNeteaseLevels(vip: boolean, quality?: string): string[] {
   const q = String(quality ?? '').trim().toLowerCase();
   let levels: string[];
   if (q === 'standard') {
@@ -131,8 +133,7 @@ function computeNeteaseLevels(vip: boolean, quality?: string, preferMp3 = false)
   } else {
     levels = vip ? ['lossless', 'exhigh', 'higher', 'standard'] : ['exhigh', 'higher', 'standard'];
   }
-  if (!preferMp3) return levels;
-  return levels.filter(l => l !== 'lossless' && l !== 'hires' && l !== 'jymaster');
+  return levels;
 }
 
 /**
@@ -143,8 +144,8 @@ function computeNeteaseLevels(vip: boolean, quality?: string, preferMp3 = false)
  * 高于 L 的一律不声明 —— 那正是以前谎报的来源。
  *
  * 注意 QUALITY_ORDER 是「低 → 高」，因此取前缀 = 取 ≤ L 的全部档位。
- * preferMp3（iOS 流播不了 FLAC）已经在上游的候选序列里剔掉 lossless，
- * 所以这里不会因为前缀而把 lossless 又说回来。
+ * 候选序列不再按客户端平台剔档（见 computeNeteaseLevels），所以只要本次真拿到了
+ * lossless，前缀里就包含 lossless —— 这正是「iOS 也能声明无损」的来源。
  */
 function availableUpTo(quality: string): string[] {
   const idx = QUALITY_ORDER.indexOf(quality);
@@ -174,9 +175,9 @@ function fail(reason: ResolveResult['reason'], message: string): ResolveResult {
 async function fetchPlayableUrl(
   songId: number,
   vip: boolean,
-  options?: { preferMp3?: boolean; quality?: string },
+  options?: { quality?: string },
 ): Promise<PlayableUrlResult | null> {
-  const levels = computeNeteaseLevels(vip, options?.quality, Boolean(options?.preferMp3));
+  const levels = computeNeteaseLevels(vip, options?.quality);
 
   for (const level of levels) {
     try {
@@ -190,12 +191,6 @@ async function fetchPlayableUrl(
       // freeTrialInfo 非空 = 该档位只有试听，往下一档试
       if (entry.freeTrialInfo) continue;
       if (!entry.url) continue;
-      /**
-       * preferMp3（iOS）：万一上游仍回执无损（请求档与回执档不符的异常情形），
-       * 那个 URL 就是 FLAC —— AVPlayer 流播不了，按"这一档失败"处理继续往下试，
-       * 否则会把一个播不动的档当成结果返回，还会被声明成可取。
-       */
-      if (options?.preferMp3 && levelToQuality(entry.level) === 'lossless') continue;
       // 以**上游回执里的真实档位**为准（可能是比请求更低的档），声明只到它为止
       const got = mapNeteaseQuality(entry.level, level);
       return {
@@ -225,9 +220,13 @@ async function fetchPlayableUrl(
  * 调用方（resolver）据此继续走 B 站。任何异常都被吞成失败——
  * 网易云不可用不能影响 B 站兜底链路。
  */
+/**
+ * ⚠️ 选项里**没有**容器偏好：网易回的容器由档位决定（lossless=FLAC、其余=MP3），
+ * 客户端要 mp3 容器时由 quality 表达（不选 lossless 即可），本源无需再分叉。
+ */
 export async function resolveNeteaseSource(
   track: ResolveInput,
-  options?: { preferMp3?: boolean; quality?: string },
+  options?: { quality?: string },
 ): Promise<ResolveResult> {
   const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const rawId = String(track.id ?? '').trim();

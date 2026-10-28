@@ -78,7 +78,7 @@ export function signSessionStreamToken(
  * 生成完整的流地址（含令牌），供 `/api/resolve` 返回给客户端。
  *
  * ★ `quality` 随地址透传（S-16）：代理侧据此读**同一个**缓存键
- * （`cacheKeyFor(trackId, preferMp3, quality)`）。不带的话，iOS 直链失效回退代理时
+ * （`cacheKeyFor(trackId, mp3Container, quality)`）。不带的话，iOS 直链失效回退代理时
  * 读的是无档位键 → 必 miss 一次重解析，且重解析结果又写进无档位键，
  * 下次 resolve 读带档位键仍是旧地址（S-2 的尾巴）。
  *

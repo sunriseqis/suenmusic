@@ -120,6 +120,14 @@ export interface ResolveResult {
   /** 本曲可用音质档位列表 */
   availableQualities?: string[];
   /**
+   * 备用 CDN 地址（多镜像，**不含主地址**，已去重）。
+   *
+   * B 站 playurl 的 `backupUrl` / `backup_url`、酷狗 tracker 的多条 url 都是同一条音频
+   * 在别的 CDN 节点上的副本 —— 主节点慢/挂了客户端可以换着试。
+   * 本轮只做「解析 + 下发」：失败与重试语义不变，仍由客户端决定。
+   */
+  backupUrls?: string[];
+  /**
    * 本次解析是「酷狗上游因为 20028 明确要求验证」失败的。
    * 只由酷狗取流层置位，且**只描述这一次解析** —— 不能拿「有没有活跃验证事件」
    * 反推（那会把 B 站失败、网络失败一律误标成需要验证）。
@@ -306,6 +314,8 @@ export interface AudioStream {
   bandwidth: number;
   mimeType: string;
   fallback: boolean;
+  /** 同一音频的备用 CDN 地址（backupUrl / backup_url，去重且不含主地址） */
+  backupUrls: string[];
   /** 视频封面（https）。无 Q 音专辑封面的曲目用它做显示层兜底 */
   pic?: string;
   quality?: string;
@@ -319,6 +329,9 @@ interface BiliViewResponse {
 interface BiliPlayUrlAudio {
   baseUrl?: string;
   base_url?: string;
+  /** 备用 CDN 地址。B 站有两种拼写，两边都要读（实测同时出现） */
+  backupUrl?: string[];
+  backup_url?: string[];
   bandwidth?: number;
   mimeType?: string;
   mime_type?: string;
@@ -328,7 +341,7 @@ interface BiliPlayUrlResponse {
   code?: number;
   data?: {
     dash?: { audio?: BiliPlayUrlAudio[] };
-    durl?: Array<{ url?: string }>;
+    durl?: Array<{ url?: string; backupUrl?: string[]; backup_url?: string[] }>;
   };
 }
 
@@ -340,7 +353,7 @@ interface BiliPlayUrlResponse {
  */
 export async function getAudioStream(
   bvid: string,
-  options: { preferMp3?: boolean; quality?: string } = {}
+  options: { mp3Container?: boolean; quality?: string } = {}
 ): Promise<AudioStream | null> {
   try {
     upstreamStats.view++;
@@ -378,7 +391,7 @@ export async function getAudioStream(
       /**
        * 只有用户明确要 standard 时取最低码率档（~64k/132k），否则取最高码率档（~192k 30280）。
        *
-       * ⚠️ preferMp3 不参与判定：它表达的是「要 mp3 容器」，不是「要最低码率」。
+       * ⚠️ mp3Container 不参与判定：它表达的是「要 mp3 容器」，不是「要最低码率」。
        * 并进来会让 iOS 恒定拿最低档（B 站 DASH 都是 m4a，本来也没有 mp3 可选）。
        */
       const sorted = [...audios].sort(
@@ -395,6 +408,8 @@ export async function getAudioStream(
           bandwidth: chosen.bandwidth || 0,
           mimeType: chosen.mimeType || chosen.mime_type || 'audio/mp4',
           fallback: false,
+          // 备用 CDN 只认**选中那条**音频自己的备份数组，不能混入别档位的地址
+          backupUrls: normalizeBackups(raw, [chosen.backupUrl, chosen.backup_url]),
           pic,
           quality: wantStandard ? 'standard' : 'high',
         };
@@ -402,13 +417,15 @@ export async function getAudioStream(
     }
 
     // DASH 不可用时回落到 durl（音视频混合流）
-    const durl = data?.durl?.[0]?.url;
+    const durlEntry = data?.durl?.[0];
+    const durl = durlEntry?.url;
     if (durl) {
       return {
         url: toHttps(durl),
         bandwidth: 0,
         mimeType: 'video/mp4',
         fallback: true,
+        backupUrls: normalizeBackups(durl, [durlEntry?.backupUrl, durlEntry?.backup_url]),
         pic,
         quality: 'standard',
       };
@@ -427,12 +444,35 @@ function toHttps(url: string): string {
 }
 
 /**
+ * 归一化备用 CDN 地址：转 https、丢空值、**去掉主地址**、按出现顺序去重。
+ *
+ * 去主地址很重要：B 站会把同一个地址也塞进 backupUrl（实测备份数组里常含主地址本身），
+ * 原样下发会让客户端「重试」到自己刚失败的那个节点。
+ */
+function normalizeBackups(primary: string, groups: unknown[]): string[] {
+  const primaryHttps = primary ? toHttps(primary) : '';
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const group of groups) {
+    const list = Array.isArray(group) ? group : typeof group === 'string' ? [group] : [];
+    for (const item of list) {
+      if (typeof item !== 'string' || !item) continue;
+      const url = toHttps(item);
+      if (url === primaryHttps || seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
+/**
  * 直连 BVID 或「搜索 -> 打分 -> 熔断 -> 取流」的完整流程。
  * 不带缓存，每次调用都会真实访问上游。
  */
 export async function resolveTrackSource(
   track: ResolveInput,
-  options: { preferMp3?: boolean; quality?: string } = {}
+  options: { mp3Container?: boolean; quality?: string } = {}
 ): Promise<ResolveResult> {
   // 0. 已绑定 BVID 时直接取流，跳过搜索
   const directBvid = track.bvid;
@@ -447,6 +487,7 @@ export async function resolveTrackSource(
       bandwidth: stream.bandwidth,
       fallbackStream: stream.fallback,
       coverUrl: stream.pic,
+      backupUrls: stream.backupUrls,
       source: 'bilibili',
       currentQuality: stream.quality ?? 'high',
       availableQualities: ['standard', 'high'],
@@ -525,6 +566,7 @@ export async function resolveTrackSource(
     coverUrl: stream.pic,
     topCandidates,
     source: 'bilibili',
+    backupUrls: stream.backupUrls,
     currentQuality: stream.quality ?? 'high',
     availableQualities: ['standard', 'high'],
   };

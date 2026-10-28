@@ -116,11 +116,13 @@ export function cacheKey(input: ResolveInput): string {
  * 一旦两处各拼一套，同一首歌就会出现「写一套键、读另一套键」的错配，
  * 响应里的 directUrl / directHeaders / source 会取自另一个音质档位的历史行。
  *
- * 规则：`trackId` + 可选的 `:mp3`（iOS 要 mp3 容器）+ 可选的 `:<quality>`。
+ * 规则：`trackId` + 可选的 `:mp3`（要 mp3 容器）+ 可选的 `:<quality>`。
+ * ⚠️ `:mp3` 后缀只标记**容器偏好**，不代表码率档位 —— 带它的键里同样可以是 lossless
+ * （FLAC）。改名（preferMp3 → mp3Container）不改规则，历史行的键仍然对得上。
  */
-export function cacheKeyFor(trackId: string, preferMp3 = false, quality?: string): string {
+export function cacheKeyFor(trackId: string, mp3Container = false, quality?: string): string {
   const q = String(quality ?? '').trim().toLowerCase();
-  const base = preferMp3 ? `${trackId}:mp3` : trackId;
+  const base = mp3Container ? `${trackId}:mp3` : trackId;
   return q ? `${base}:${q}` : base;
 }
 
@@ -138,8 +140,8 @@ export type QualityName = (typeof QUALITY_WHITELIST)[number];
 /**
  * 白名单归一化：命中返回小写档位，否则返回 null。
  *
- * **不猜缺省值** —— 缺省由调用方按平台身份决定（routes/resolve.ts 的 normalizeQuality：
- * iOS 缺省 exhigh、其余端 lossless）。代理侧只想知道「这次请求带了哪个档」，
+ * **不猜缺省值** —— 缺省由调用方决定（routes/resolve.ts 的 normalizeQuality：所有端
+ * 缺省 lossless；2026-10-28 起不再按平台分档）。代理侧只想知道「这次请求带了哪个档」，
  * 替它猜一个缺省值只会让它去读一个跟写侧不一致的键。
  */
 export function whitelistQuality(raw: unknown): QualityName | null {
@@ -184,15 +186,20 @@ function memoryDelete(key: string): void {
   }
 }
 
-export function isFlacUrl(url: string | null | undefined): boolean {
+/**
+ * 「这个地址的容器是不是 OGG」—— 只用于**坏缓存防御**，不再参与音质判定。
+ *
+ * 历史：以前叫 isFlacUrl，把 flac / quflac / x-flac 也算进来，命中就当这条缓存不可用
+ * 丢掉重解析 —— 那是为了绕开 AVPlayer 播不了 FLAC。2026-10-28 换成 libmpv 后
+ * FLAC 完全合法（docs/memory/2026-10-28-iOS音频格式实测矩阵.md 第五节），继续按 FLAC 判坏
+ * 只会让「iOS 每次都要无损」变成每条缓存都被判死、反复重解析上游。
+ *
+ * 因此范围收窄成**只挡 OGG**：要 mp3 容器的客户端（iOS / ?format=mp3）拿到 ogg 容器
+ * 属于上游 need_ogg 失效的异常结果，按坏缓存丢掉重新解析即可。
+ */
+export function isOggUrl(url: string | null | undefined): boolean {
   if (!url) return false;
-  return (
-    /\.flac(\?|$)/i.test(url) ||
-    /quflac/i.test(url) ||
-    /audio\/x-flac/i.test(url) ||
-    /\.ogg(\?|$)/i.test(url) ||
-    /audio\/ogg/i.test(url)
-  );
+  return /\.ogg(\?|$)/i.test(url) || /audio\/ogg/i.test(url);
 }
 
 // ---------- 对外接口 ----------
@@ -208,8 +215,11 @@ export interface ResolveOptions {
    * 一次失败结果会让这首歌在负缓存周期内怎么重试都播不出来。
    */
   retry?: boolean;
-  /** 优先使用 MP3（iOS 客户端规避 FLAC 播放器兼容性问题） */
-  preferMp3?: boolean;
+  /**
+   * 要 MP3 容器（iOS / ?format=mp3）。**只影响容器，不影响可取档位** ——
+   * 带它的请求照样可以拿 lossless（FLAC），不再因为要 mp3 容器被降档。
+   */
+  mp3Container?: boolean;
   /** 期望的音质档位：lossless / exhigh / high / standard */
   quality?: string;
 }
@@ -236,9 +246,9 @@ export function resolveTrack(
     });
   }
 
-  const preferMp3 = Boolean(options.preferMp3);
+  const mp3Container = Boolean(options.mp3Container);
   const quality = options.quality ? String(options.quality).trim().toLowerCase() : '';
-  const cKey = cacheKeyFor(key, preferMp3, quality);
+  const cKey = cacheKeyFor(key, mp3Container, quality);
 
   /**
    * 用户源钉（锚定页「只用某源」）。
@@ -280,7 +290,7 @@ export function resolveTrack(
     if (anchor?.pinned && !pin) {
       const cached = memoryGet(cKey);
       if (cached && cached.bvid === anchor.bvid && cached.ok) {
-        if (!preferMp3 || !isFlacUrl(cached.sourceUrl)) {
+        if (!mp3Container || !isOggUrl(cached.sourceUrl)) {
           stats.memoryHits++;
           return Promise.resolve(decorate(cached, key, 'memory', started));
         }
@@ -292,7 +302,7 @@ export function resolveTrack(
 
       const persisted = getSource(cKey);
       if (persisted && persisted.bvid === anchor.bvid && persisted.ok) {
-        if (!preferMp3 || !isFlacUrl(persisted.audioUrl)) {
+        if (!mp3Container || !isOggUrl(persisted.audioUrl)) {
           const result = rowToResult(persisted);
           memorySet(cKey, result, persisted.expiresAt);
           stats.dbHits++;
@@ -306,7 +316,7 @@ export function resolveTrack(
 
     const cached = memoryGet(cKey);
     if (cached) {
-      if (preferMp3 && isFlacUrl(cached.sourceUrl)) {
+      if (mp3Container && isOggUrl(cached.sourceUrl)) {
         memoryDelete(cKey);
       } else {
         stats.memoryHits++;
@@ -325,7 +335,7 @@ export function resolveTrack(
 
     const persisted = getSource(cKey);
     if (persisted) {
-      if (preferMp3 && isFlacUrl(persisted.audioUrl)) {
+      if (mp3Container && isOggUrl(persisted.audioUrl)) {
         deleteSource(cKey);
       } else {
         const result = rowToResult(persisted);
@@ -382,25 +392,26 @@ export function resolveTrack(
     const kgStatus = await readKugouLoginState();
     if (!kugouUsable(kgStatus.state)) {
       log.debug(`酷狗无有效会员（${kgStatus.state}），直接走 B 站兜底`);
-      return resolveTrackSource(input, { preferMp3, quality: options.quality });
+      return resolveTrackSource(input, { mp3Container, quality: options.quality });
     }
     const meta = readKugouMeta(key);
     if (meta) {
-      const direct = await resolveKugouDirect(meta, { preferMp3, quality: options.quality });
+      const direct = await resolveKugouDirect(meta, { mp3Container, quality: options.quality });
       if (direct.ok) {
         log.info(`音源链 kg → 酷狗直取 ${key} 「${direct.matchedTitle}」 时长差=${direct.durationDiff ?? 0}s`);
         return direct;
       }
       log.debug(`酷狗直取未命中 ${key}：${direct.message ?? ''}，按名搜一次`);
     }
-    const searched = await resolveKugouSource(input, { preferMp3, quality: options.quality });
+    const searched = await resolveKugouSource(input, { mp3Container, quality: options.quality });
     if (searched.ok) {
       log.info(`音源链 kg → 酷狗搜索命中 ${key} 「${searched.matchedTitle}」 时长差=${searched.durationDiff ?? 0}s`);
       return searched;
     }
     log.debug(`酷狗未命中 ${key}：${searched.message ?? ''}，转 B 站`);
-    // preferMp3 透传：iOS 分支下 B 站 DASH 也要降档（方案 A 覆盖 B 站链路）
-    return resolveTrackSource(input, { preferMp3, quality: options.quality });
+    // 容器偏好照旧透传（B 站 DASH 全是 m4a，实际没有 mp3 可选，只是保持调用契约一致）；
+    // 注意它**不参与档位选择** —— 要无损时这里照样取最高码率档。
+    return resolveTrackSource(input, { mp3Container, quality: options.quality });
   };
 
   /**
@@ -411,13 +422,14 @@ export function resolveTrack(
    * 拿不到完整地址才落 B 站。很多歌其实是免费可听的，跳过等于白丢一条源。
    */
   const neChain = async (): Promise<ResolveResult> => {
-    const ne = await resolveNeteaseSource(input, { preferMp3, quality: options.quality });
+    // 网易回的容器由档位决定，本源不接受容器偏好（传了类型上也不允许）
+    const ne = await resolveNeteaseSource(input, { quality: options.quality });
     if (ne.ok) {
       log.info(`音源链 ne → 网易云命中 ${key} 「${ne.matchedTitle}」 时长差=${ne.durationDiff ?? 0}s`);
       return ne;
     }
     log.debug(`网易云未命中 ${key}：${ne.message ?? ''}，转 B 站`);
-    return resolveTrackSource(input, { preferMp3, quality: options.quality });
+    return resolveTrackSource(input, { mp3Container, quality: options.quality });
   };
 
   /**
@@ -431,9 +443,9 @@ export function resolveTrack(
     const kgStatus = await readKugouLoginState();
     if (!kugouUsable(kgStatus.state)) {
       log.debug(`酷狗无有效会员（${kgStatus.state}），跳过酷狗直接走 B 站`);
-      return resolveTrackSource(input, { preferMp3, quality: options.quality });
+      return resolveTrackSource(input, { mp3Container, quality: options.quality });
     }
-    const kugouResult = await resolveKugouSource(input, { preferMp3, quality: options.quality });
+    const kugouResult = await resolveKugouSource(input, { mp3Container, quality: options.quality });
     if (kugouResult.ok) {
       log.info(
         `音源链 qq → 酷狗命中 ${key} 「${kugouResult.matchedTitle}」` +
@@ -442,15 +454,15 @@ export function resolveTrack(
       return kugouResult;
     }
     log.debug(`酷狗未命中 ${key}：${kugouResult.message ?? ''}，转 B 站`);
-    return resolveTrackSource(input, { preferMp3, quality: options.quality });
+    return resolveTrackSource(input, { mp3Container, quality: options.quality });
   };
 
   const baseChain: Promise<ResolveResult> = pin
     ? (async (): Promise<ResolveResult> => {
         log.info(`源钉 ${key} → 只走 ${pin.source}`);
         return pin.source === 'kugou'
-          ? resolveKugouSource(input, { preferMp3, quality: options.quality })
-          : resolveNeteaseSource(input, { preferMp3, quality: options.quality });
+          ? resolveKugouSource(input, { mp3Container, quality: options.quality })
+          : resolveNeteaseSource(input, { quality: options.quality });
       })()
     : source === 'kg'
       ? kgChain()
@@ -463,7 +475,7 @@ export function resolveTrack(
       // 成功与失败都落库。负缓存同样重要：否则重启后会把"注定匹配不到"的
       // 曲子重新打一遍上游，而这正是风控的主要来源。
       saveSource(cKey, result);
-      // 失败结果**同键落库**（不带 :mp3 后缀）：iOS(:mp3) 与非 iOS 共享负缓存，
+      // 失败结果**同键落库**（不带 :mp3 后缀）：带容器偏好(:mp3)与不带它的键共享负缓存，
       // 否则 iOS 每次切歌都要把注定失败的上游链路重打一遍（2026-10-27 报障：启播缓慢）。
       if (!result.ok) saveSource(key, result);
       const expiresAt = result.ok
@@ -539,7 +551,7 @@ async function resolveFromAnchor(
       durationMs: input.durationMs,
       bvid: anchor.bvid,
     },
-    { preferMp3: Boolean(options.preferMp3), quality: options.quality }
+    { mp3Container: Boolean(options.mp3Container), quality: options.quality }
   );
 
   if (result.ok) {
@@ -559,7 +571,7 @@ async function resolveFromAnchor(
     };
     // 锚点路径也必须写「本次请求的那个键」：写裸键的话，带 quality 的读取永远 miss，
     // 而裸键里的旧行又会被别的档位读到（S-1 的根因）。
-    const anchorKey = cacheKeyFor(key, Boolean(options.preferMp3), options.quality);
+    const anchorKey = cacheKeyFor(key, Boolean(options.mp3Container), options.quality);
     saveSource(anchorKey, enriched);
     memorySet(anchorKey, enriched, computeExpiry(enriched.sourceUrl ?? '', ts));
     log.info(`锚点命中 ${key} → ${anchor.bvid}（${anchor.pinned ? '手动' : '自动'}）`);

@@ -809,6 +809,27 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
+    /// 缓冲态（mpv paused-for-cache / core-idle）→ **复用已有的 loading 通道**。
+    ///
+    /// 为什么不再造一个 isBuffering：loading 本来就是「还没真正出声」的唯一表示，
+    /// 看门狗（armLoadWatchdog）与失败三分支都挂在它上面 —— 另起一套会让两处状态打架。
+    /// 这里只是把 mpv 的缓冲事件翻译成同一根开关：
+    ///   · 缓冲开始 → loading = true（播放页播放键显示转圈，用户知道"在等"而不是"卡死"）
+    ///   · 缓冲结束 / 真正出流 → loading = false（由引擎在 .playing 时补发一次）
+    nonisolated func emitBuffering(_ buffering: Bool) {
+        Task { @MainActor in
+            if buffering {
+                // 用户意图是暂停时不该冒 loading：缓冲只对「点了播放」有意义
+                guard self.playing else { return }
+                self.loading = true
+                NSLog("[Buffer] mpv 缓冲中 → loading=true")
+            } else {
+                self.loading = false
+                NSLog("[Buffer] 缓冲结束 → loading=false")
+            }
+        }
+    }
+
     nonisolated func emitProgress(index: Int, positionMs: Int, durationMs: Int, playing: Bool) {
         Task { @MainActor in
             // 进度回调只在引擎给的下标**在当前队列之内**时才采纳：

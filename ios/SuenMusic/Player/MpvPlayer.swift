@@ -65,6 +65,11 @@ final class MpvPlayer {
     private var coreIdle = true
     private var pausedForCache = false
     private var lastTimeEmit = Date.distantPast
+    /// 最近一次 time-pos **真的变化**的时刻（nil = 本轮装载还没出过第一次推进）。
+    ///
+    /// core-idle 既可能表示缓冲、也可能只是核心在等处：单看它判缓冲会误伤正常播放
+    /// （误判的代价是 UI 上一个永不消失的 loading），所以要用「确实没在推进」交叉确认。
+    private var lastAdvanceAt: Date?
 
     /// time-pos 的节流间隔：mpv 自己的属性回调频率不可控，UI 只要 4Hz 就够
     private static let timeEmitInterval: TimeInterval = 0.25
@@ -210,6 +215,7 @@ final class MpvPlayer {
         currentTime = max(0, startAt)
         duration = 0
         lastTimeEmit = .distantPast
+        lastAdvanceAt = nil          // 新文件：推进基准从零开始算
         lock.unlock()
 
         // ③ 装载（replace：换掉当前文件，而不是排队）
@@ -348,6 +354,8 @@ final class MpvPlayer {
             guard format == 5 else { return }          // 5 = MPV_FORMAT_DOUBLE
             let value = data.assumingMemoryBound(to: Double.self).pointee
             lock.lock()
+            // 推进判定：往前走了才算（seek 造成的倒退不算推进）
+            if value > currentTime + 0.01 { lastAdvanceAt = Date() }
             currentTime = value
             let emit = Date().timeIntervalSince(lastTimeEmit) >= Self.timeEmitInterval
             if emit { lastTimeEmit = Date() }
@@ -401,6 +409,10 @@ final class MpvPlayer {
     }
 
     /// 把三个 flag 归并成对外的四态。只在**变化**时上报（缓冲抖动不该刷 UI）。
+    ///
+    /// core-idle 的映射要保守：它表示「核心当前没有在推进」，缓冲时会置真，但装载 /
+    /// 等处时也会短暂置真。直接拿它当 buffering 有把正常播放误判成缓冲的风险，
+    /// 所以只在 **time-pos 确实 2s 没动过**（lastAdvanceAt 交叉确认）时才算缓冲。
     private func refreshState() {
         lock.lock()
         let next: PlaybackState
@@ -409,6 +421,8 @@ final class MpvPlayer {
         } else if paused {
             next = .paused
         } else if pausedForCache {
+            next = .buffering
+        } else if coreIdle && Self.notAdvancing(lastAdvanceAt) {
             next = .buffering
         } else {
             next = .playing
@@ -419,6 +433,12 @@ final class MpvPlayer {
         guard changed else { return }
         NSLog("[Mpv] state=%@", next.rawValue)
         emitMain { $0.onState?(next) }
+    }
+
+    /// 距上次真实推进超过 2s 视为「没在推进」（nil = 本轮还没出过推进，同样算）
+    private static func notAdvancing(_ lastAdvanceAt: Date?) -> Bool {
+        guard let lastAdvanceAt = lastAdvanceAt else { return true }
+        return Date().timeIntervalSince(lastAdvanceAt) >= 2.0
     }
 
     private func refreshDuration() {

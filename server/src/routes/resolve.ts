@@ -38,7 +38,7 @@ import {
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
-import { isIosClient, wantsMp3 } from '../http/platform.ts';
+import { wantsMp3Container } from '../http/platform.ts';
 
 const log = createLogger('routes:resolve');
 
@@ -56,14 +56,19 @@ function directEnabled(): boolean {
 const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
 
 /**
- * 归一化音质参数（doc2 §四.1）：白名单命中就用它（统一小写），否则按平台缺省 ——
- * iOS 缺省 exhigh（避开 FLAC 的播放器兼容问题），其他端缺省 lossless。
+ * 归一化音质参数（doc2 §四.1）：白名单命中就用它（统一小写），否则缺省 lossless。
+ *
+ * ⚠️ **不再按平台降档**（2026-10-28）：iOS 播放内核已从 AVPlayer 换成 libmpv
+ * （ffmpeg 解码），FLAC / OGG / fMP4 / MP3 实测全部可播
+ * （docs/memory/2026-10-28-iOS音频格式实测矩阵.md 第五节）。以前「iOS 缺省 exhigh」
+ * 只是为了绕开 AVPlayer 播不了 FLAC —— 那个理由已经不成立，用户选无损就给无损。
+ * 保留下来的平台差异只有**容器偏好**（320k 档仍走 mp3 容器而不是 ogg，见 mp3Container）。
  *
  * 白名单本身由 services/resolver.ts 提供（与缓存键规则同一个家）：
  * 代理侧读键前也要过同一份名单，两处各留一份迟早漂移。
  */
-function normalizeQuality(raw: string, ios: boolean): string {
-  return whitelistQuality(raw) ?? (ios ? 'exhigh' : 'lossless');
+function normalizeQuality(raw: string): string {
+  return whitelistQuality(raw) ?? 'lossless';
 }
 
 type TrackMeta = Awaited<ReturnType<typeof loadTrack>>;
@@ -71,12 +76,12 @@ type TrackMeta = Awaited<ReturnType<typeof loadTrack>>;
 function shape(
   outcome: ResolveOutcome,
   meta: TrackMeta = null,
-  preferMp3 = false,
+  mp3Container = false,
   quality?: string,
 ): Record<string, unknown> {
   // 读的键必须与 resolver 写的是同一个（cacheKeyFor）：否则带 quality 的请求永远读不到本次
   // 解析写下的那一行，反而取到别的档位/别的音源的历史行（directUrl、directHeaders、source 一起错）。
-  const row = outcome.ok ? getSource(cacheKeyFor(outcome.trackId, preferMp3, quality)) : null;
+  const row = outcome.ok ? getSource(cacheKeyFor(outcome.trackId, mp3Container, quality)) : null;
   /**
    * 需要验证的判定**只看本次解析**：outcome.verifyRequired（酷狗 /tracker/v5/url 真撞到
    * 20028 时由 sources/kugou/stream.ts 置位）。
@@ -98,6 +103,17 @@ function shape(
     (outcome.availableQualities?.length ? outcome.availableQualities : undefined) ??
     (row?.availableQualities.length ? row.availableQualities : undefined) ??
     ['standard'];
+  /**
+   * 备用 CDN 直链（多镜像）：解析时一并拿下、按出现顺序去重、**不含主地址**。
+   *
+   * 来源：B 站 playurl 的 backupUrl / backup_url，酷狗 tracker 的多条 CDN 候选。
+   * 语义边界（本轮刻意不越界）：只做「解析 + 下发」，不改失败/重试 ——
+   * 主地址挂了客户端自己换着试，服务端照旧按主地址代理。
+   */
+  const effectiveBackups =
+    (outcome.backupUrls?.length ? outcome.backupUrls : undefined) ??
+    (row?.backupUrls.length ? row.backupUrls : undefined) ??
+    [];
 
   /**
    * 失败分两类（用户拍板）：
@@ -161,6 +177,12 @@ function shape(
       directEnabled() && outcome.ok
         ? audioHeadersFor((row?.source ?? outcome.source ?? 'bilibili') as 'bilibili' | 'netease' | 'kugou')
         : null,
+    /**
+     * 备用 CDN 直链（镜像）。取流时**带同一份 directHeaders**（B 站仍要 Referer）。
+     * 无则空数组 —— 不下发 null，客户端不必判空。直链通道关闭时同样为空
+     * （备用地址也是直连 CDN，没有直链通道就没有可用的备用地址）。
+     */
+    backupUrls: directEnabled() && outcome.ok ? effectiveBackups : [],
     /** 直链剩余有效期（秒）：与音源缓存同口径，到期必须重新解析 */
     directExpiresInSec:
       directEnabled() && row ? Math.max(0, Math.round((row.expiresAt - Date.now()) / 1000)) : 0,
@@ -274,10 +296,10 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     const trackId = parsed.raw;
     const force = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.force).toLowerCase());
     const retry = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.retry).toLowerCase());
-    // 平台身份与「要 mp3 容器」是两件事：iOS 身份决定缺省音质，mp3 偏好决定容器
-    const ios = isIosClient(req);
-    const preferMp3 = wantsMp3(req);
-    const quality = normalizeQuality(strParam((req.query as any)?.quality), ios);
+    // 「要 mp3 容器」偏好（iOS 或显式 ?format=mp3）：**只决定容器**，不决定码率档位。
+    // 缺省音质不再看平台（libmpv 能播 FLAC，见 normalizeQuality 注释）。
+    const mp3Container = wantsMp3Container(req);
+    const quality = normalizeQuality(strParam((req.query as any)?.quality));
 
     const meta = await loadTrack(trackId);
     if (!meta) throw notFound('曲目不存在');
@@ -291,14 +313,14 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         // 无 Q 音专辑封面时网易云路径会去取网易云侧专辑封面（显示层兜底）
         hasAlbumCover: Boolean(meta.albumPic),
       },
-      { force, retry, preferMp3, quality }
+      { force, retry, mp3Container, quality }
     );
 
     log.debug(
       `resolve ${trackId} ok=${outcome.ok} hit=${outcome.hitLevel} ${outcome.costMs}ms`
     );
 
-    return shape(outcome, meta, preferMp3, quality);
+    return shape(outcome, meta, mp3Container, quality);
   });
 
   /**
@@ -310,11 +332,10 @@ export function registerResolveRoutes(app: FastifyInstance): void {
   app.post('/api/resolve/batch', async req => {
     requireUser(req);
 
-    const ios = isIosClient(req);
-    const preferMp3 = wantsMp3(req);
+    const mp3Container = wantsMp3Container(req);
     const body = (req.body ?? {}) as { trackIds?: unknown; quality?: unknown };
     // 与单曲接口同规则：归一化后再进缓存键与 shape()，否则批量预取会写出一批平行键
-    const quality = normalizeQuality(strParam(body.quality), ios);
+    const quality = normalizeQuality(strParam(body.quality));
     const ids = Array.isArray(body.trackIds)
       ? body.trackIds.filter((x): x is string => typeof x === 'string').slice(0, 10)
       : [];
@@ -339,8 +360,8 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         name: meta.name,
         artists: meta.artists,
         durationMs: meta.durationMs,
-      }, { preferMp3, quality });
-      results.push(shape(outcome, meta, preferMp3, quality));
+      }, { mp3Container, quality });
+      results.push(shape(outcome, meta, mp3Container, quality));
     }
 
     return { results };

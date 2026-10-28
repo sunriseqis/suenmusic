@@ -150,6 +150,28 @@ function readCreds(): KugouCreds | null {
   }
 }
 
+/**
+ * 收集酷狗返回的多 CDN 候选：主地址取 url[0]，其余 url[] 与 backup_url 当备用镜像。
+ *
+ * tracker 经常在 `url` 数组里给好几个节点地址（同一首歌、同一音质的副本），
+ * 以前只取 url[0]，其它节点白丢；主节点慢/被限速时客户端无路可换。
+ * 去重 + **去掉主地址**，顺序保持上游给的顺序（酷狗按线路质量排过序）。
+ */
+function collectBackupUrls(primary: string | null, groups: unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const group of groups) {
+    const list = Array.isArray(group) ? group : typeof group === 'string' ? [group] : [];
+    for (const item of list) {
+      const url = typeof item === 'string' ? item.trim() : '';
+      if (!url || url === primary || seen.has(url)) continue;
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
 function fail(reason: ResolveResult['reason'], message: string): ResolveResult {
   return {
     ok: false, reason, bvid: null, sourceUrl: null, score: 0,
@@ -277,8 +299,15 @@ async function fetchPlayUrlWithAuth(
   userAuth: string,
   creds: KugouCreds,
   dfid: string,
-  options?: { preferMp3?: boolean },
-): Promise<{ url: string | null; bitrate: number; timeLength: number; verifyRequired: boolean }> {
+  options?: { mp3Container?: boolean },
+): Promise<{
+  url: string | null;
+  /** 同一音质的其它 CDN 节点地址（去重、不含主地址） */
+  backupUrls: string[];
+  bitrate: number;
+  timeLength: number;
+  verifyRequired: boolean;
+}> {
   const { mid } = resolveIdentity(creds, dfid);
 
   // Step 2: 单曲授权 /v1/authorization
@@ -302,7 +331,7 @@ async function fetchPlayUrlWithAuth(
   const songAuth = String(authJson?.data?.auth ?? '');
   const openTime = authJson?.data?.open_time;
   if (authJson?.status !== 1 || !songAuth || openTime === undefined) {
-    return { url: null, bitrate: 0, timeLength: 0, verifyRequired: false };
+    return { url: null, backupUrls: [], bitrate: 0, timeLength: 0, verifyRequired: false };
   }
 
   // Step 3: 授权取流 /tracker/v5/url
@@ -318,7 +347,12 @@ async function fetchPlayUrlWithAuth(
       version: '11430',
       open_time: String(openTime),
       ptype: '0',
-      need_ogg: options?.preferMp3 ? '0' : '1',
+      /**
+       * ⚠️ 别顺手删这一行：`need_ogg: '0'` = 320k 档仍要 **MP3 容器**（兼容最好、体积最小）。
+       * 直接去掉这个参数会退化成 OGG —— 那是「反向优化」，OGG 并不比 MP3 更省。
+       * 它表达的是**容器**偏好，与「能不能拿无损」无关：要 mp3 容器的客户端照样拿 flac。
+       */
+      need_ogg: options?.mp3Container ? '0' : '1',
       page_id: '967177915',
       auth: songAuth,
       mtype: '0',
@@ -360,10 +394,16 @@ async function fetchPlayUrlWithAuth(
   }
 
   const url = Array.isArray(trackerJson?.url) && trackerJson.url[0] ? String(trackerJson.url[0]) : null;
+  // 备用 CDN：url[] 的其余项 + backup_url/backupUrl（去重，去掉主地址）
+  const backupUrls = collectBackupUrls(url, [
+    Array.isArray(trackerJson?.url) ? trackerJson.url.slice(1) : [],
+    trackerJson?.backup_url,
+    trackerJson?.backupUrl,
+  ]);
   const rawBr = Number(trackerJson?.bitRate ?? 0);
   const bitrate = rawBr > 1000 ? Math.round(rawBr / 1000) : rawBr || (quality === 'flac' ? 900 : quality === '320' ? 320 : 128);
   const timeLength = Number(trackerJson?.timeLength ?? 0);
-  return { url, bitrate, timeLength, verifyRequired };
+  return { url, backupUrls, bitrate, timeLength, verifyRequired };
 }
 
 /**
@@ -393,7 +433,7 @@ export interface KugouStoredMeta {
  */
 export async function resolveKugouDirect(
   meta: KugouStoredMeta,
-  options?: { preferMp3?: boolean; quality?: string },
+  options?: { mp3Container?: boolean; quality?: string },
 ): Promise<ResolveResult> {
   const creds = readCreds();
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
@@ -454,7 +494,7 @@ async function streamFirstPlayable(
   creds: KugouCreds,
   dfid: string,
   userAuth: string,
-  options?: { preferMp3?: boolean; quality?: string },
+  options?: { mp3Container?: boolean; quality?: string },
   svip = false,
 ): Promise<{ hit: ResolveResult | null; verifyRequired: boolean }> {
   let qualityOrder: readonly string[];
@@ -471,7 +511,9 @@ async function streamFirstPlayable(
     // 酷狗无 160-192k 档位（只有 128k / 320k / FLAC）：用户选「高」时取 320k 这一更高档，
     // 超出需求不算欺骗；若继续只给 128k，就成了「点了高只听到标准」的静默降级。
     qualityOrder = ['320', '128'];
-  } else if (reqQ === 'exhigh' || options?.preferMp3) {
+  } else if (reqQ === 'exhigh') {
+    // ⚠️ 这里以前还有 `|| options?.preferMp3`：要 mp3 容器的客户端被锁死在 320k，永不给 flac。
+    // 那是为 AVPlayer 做的降档，libmpv 能播 FLAC 后撤销（2026-10-28）。
     qualityOrder = ['320', '128'];
   } else if (reqQ === 'lossless') {
     qualityOrder = ['flac', 'high', '320', '128'];
@@ -487,7 +529,8 @@ async function streamFirstPlayable(
       if (priv.goodsByQuality.has('320')) {
         availableQualities.push('high', 'exhigh');
       }
-      if (!options?.preferMp3 && (priv.goodsByQuality.has('flac') || priv.goodsByQuality.has('high'))) {
+      // ⚠️ 不再按容器偏好剔掉 lossless：只要这首真有无损就声明（客户端据此点亮「无损」）
+      if (priv.goodsByQuality.has('flac') || priv.goodsByQuality.has('high')) {
         availableQualities.push('lossless');
       }
     }
@@ -508,7 +551,7 @@ async function streamFirstPlayable(
           options,
         );
         if (attempt.verifyRequired) verifyRequired = true;
-        const { url, bitrate, timeLength } = attempt;
+        const { url, bitrate, timeLength, backupUrls } = attempt;
         if (!url) continue;
 
         // 校验是否为试听片段：优先用 tracker 返回的 timeLength，缺失时用 HEAD Content-Length 兜底
@@ -548,6 +591,7 @@ async function streamFirstPlayable(
             matchedDurationSec: actualSec,
             durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
             coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
+            backupUrls,
             currentQuality,
             availableQualities,
           },
@@ -563,7 +607,7 @@ async function streamFirstPlayable(
 
 export async function resolveKugouSource(
   track: ResolveInput,
-  options?: { preferMp3?: boolean; quality?: string },
+  options?: { mp3Container?: boolean; quality?: string },
 ): Promise<ResolveResult> {
   const creds = readCreds();
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');

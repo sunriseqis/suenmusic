@@ -52,10 +52,10 @@ import {
   cacheKeyFor,
   invalidateTrack,
   resolveTrack,
-  isFlacUrl,
+  isOggUrl,
   whitelistQuality,
 } from '../services/resolver.ts';
-import { isIosClient, wantsMp3 } from '../http/platform.ts';
+import { isIosClient, wantsMp3Container } from '../http/platform.ts';
 
 const log = createLogger('routes:stream');
 
@@ -374,7 +374,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      * ★ 档位从 URL 透传（`&quality=<档>`，由 /api/resolve 的 buildStreamUrl 签发，S-16）。
      *
      * 旧写法里代理侧「拿不到 quality」，只能按无档位键读 —— 而写侧
-     * （resolver）是按 `cacheKeyFor(trackId, preferMp3, quality)` 落库的，
+     * （resolver）是按 `cacheKeyFor(trackId, mp3Container, quality)` 落库的，
      * 于是 iOS 直链失效回退代理时永远读不到本次写下的那一行：必 miss 一次重解析，
      * 且重解析结果又落到无档位键，下次 resolve 读 `:mp3:exhigh` 还是旧地址。
      *
@@ -382,10 +382,10 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      * 只认白名单值：非法/缺失一律当「没带档位」，绝不把客户端随手发来的原始串拼进键。
      */
     const isIos = isIosClient(req);
-    const preferMp3 = wantsMp3(req);
+    const mp3Container = wantsMp3Container(req);
     const quality =
       whitelistQuality((req.query as Record<string, unknown> | undefined)?.quality) ?? undefined;
-    const cacheKey = cacheKeyFor(trackId, preferMp3, quality);
+    const cacheKey = cacheKeyFor(trackId, mp3Container, quality);
     let row = getSource(cacheKey);
     /**
      * 键降级试探：带档位的键 miss 时回落到不加档位的旧键。
@@ -395,9 +395,14 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      * 读不到再走下方重解析（重解析会按带档位的键重新落库，随后自愈）。
      */
     if (!row && quality) {
-      row = getSource(cacheKeyFor(trackId, preferMp3));
+      row = getSource(cacheKeyFor(trackId, mp3Container));
     }
-    if (preferMp3 && row && isFlacUrl(row.audioUrl)) {
+    /**
+     * 坏缓存防御（只挡 ogg）：要 mp3 容器的客户端拿到 ogg 说明上游 need_ogg 失效，
+     * 丢掉重解析。⚠️ FLAC **不**再算坏缓存 —— libmpv 能播，继续按 FLAC 判死会让
+     * 「iOS 要无损」变成每条缓存都被判坏、反复重解析上游。
+     */
+    if (mp3Container && row && isOggUrl(row.audioUrl)) {
       row = null;
     }
     let upstream: Response | null = null;
@@ -467,7 +472,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
         },
         // quality 必须一起带上（S-16）：否则兜底重解析把结果写进无档位键，
         // 下次 resolve 读带档位键仍是旧地址，等于白重解析一轮
-        { force: urlExpired, preferMp3, quality }
+        { force: urlExpired, mp3Container, quality }
       );
 
       if (!outcome.ok || !outcome.sourceUrl) {

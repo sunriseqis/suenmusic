@@ -126,13 +126,24 @@ struct PlayerBar: View {
 
     private var playPauseButton: some View {
         Button { player.toggle() } label: {
-            Image(systemName: player.playing ? "pause.fill" : "play.fill")
-                .font(.system(size: Dim.icon18))   // hw：boxSize 36 → 字形 18
-                .foregroundStyle(p.text1)
-                .frame(width: Dim.btnMd, height: Dim.btnMd)
+            Group {
+                if player.loading {
+                    // 缓冲 / 装载中：转圈替掉图标（mpv paused-for-cache / core-idle
+                    // → PlaybackService.loading），用户能分清「在等」和「点了没反应」
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(p.text1)
+                        .scaleEffect(0.7)
+                } else {
+                    Image(systemName: player.playing ? "pause.fill" : "play.fill")
+                        .font(.system(size: Dim.icon18))   // hw：boxSize 36 → 字形 18
+                        .foregroundStyle(p.text1)
+                }
+            }
+            .frame(width: Dim.btnMd, height: Dim.btnMd)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(player.playing ? "暂停" : "播放")
+        .accessibilityLabel(player.loading ? "缓冲中" : (player.playing ? "暂停" : "播放"))
     }
 
     // MARK: - 左右滑切歌（hw PanGesture 同口径）

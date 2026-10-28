@@ -554,10 +554,18 @@ struct PlayerView: View {
 
             Spacer(minLength: 0)
 
-            // 4. 播放 / 暂停
+            // 4. 播放 / 暂停（mpv 缓冲中套一层转圈：paused-for-cache → PlaybackService.loading）
             WebIconButton(player.playing ? .pause : .play,
                           box: PlayerSpec.playKey, style: .gradient) { player.toggle() }
-                .accessibilityLabel(player.playing ? "暂停" : "播放")
+                .overlay {
+                    if player.loading {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(DesignTokens.accent)
+                            .scaleEffect(0.8)
+                    }
+                }
+                .accessibilityLabel(player.loading ? "缓冲中" : (player.playing ? "暂停" : "播放"))
 
             Spacer(minLength: 0)
 
