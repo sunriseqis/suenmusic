@@ -22,13 +22,8 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 
 	<!-- 后台/锁屏播放：这是原生化最直接的收益，必须有 -->
-	<!-- Live Activity / 灵动岛：缺这个 key 时 ActivityKit 直接拒绝请求（Target does not include NSSupportsLiveActivities）-->
-	<key>NSSupportsLiveActivities</key>
-	<true/>
-	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
-	<true/>
 
-	<!-- 灵动岛/锁屏卡点击后的落地页：suenmusic://player（见 SuenWidgets/PlaybackLiveActivity.swift 的 widgetURL） -->
+	<!-- URL Scheme 落地页：suenmusic://player -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

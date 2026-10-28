@@ -2,6 +2,7 @@
 
 唯一记忆索引（约定见 `docs/README.md`）。新记忆先落 `YYYY-MM-DD-<主题>.md`，再在这里加一行。
 
+- [2026-10-28 iOS 彻底移除 Live Activity 与 Widget Extension，全面回归系统原生](2026-10-28-iOS彻底移除LiveActivity与WidgetExtension回归系统原生.md) —— **采纳方案 B 落地交付**：彻底删除 `SuenWidgets` 与 ActivityKit 代码（`LiveActivityController` / `PlaybackActivity` / `PlaybackIntents`），消除锁屏双卡片与灵动岛分裂问题；`PlaybackService` 清理高频推送；`gen-ios-project.mjs` 收敛为纯原生单一 Target（App），消除扩展构建与签名负担，全面回归系统原生 Now Playing 体验
 - [2026-10-28 多源音质精细化、三级会员熔断与双端直连闭环](2026-10-28-多源音质精细化与三级会员熔断改造.md) —— **待真机测试（若 2026-10-30 14:00 CST 前无新反馈自动设定为已完成）**：①**音质下一首生效**：端侧切换音质仅变更偏好，绝不原地重载或打断在播流 ②**本地缓存绝对优先级**：鸿蒙 `fd://` 与 iOS 命中完整缓存时绕过网络与音质决议 ③**端到端直连闭环**：鸿蒙 `resolveDirect` 超时放宽至 3s、设置 `createMediaSourceWithUrl(direct.url, direct.headers)`；iOS 彻底移除本地代理与下载风暴，切歌/预取直解析 CDN 直链与请求头 ④**UI 规格统一**：播放页音质按钮与浮层选项统一金色高亮，完整引入标准/HQ/SQ/原声 4 套官方 SVG；iOS 遵循端机规格仅保留 SQ/HQ/标准 3 档（无原声档）⑤**三级会员熔断与多源精细化**：酷狗无会员立即熔断转 B 站兜底（0 浪费请求）、普通 VIP 仅请求 128k 并置灰其他档、概念版 SVIP 全码率开放；网易云非 VIP 永不打 lossless，动态判断 encodeType；B 站 DASH 精确匹配标准(64k)与高品(192k)
 - [2026-10-28 直链播放改造与动态音质开关设计方案](2026-10-28-直链播放与音质开关设计方案.md) —— iOS 彻底移除本地回环代理与 2GB 缓存下载风暴，与鸿蒙完全看齐 CDN 直链播放；音质切换与控制栏重排方案设计
 - [2026-10-27 iOS 多服务器频繁切歌锁死：切服状态污染修复](2026-10-27-iOS多服务器切歌锁死-切服状态污染修复.md) —— 解决 iOS 频繁切歌导致 CF 隧道锁死与局域网 HTTP 400：`AudioCacheStore.swift` 增加代际隔离 `configGeneration`、失效在途旧任务、4xx 错误请求熔断与指数退避

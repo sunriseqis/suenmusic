@@ -42,9 +42,6 @@ struct RootView: View {
         // 时长用 160ms 而不是 hw 的 200ms：hw 那 200ms 是按它自己的渲染节奏定的，
         // iOS 上 200ms 叠加首帧布局，观感就是「点完等一下才动」（用户实测“展开还有点延迟”）。
         .animation(.easeOut(duration: Motion.sheet), value: showPlayer)
-        .onChange(of: systemScheme) { _, _ in
-            player.refreshActivityForTheme()
-        }
         .task {
             #if DEBUG
             NSLog("[Env] TAB=%@ CYCLE=%@ AUTOPLAY=%@",

@@ -52,12 +52,6 @@ final class ThemeStore: ObservableObject {
     func set(_ newMode: ThemeMode) {
         mode = newMode
         UserDefaults.standard.set(newMode.rawValue, forKey: ThemeStore.storageKey)
-        // 锁屏卡 / 灵动岛是独立进程，靠 ContentState 里的 dark 字段着色；
-        // 不主动重推一次，主题切换要等到下一首歌才生效。
-        // ⚠️ Theme.swift 同时编进 widget target（WIDGET_SHARED），那里没有 PlaybackService，必须隔离。
-        #if !WIDGET_EXTENSION
-        PlaybackService.shared.refreshActivityForTheme()
-        #endif
     }
 }
 

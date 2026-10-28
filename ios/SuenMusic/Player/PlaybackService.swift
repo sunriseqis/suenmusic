@@ -68,12 +68,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     private static let maxFailStreak = 2
     /// 连播静默跳过的延迟（服务端瞬时抖动时不至于把整条队列连跳掉）
     private static let skipDelayMs = 600
-    // MARK: 歌词（供 Live Activity 与播放页共用）
+    // MARK: 歌词（供播放页与 peek 共用）
 
     /// 当前曲目的歌词行（按时间戳升序）
     private var lyricLines: [LyricLine] = []
-    /// 上一次推进 Live Activity 的歌词行（换行才推，省 ActivityKit 预算）
-    private var lastPushedLyric: String = ""
     /// 正在加载/已加载歌词的曲目 id（保证「当前曲一定已经发起过歌词请求」）
     private var lyricTrackId: String = ""
 
@@ -90,7 +88,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         NSLog("[Lyric] 请求歌词 %@", trackId)
         lyricTrackId = trackId
         lyricLines = []
-        lastPushedLyric = ""
         Task { [weak self] in
             guard let doc = await LyricStore.shared.doc(for: trackId) else {
                 NSLog("[Lyric] 拉取失败 %@", trackId)
@@ -104,7 +101,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 guard let self, self.currentTrack?.id == trackId else { return }
                 self.lyricLines = lines
                 NSLog("[Lyric] %@ 行数=%d 首行=%@", trackId, lines.count, lines.first?.text ?? "-")
-                self.pushActivity(force: true)   // 歌词就绪后立刻推一次当前行
             }
         }
     }
@@ -115,17 +111,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 不发 trackChange（实测：起播后日志里一条 `[Lyric]` 都没有）——
     /// 于是「本次会话第一首」永远没有歌词行，而 `emitProgress` 又只在换行时推，
     /// 连带进度条整首不动。这里做成自愈：任何一次推状态前都核对一遍当前曲。
-    private func ensureLyrics() {
+    /// 确保当前曲的歌词已发起拉取请求。
+    func ensureLyrics() {
         guard let id = currentTrack?.id, !id.isEmpty, id != lyricTrackId else { return }
         loadLyrics(for: id)
-    }
-
-    /// 当前歌词行距自己时间轴的滞后（毫秒）：换行推得够不够快，靠这个数自证
-    private func lyricLagMs() -> Int {
-        guard !lyricLines.isEmpty else { return 0 }
-        var start = 0
-        for line in lyricLines where line.atMs <= positionMs { start = line.atMs }
-        return max(0, positionMs - start)
     }
 
     /// 无音源文案（hw `NO_SOURCE_LABEL`）
@@ -172,35 +161,11 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
-    /// 主题变化后立刻重推一次 Live Activity（锁屏卡/灵动岛是独立进程，不会自己跟着改色）
-    func refreshActivityForTheme() {
-        guard currentTrack != nil else { return }
-        pushActivity(force: true)
-    }
-
-    /// 当前主题是否深色：显式设了浅/深就按设置，跟随系统时按系统当前外观。
-    static var currentDark: Bool {
-        switch ThemeStore.shared.mode {
-        case .light: return false
-        case .dark: return true
-        case .system:
-            // 不用 UITraitCollection.current：它在后台/非主线程上下文里读到的可能不是窗口真实外观。
-            // 取前台窗口场景的 trait 才是「系统现在是不是深色」。
-            let style = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first { $0.activationState == .foregroundActive }?
-                .traitCollection.userInterfaceStyle
-                ?? UITraitCollection.current.userInterfaceStyle
-            return style == .dark
-        }
-    }
-
     // MARK: 预热（降低起播延迟）
 
     /// 应用启动/回前台时调一次：把引擎（AVAudioSession + 观察者）建好，并预取流会话令牌。
     /// 这样用户点歌时省掉「引擎初始化 + 一次 token 往返」（模拟器实测 token 往返 ~120ms，真机更久）。
     func prewarm() {
-        LiveActivityController.shared.endAllStale()
         guard ensureEngine() != nil else { return }
         Task { _ = await validToken() }
     }
@@ -444,7 +409,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 if let avail = r?.availableQualities {
                     self.availableQualities = avail
                 }
-                self.pushActivity(force: true)
             }
         }
     }
@@ -672,15 +636,13 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             self.currentRecoReason = self.recoReasons[id]
             self.lyricTrackId = id
             self.refreshSource(for: id)
-            self.loadLyrics(for: id)   // 换歌即拉歌词（Live Activity 的歌词行靠它）
+            self.loadLyrics(for: id)   // 换歌即拉歌词（播放页歌词面板靠它）
             self.prefetchNextDirect()  // 预取下一首 CDN 直链，切歌秒启播
             self.noSource = false
             // 进度先归零：否则新歌的卡会带着上一首的位置（emitProgress 下一 tick 才纠正）
             self.positionMs = 0
             // 时长先落元数据值，等流的精确值（X-Audio-Duration-Ms）回来再覆盖
             if self.queue.indices.contains(index) { self.durationMs = self.queue[index].dt }
-            // 换歌是元数据变更 → 立刻推 Live Activity（不受 1s 地板限制）
-            self.pushActivity(force: true)
         }
     }
 
@@ -691,8 +653,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 self.loading = false
                 self.markLoaded()
             }
-            // 播放/暂停是用户看得见的即时反馈，不走地板（一次推送内就得到）
-            self.pushActivity(force: true)
         }
     }
 
@@ -712,19 +672,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 if !wasPlaying { NSLog("[Start] 首次 playing id=\(self.currentTrack?.id ?? "-")") }
                 self.markLoaded()
             }
-            // 进度类：每 tick 都交给控制器，由它按 1s 地板节流。
-            // 旧实现只在「歌词换行」时推 → 没有歌词的歌，进度条整首不动。
-            // 歌词换行则 force（不等地板），目标是「换行后 ≤1s 岛上就变」，滞后量见 [Lyric] 日志的「滞后=」。
-            let line = self.currentLyricLine
-            let lyricChanged = line != self.lastPushedLyric
-            if lyricChanged {
-                self.lastPushedLyric = line
-                if !line.isEmpty {
-                    NSLog("[Lyric] 当前行=%@ 滞后=%dms pos=%d", line.replacingOccurrences(of: "\n", with: " / "),
-                          self.lyricLagMs(), self.positionMs)
-                }
-            }
-            self.pushActivity(force: lyricChanged)
         }
     }
 
@@ -818,32 +765,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         errorMessage = nil
         noSource = true
         NSLog("[Fail] 手动点播无音源 → 停在当前曲，eyebrow 显示「无音源」（不跳、不弹按钮）")
-    }
-
-    /// 推一次 Live Activity / 灵动岛状态。
-    /// force = true 时用于换歌/播放暂停等必须即时的变更；进度类走控制器内部 1s 地板（与 hw 卡片同值）。
-    private func pushActivity(force: Bool) {
-        ensureLyrics()   // 自愈：任何一次推状态前核对「当前曲的歌词是否已经在拉」
-        let track = currentTrack
-        let coverUrl = track?.al.picUrl ?? ""
-        // 封面小图：命中内存缓存就拿，没有则异步下（下完回调里再 force 推一次）
-        let cached = LiveActivityController.shared.coverJPEG(for: coverUrl) { [weak self] _ in
-            self?.pushActivity(force: true)
-        }
-        let state = PlaybackActivityAttributes.ContentState(
-            title: track?.name ?? "",
-            artist: track?.artistLine ?? "",
-            album: track?.al.name ?? "",
-            coverUrl: coverUrl,
-            positionMs: positionMs,
-            durationMs: durationMs,
-            playing: playing,
-            sourceLabel: sourceLabel,
-            coverJPEG: cached,
-            lyricLine: currentLyricLine,
-            dark: Self.currentDark
-        )
-        LiveActivityController.shared.sync(state: state, force: force)
     }
 
     /// 顶栏 eyebrow（hw eyebrowText 同口径）：无音源/错误 > 「正在播放/已停止 · 来源」
