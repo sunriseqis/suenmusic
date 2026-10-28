@@ -2,6 +2,8 @@
 
 唯一记忆索引（约定见 `docs/README.md`）。新记忆先落 `YYYY-MM-DD-<主题>.md`，再在这里加一行。
 
+- [2026-10-28 iOS 换播放内核决策：libmpv](2026-10-28-iOS换播放内核决策-libmpv.md) —— **AVPlayer 能力边界导致 B 站 fMP4 / FLAC / OGG 播不了，决定换 libmpv（MPVKit，SPM）**；只要音频、不做双引擎。含完整证据链、三个被推翻的错误归因、两个成熟参照项目（都用 mpv、都无代理）的做法对比，以及换内核后要放开 iOS 无损的结论
+- [2026-10-28 iOS 音频格式实测矩阵](2026-10-28-iOS音频格式实测矩阵.md) —— **实听定论：iOS 只有 MP3 与 fMP4 能播，FLAC 与 OGG 都不走进度**。方法：把四种格式真实文件按缓存命名规则注入模拟器 App 缓存，走 `fd://` 本地播放，绕开网络与服务端。结论：`preferMp3`（iOS 剔除 lossless）与酷狗 `need_ogg=0` 必须保留；同时记录两个被证伪的判断（「iOS 11 支持 FLAC 即可放开无损」「解析成功=能播放」）
 - [2026-10-28 iOS 彻底移除 Live Activity 与 Widget Extension，全面回归系统原生](2026-10-28-iOS彻底移除LiveActivity与WidgetExtension回归系统原生.md) —— **采纳方案 B 落地交付**：彻底删除 `SuenWidgets` 与 ActivityKit 代码（`LiveActivityController` / `PlaybackActivity` / `PlaybackIntents`），消除锁屏双卡片与灵动岛分裂问题；`PlaybackService` 清理高频推送；`gen-ios-project.mjs` 收敛为纯原生单一 Target（App），消除扩展构建与签名负担，全面回归系统原生 Now Playing 体验
 - [2026-10-28 多源音质精细化、三级会员熔断与双端直连闭环](2026-10-28-多源音质精细化与三级会员熔断改造.md) —— **待真机测试（若 2026-10-30 14:00 CST 前无新反馈自动设定为已完成）**：①**音质下一首生效**：端侧切换音质仅变更偏好，绝不原地重载或打断在播流 ②**本地缓存绝对优先级**：鸿蒙 `fd://` 与 iOS 命中完整缓存时绕过网络与音质决议 ③**端到端直连闭环**：鸿蒙 `resolveDirect` 超时放宽至 3s、设置 `createMediaSourceWithUrl(direct.url, direct.headers)`；iOS 彻底移除本地代理与下载风暴，切歌/预取直解析 CDN 直链与请求头 ④**UI 规格统一**：播放页音质按钮与浮层选项统一金色高亮，完整引入标准/HQ/SQ/原声 4 套官方 SVG；iOS 遵循端机规格仅保留 SQ/HQ/标准 3 档（无原声档）⑤**三级会员熔断与多源精细化**：酷狗无会员立即熔断转 B 站兜底（0 浪费请求）、普通 VIP 仅请求 128k 并置灰其他档、概念版 SVIP 全码率开放；网易云非 VIP 永不打 lossless，动态判断 encodeType；B 站 DASH 精确匹配标准(64k)与高品(192k)
 - [2026-10-28 直链播放改造与动态音质开关设计方案](2026-10-28-直链播放与音质开关设计方案.md) —— iOS 彻底移除本地回环代理与 2GB 缓存下载风暴，与鸿蒙完全看齐 CDN 直链播放；音质切换与控制栏重排方案设计
