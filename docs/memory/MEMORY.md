@@ -2,6 +2,36 @@
 
 唯一记忆索引（约定见 `docs/README.md`）。新记忆先落 `YYYY-MM-DD-<主题>.md`，再在这里加一行。
 
+---
+
+## ⚠️ 调试钩子登记表 —— 上线前必须全部清理
+
+> **规则（2026-10-28 立）**：任何提交进仓库的调试钩子（环境变量 / UserDefaults 开关），
+> **必须在本表登记**：钩子名、位置、用途、清理动作。上线发版前这张表必须清空并删除对应代码。
+>
+> 读取方式：iOS 统一走 `ios/SuenMusic/App/DebugHooks.swift`，全部包在 `#if DEBUG` 里 ——
+> 因此 **Release 包中一律返回 nil，不会在生产触发**。但按产品要求，上线前仍要连同代码一起删掉，不留死角。
+
+| 钩子 | 位置 | 用途 | 上线前 |
+| :-- | :-- | :-- | :-- |
+| `SUEN_TAB` | `UI/RootView.swift:45,133`；`App/AppState.swift:27` | 启动直接落到指定 tab（settings / search …） | 删 |
+| `SUEN_PLAYER` | `UI/RootView.swift:64` | 启动直接进播放页 | 删 |
+| `SUEN_SHEET` | `UI/PlayerView.swift:188` | 进播放页时自动打开指定弹层（音质 / 锚定 …） | 删 |
+| `SUEN_SEARCH` | `UI/SearchView.swift:590`；`App/AppState.swift:28` | 注入搜索词并自动搜 | 删 |
+| `SUEN_COLLECTION` | `UI/SearchView.swift:609` | 注入合集/歌单标识 | 删 |
+| `SUEN_AUTOPLAY` | `UI/DailyView.swift:89`；`UI/RootView.swift:47` | 每日推荐自动起播 | 删 |
+| `SUEN_CYCLE_MODE` | `UI/RootView.swift:46` | 强制播放循环模式 | 删 |
+| `SUEN_REFRESH_TOKEN` | `App/AppState.swift:34` | 注入登录令牌，跳过手输登录 | 删 |
+| `SUEN_USER` / `SUEN_PASS` / `SUEN_BASE_URL` | `App/AppState.swift:47-50` | 注入账号密码与服务端地址，自动登录 | 删 |
+| `SUEN_MPV_TRACE` | `Player/MpvPlayer.swift:121` | 把 mpv 日志级别提到 trace（看 HTTP/http_code/AO 初始化）**纯日志，不改播放行为** | 删 |
+
+**已清理（2026-10-28）**：`SUEN_MPV_SELFTEST`（起播后自动 pause→play→seek→stop）、
+`SUEN_PLAY_SEARCH`（搜完自动播第一条）—— P1 无触摸验收用完即删，见提交记录。
+
+> 新增钩子时：**先加进本表，再写代码**。表里没登记的钩子视为违规提交。
+
+---
+
 - [2026-10-28 iOS 换播放内核决策：libmpv](2026-10-28-iOS换播放内核决策-libmpv.md) —— **AVPlayer 能力边界导致 B 站 fMP4 / FLAC / OGG 播不了，决定换 libmpv（MPVKit，SPM）**；只要音频、不做双引擎。含完整证据链、三个被推翻的错误归因、两个成熟参照项目（都用 mpv、都无代理）的做法对比，以及换内核后要放开 iOS 无损的结论
 - [2026-10-28 iOS 音频格式实测矩阵](2026-10-28-iOS音频格式实测矩阵.md) —— **实听定论：iOS 只有 MP3 与 fMP4 能播，FLAC 与 OGG 都不走进度**。方法：把四种格式真实文件按缓存命名规则注入模拟器 App 缓存，走 `fd://` 本地播放，绕开网络与服务端。结论：`preferMp3`（iOS 剔除 lossless）与酷狗 `need_ogg=0` 必须保留；同时记录两个被证伪的判断（「iOS 11 支持 FLAC 即可放开无损」「解析成功=能播放」）
 - [2026-10-28 iOS 彻底移除 Live Activity 与 Widget Extension，全面回归系统原生](2026-10-28-iOS彻底移除LiveActivity与WidgetExtension回归系统原生.md) —— **采纳方案 B 落地交付**：彻底删除 `SuenWidgets` 与 ActivityKit 代码（`LiveActivityController` / `PlaybackActivity` / `PlaybackIntents`），消除锁屏双卡片与灵动岛分裂问题；`PlaybackService` 清理高频推送；`gen-ios-project.mjs` 收敛为纯原生单一 Target（App），消除扩展构建与签名负担，全面回归系统原生 Now Playing 体验

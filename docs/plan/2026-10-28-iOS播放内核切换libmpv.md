@@ -58,7 +58,7 @@ xcodebuild -project App.xcodeproj -target App -configuration Debug -sdk iphonesi
 | :-- | :-- | :-- |
 | **P0** | 给 `scripts/gen-ios-project.mjs` 加 SPM 支持（XCRemoteSwiftPackageReference / XCSwiftPackageProductDependency / PBXProject.packageReferences / target.packageProductDependencies / Frameworks phase 的 productRef），挂 MPVKit，加一个**真调用 libmpv 符号**的探针文件 | `gen-ios-project.mjs --check` exit 0 + Mac `BUILD SUCCEEDED` + 量出 App.app 体积增量 |
 | **P1** | 写 `MpvEngine`：播一个带 Referer 的 URL、拿时长、上报播放态 | 模拟器里 B 站 m4s 出声有进度 |
-| **P2** | 补全 queue / 接续 / seek / 打断 / 错误上报，对齐现有 `PlaybackService` 接口 | 与 AVPlayer 版行为一致 |
+| **P2** | 补全 queue / 接续 / seek / 打断 / 错误上报，对齐现有 `PlaybackService` 接口；**并完成[系统集成](#七系统集成灵动岛--锁屏--音频会话)全部条目** | 与 AVPlayer 版行为一致 + 系统集成 checklist 全绿 |
 | **P3** | 全量切 mpv，删 AVPlayer 路径（不做双引擎） | 无 AVPlayer 残留 |
 | **P4** | 回归：FLAC / OGG / B 站 fMP4 / 酷狗 mp3 / 后台播放 / 锁屏控制 / 缓存本地文件 | 逐项实听验过 |
 | **P5** | 放开 iOS lossless（去掉 `preferMp3` 对无损的屏蔽）+ 解析 `backupUrl` 多镜像 | iOS 可选无损；单节点故障自动换镜像 |
@@ -68,12 +68,23 @@ xcodebuild -project App.xcodeproj -target App -configuration Debug -sdk iphonesi
 MPVKit 是**预编译全量 ffmpeg**（含视频/滤镜/字体渲染）。仅靠配置层 `--vo=null --audio-display=no` **只能关掉运行，瘦不了包**。
 
 真正的音频瘦身 = 自己交叉编译 audio-only 的 ffmpeg（`--disable-everything` 后只开音频 decoder/demuxer/parser）再编 libmpv。
-**P0 会先量出全量体积增量**，据此决定：
 
-- 增量可接受 → 保持 MPVKit 全量，配置层只做音频；
-- 增量过大 → 启动自编 audio-only 方案，作为独立阶段。
+**P0 实测体积（2026-10-28）**：
+
+| 口径 | 之前 | 之后 | 增量 |
+| :-- | --: | --: | --: |
+| Debug / iphonesimulator（未 strip） | 24 M | 99 M | +75 M |
+| **Release / arm64**（接近上架） | 9 M | 41 M | **+32 M** |
+
+**用户裁定：先跑通，暂不做瘦身。** 理由：瘦身会卡住整个功能，而代码与包体无关 —— 以后换 audio-only 包不需要改播放器代码。
+瘦身留作独立阶段，触发条件：功能跑通后若包体不可接受，再自建 audio-only 的 ffmpeg + libmpv。
 
 ## 六、风险
+
+0. **Release 的静默陷阱（P0 实测，必须记住）**：wholemodule 优化会把没人调用的符号整体 DCE，
+   探针一旦不被播放路径调用，libmpv 就完全不链接 —— 产物只剩 8.2 M、`nm` 里 0 个 `mpv_` 符号，
+   但 **`BUILD SUCCEEDED` 照样通过**。所以「编译通过」≠「真的链进去了」，
+   Release 下必须 `nm` 复查 `mpv_*` 符号数量 + 看体积。
 
 1. **生成器被冲掉**：pbxproj 由脚本生成，任何手改都会被覆盖 —— 所有 SPM 配置必须落在生成器里。
 2. **SPM 首次拉取慢/失败**：必须带代理；失败时检查 `https_proxy` 是否传入 xcodebuild 环境。
@@ -81,7 +92,79 @@ MPVKit 是**预编译全量 ffmpeg**（含视频/滤镜/字体渲染）。仅靠
 4. **模拟器切片**：MPVKit 是否提供 x86_64-simulator 切片，P0 编译即验证。
 5. **状态机差异**：AVPlayer 的 `status/timeControlStatus` 语义要映射到 mpv 的 `property-change` 事件，现有失败三分支逻辑不能丢。
 
-## 七、当前进度
+## 七、系统集成（灵动岛 / 锁屏 / 音频会话）
+
+### 前置认知：这套 UI 不归播放内核管
+
+Live Activity 与 Widget Extension 已在 `60ecdcd` 彻底移除，**灵动岛的媒体卡片是系统原生媒体模块**，
+不是我们的扩展。它只认四样东西，全部与解码器无关：
+
+| 依赖 | 现状 | 换 mpv 后 |
+| :-- | :-- | :-- |
+| `MPNowPlayingInfoCenter`（元数据 + 进度） | `AudioEngine.swift:177` 持有、`:1437-1440` 自己写 duration/elapsed/rate | **要改数据源** |
+| `MPRemoteCommandCenter`（播放/暂停/上下曲） | `:1344` / `:1408` / `:1472` 三处注册 | **要转发到 mpv 命令** |
+| `AVAudioSession`（playback + active） | `:221` 配置；`:290-303` 订阅打断/重置/路由三条通知 | 保留，注意激活时序 |
+| `UIBackgroundModes: audio` | `ios/SuenMusic/App/Info.plist:47` 已有 | 不变 |
+
+**结论：灵动岛与锁屏照样接管，但接管所需的数据要由我们从 mpv 侧喂。**
+
+### 必须补的四件事
+
+1. **`playbackState` 目前零处设置**（全仓 grep 为空）。
+   AVPlayer 时代系统可从会话与播放状态推断；mpv 不会。必须显式跟随 `playing / paused / buffering`，
+   否则锁屏与灵动岛的播放/暂停图标状态错误。
+
+2. **进度回写机制要换**。现在是一次性写 `MPNowPlayingInfoPropertyPlaybackRate = 1.0`，让系统自己往后推算
+   （见 `AudioEngine.swift:1420` 注释）。mpv 侧一旦 seek / 缓冲 / 变速，推算就会漂，
+   需订阅 mpv `time-pos` 并**节流（约 1s）**写回 `MPNowPlayingInfoPropertyElapsedPlaybackTime`。
+
+3. **`timeControlStatus` 语义要映射**。UI 的 loading 态与「点了没反应」的失败三分支依赖它
+   （`waitingToPlayAtSpecifiedRate` 等）。mpv 对应的是 `paused-for-cache` / `core-idle` / `idle` / 正常出流。
+   映射做不好会重演一次「点了不出声也没提示」——**这条今晚已经踩过一次**。
+
+4. **远程命令要自己转发**。mpv 不接管 `MPRemoteCommandCenter`，按键回调仍需转成 mpv 的 pause / seek / 上下曲。
+
+### 两个 iOS + mpv 的硬要求
+
+- 音频输出必须走 `--ao=audiounit`（或 coreaudio），否则静音
+- `AVAudioSession` 必须在 mpv 初始化**之前**配置并 `setActive(true)`
+
+### 验收 checklist（P2 门槛，逐项实测）
+
+- [ ] 锁屏显示元数据（歌名/歌手/封面）
+- [ ] 锁屏进度条推进，seek 后不漂
+- [ ] 播放/暂停图标状态正确（`playbackState`）
+- [ ] 灵动岛媒体卡片出现且按钮可用
+- [ ] 耳机线控（播放/暂停、上下曲）
+- [ ] AirPods 双击手势
+- [ ] 来电打断后能恢复播放
+- [ ] 耳机拔出自动暂停
+- [ ] AirPlay 路由切换不断音
+- [ ] 后台播放（锁屏后继续出声）
+- [ ] 缓冲态有 UI 反馈（mpv `paused-for-cache` → loading）
+
+## 附：构建机环境残留（2026-10-28，有意保留）
+
+Mac（`suenqi@suenqideimac.lan`）上为拉 MPVKit 留下的两样，**保留不清**——后续 P1/P2 还要反复 resolve：
+
+| 项 | 内容 |
+| :-- | :-- |
+| git 全局代理 | `git config --global http.proxy / https.proxy` → `http://192.168.89.3:20170`（Xcode 内部 git 会读） |
+| SwiftPM 包缓存 | `~/Library/Caches/org.swift.swiftpm/artifacts`，约 **559 M**（38 个 xcframework zip 预灌） |
+
+**踩坑记录**：Xcode 下载 xcframework 走 NSURLSession，**不认 `HTTPS_PROXY` 环境变量**，设系统代理需要 sudo；
+解法是按 SwiftPM 缓存命名规则（非字母数字→`_`）用 `curl -x` 把 zip 预灌进 artifacts 目录，之后 resolve 直接命中。
+
+`Package.resolved` 已入库（`ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/`），
+保证任何机器解析出的 revision 与 `1.1.0-n9.0.2` 完全一致。
+
+## 上线前强制项
+
+**仓库内所有调试钩子必须清理干净。** 登记表见 [`docs/memory/MEMORY.md`](../memory/MEMORY.md) 顶部的
+「⚠️ 调试钩子登记表」——新增钩子必须先登记再写代码，表里没登记视为违规提交。
+当前与本项目相关的钩子：`SUEN_MPV_TRACE`（mpv 日志级别，纯日志不改行为）等，见登记表。
+
+## 八、当前进度
 
 - [ ] P0 生成器 SPM + MPVKit 编译通过（进行中）
 - [ ] P1 MpvEngine 起播

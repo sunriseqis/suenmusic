@@ -42,6 +42,19 @@
 1. `preferMp3`（iOS 剔除 lossless）+ 酷狗 `need_ogg=0` 在 AVPlayer 时代是**正确且必需的**；换内核后应**放开**，让 iOS 也能用无损。
 2. 「B 站不下发直链、统一走服务端代理」这个方案**作废** —— 那是绕路，不是解法。
 
+## 三·补：mpv 传防盗链头的坑（P1 实测，必记）
+
+把 B 站的 `Referer` / `User-Agent` 交给 mpv 时，**写法决定了它到底有没有被发出去**：
+
+| 写法 | 结果 |
+| :-- | :-- |
+| `Referer` 塞进 `http-header-fields` | ❌ ffmpeg 不吃，CDN 回 **400** |
+| `http-header-fields` 用 `", "`（逗号+空格）分隔 | ❌ 同样 400 —— mpv 只按 `,` 切分且**不 trim**，第二个头变成带前导空格的非法头 |
+| `Referer` → mpv 的 `referrer` 专用选项；`User-Agent` → `user-agent` 专用选项；其余才进 `http-header-fields`（纯逗号） | ✅ 206 |
+
+**这条解释了我们之前一直没想通的现象**：抓包看到 `Referer` 送到了，CDN 却仍拒绝 —— 送达方式与格式都有讲究。
+以后任何端接入 mpv 都必须按这个写法，否则会重演「带了 Referer 还是 403」。
+
 ## 四、教训
 
 - **「解析成功」不等于「能播放」**：`AVURLAsset.load(.duration)` 通过只说明容器被识别。判断可播性只认实听或 `readyToPlay` + `currentTime` 推进。

@@ -8,6 +8,10 @@
  * 为什么用脚本而不是手改：本机（Linux）没有 Xcode，手改 pbxproj 必漏登记；
  * 这里按磁盘上的真实文件清单生成，加文件跑一次即可。
  *
+ * Swift Package：MPVKit（libmpv + ffmpeg）通过 SPM 引入，
+ * pbxproj 里必须同时写 packageReferences / packageProductDependencies /
+ * XCSwiftPackageProductDependency / Frameworks 阶段，缺一条都链接不上。
+ *
  * 用法：node scripts/gen-ios-project.mjs [--check]
  */
 import { readdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
@@ -21,6 +25,13 @@ const PROJECT = join(IOS, 'App/App.xcodeproj/project.pbxproj');
 const ASSETS = join(IOS, 'App/App/Assets.xcassets');
 
 const GROUPS = ['App', 'Net', 'Player', 'UI'];
+
+// Swift Package 依赖：MPVKit（libmpv + ffmpeg），tag 用 exactVersion 锁死。
+// 0.38.0/0.39.0/…/1.0.0/1.1.0-n9.0.2 为仓库真实 tag（git ls-remote --tags），
+// 取最新一个；写死版本号保证 --check 稳定、重复生成一致。
+const MPVKIT_URL = 'https://github.com/mpvkit/MPVKit';
+const MPVKIT_VERSION = '1.1.0-n9.0.2';
+const MPVKIT_PRODUCT = 'MPVKit';
 
 function collectMain() {
   const out = [];
@@ -47,6 +58,8 @@ function render(main) {
   const FRAMEWORKS = hid('phase:frameworks'), SOURCES = hid('phase:sources'), RESOURCES = hid('phase:resources');
   const CFG = { dbgP: hid('cfg:proj:debug'), relP: hid('cfg:proj:release'), dbgT: hid('cfg:tgt:debug'), relT: hid('cfg:tgt:release') };
   const LIST = { proj: hid('list:proj'), tgt: hid('list:tgt') };
+  const PKG_REF = hid('pkg:mpvkit'), PKG_PROD = hid('pkgprod:mpvkit'), PKG_BLD = hid('build:pkg:mpvkit');
+  const PKG_REF_CMT = 'XCRemoteSwiftPackageReference "' + MPVKIT_PRODUCT + '"';
 
   let o = '';
   o += '// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tclasses = {\n\t};\n\tobjectVersion = 60;\n\tobjects = {\n\n';
@@ -54,6 +67,7 @@ function render(main) {
   o += '/* Begin PBXBuildFile section */\n';
   for (const f of main) o += '\t\t' + bldMain(f) + ' /* ' + f.file + ' in Sources */ = {isa = PBXBuildFile; fileRef = ' + refMain(f) + ' /* ' + f.file + ' */; };\n';
   o += '\t\t' + ASSETS_BLD + ' /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = ' + ASSETS_REF + ' /* Assets.xcassets */; };\n';
+  o += '\t\t' + PKG_BLD + ' /* ' + MPVKIT_PRODUCT + ' in Frameworks */ = {isa = PBXBuildFile; productRef = ' + PKG_PROD + ' /* ' + MPVKIT_PRODUCT + ' */; };\n';
   o += '/* End PBXBuildFile section */\n\n';
 
   o += '/* Begin PBXFileReference section */\n';
@@ -71,7 +85,7 @@ function render(main) {
   };
 
   o += '/* Begin PBXFrameworksBuildPhase section */\n';
-  o += phase(FRAMEWORKS, 'Frameworks', 'PBXFrameworksBuildPhase', []);
+  o += phase(FRAMEWORKS, 'Frameworks', 'PBXFrameworksBuildPhase', [PKG_BLD + ' /* ' + MPVKIT_PRODUCT + ' in Frameworks */']);
   o += '/* End PBXFrameworksBuildPhase section */\n\n';
 
   o += '/* Begin PBXGroup section */\n';
@@ -92,7 +106,10 @@ function render(main) {
   o += '/* Begin PBXNativeTarget section */\n';
   o += '\t\t' + TARGET + ' /* App */ = {\n\t\t\tisa = PBXNativeTarget;\n\t\t\tbuildConfigurationList = ' + LIST.tgt + ';\n';
   o += '\t\t\tbuildPhases = (\n\t\t\t\t' + SOURCES + ' /* Sources */,\n\t\t\t\t' + FRAMEWORKS + ' /* Frameworks */,\n\t\t\t\t' + RESOURCES + ' /* Resources */,\n\t\t\t);\n';
-  o += '\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = App;\n\t\t\tproductName = App;\n\t\t\tproductReference = ' + PROD_REF + ' /* App.app */;\n\t\t\tproductType = "com.apple.product-type.application";\n\t\t};\n';
+  o += '\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = App;\n';
+  o += '\t\t\tbuildRules = (\n\t\t\t);\n\t\t\tdependencies = (\n\t\t\t);\n\t\t\tname = App;\n';
+  o += '\t\t\tpackageProductDependencies = (\n\t\t\t\t' + PKG_PROD + ' /* ' + MPVKIT_PRODUCT + ' */,\n\t\t\t);\n';
+  o += '\t\t\tproductName = App;\n\t\t\tproductReference = ' + PROD_REF + ' /* App.app */;\n\t\t\tproductType = "com.apple.product-type.application";\n\t\t};\n';
   o += '/* End PBXNativeTarget section */\n\n';
 
   o += '/* Begin PBXProject section */\n';
@@ -100,7 +117,7 @@ function render(main) {
   o += '\t\t\t\t\t' + TARGET + ' = {\n\t\t\t\t\t\tProvisioningStyle = Automatic;\n\t\t\t\t\t};\n';
   o += '\t\t\t\t};\n\t\t\t};\n';
   o += '\t\t\tbuildConfigurationList = ' + LIST.proj + ';\n\t\t\tcompatibilityVersion = "Xcode 14.0";\n\t\t\tdevelopmentRegion = zh_CN;\n\t\t\thasScannedForEncodings = 0;\n';
-  o += '\t\t\tknownRegions = (\n\t\t\t\tzh_CN,\n\t\t\t\ten,\n\t\t\t\tBase,\n\t\t\t);\n\t\t\tmainGroup = ' + ROOTG + ';\n\t\t\tproductRefGroup = ' + PRODG + ' /* Products */;\n\t\t\tprojectDirPath = "";\n\t\t\tprojectRoot = "";\n';
+  o += '\t\t\tknownRegions = (\n\t\t\t\tzh_CN,\n\t\t\t\ten,\n\t\t\t\tBase,\n\t\t\t);\n\t\t\tmainGroup = ' + ROOTG + ';\n\t\t\tpackageReferences = (\n\t\t\t\t' + PKG_REF + ' /* ' + PKG_REF_CMT + ' */,\n\t\t\t);\n\t\t\tproductRefGroup = ' + PRODG + ' /* Products */;\n\t\t\tprojectDirPath = "";\n\t\t\tprojectRoot = "";\n';
   o += '\t\t\ttargets = (\n\t\t\t\t' + TARGET + ' /* App */,\n\t\t\t);\n\t\t};\n';
   o += '/* End PBXProject section */\n\n';
 
@@ -153,7 +170,21 @@ function render(main) {
   const cfgList = (id, dbg, rel) => '\t\t' + id + ' = {\n\t\t\tisa = XCConfigurationList;\n\t\t\tbuildConfigurations = (\n\t\t\t\t' + dbg + ' /* Debug */,\n\t\t\t\t' + rel + ' /* Release */,\n\t\t\t);\n\t\t\tdefaultConfigurationIsVisible = 0;\n\t\t\tdefaultConfigurationName = Debug;\n\t\t};\n';
   o += cfgList(LIST.proj, CFG.dbgP, CFG.relP);
   o += cfgList(LIST.tgt, CFG.dbgT, CFG.relT);
-  o += '/* End XCConfigurationList section */\n\n\t};\n\trootObject = ' + PROJ + ' /* Project object */;\n}\n';
+  o += '/* End XCConfigurationList section */\n\n';
+
+  o += '/* Begin XCRemoteSwiftPackageReference section */\n';
+  o += '\t\t' + PKG_REF + ' /* ' + PKG_REF_CMT + ' */ = {\n\t\t\tisa = XCRemoteSwiftPackageReference;\n';
+  o += '\t\t\trepositoryURL = "' + MPVKIT_URL + '";\n';
+  o += '\t\t\trequirement = {\n\t\t\t\tkind = exactVersion;\n\t\t\t\tversion = "' + MPVKIT_VERSION + '";\n\t\t\t};\n\t\t};\n';
+  o += '/* End XCRemoteSwiftPackageReference section */\n\n';
+
+  o += '/* Begin XCSwiftPackageProductDependency section */\n';
+  o += '\t\t' + PKG_PROD + ' /* ' + MPVKIT_PRODUCT + ' */ = {\n\t\t\tisa = XCSwiftPackageProductDependency;\n';
+  o += '\t\t\tpackage = ' + PKG_REF + ' /* ' + PKG_REF_CMT + ' */;\n';
+  o += '\t\t\tproductName = ' + MPVKIT_PRODUCT + ';\n\t\t};\n';
+  o += '/* End XCSwiftPackageProductDependency section */\n\n';
+
+  o += '\t};\n\trootObject = ' + PROJ + ' /* Project object */;\n}\n';
 
   return o;
 }

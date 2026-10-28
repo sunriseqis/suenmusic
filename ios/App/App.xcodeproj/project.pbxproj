@@ -15,6 +15,8 @@
 		2CC1734B80EB096854C0A995 /* AudioCacheStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */; };
 		0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26564CB8956642BA586CAE68 /* AudioEngine.swift */; };
 		66E1E36271D662A6E11C8CDA /* LyricLines.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */; };
+		1F3CF45FF33997E55A00B08A /* MpvPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 783BF2F4517233EFACE2E93D /* MpvPlayer.swift */; };
+		B12FDD6F246B8904A6C6FEA6 /* MpvProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F136E033A67925E23AD446B4 /* MpvProbe.swift */; };
 		1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 059196BD216930E1443BF606 /* Notifier.swift */; };
 		27F5989A61368C71B560E576 /* PlaybackService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29822D920A5A97C4DD3B16BC /* PlaybackService.swift */; };
 		576222D79669E976B4A16257 /* AnchorSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1399D0B8EF48C482BBA3942C /* AnchorSheet.swift */; };
@@ -52,6 +54,7 @@
 		6D7E47582205724B6C775A9B /* WebButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1576CEAA3C86065B140D33 /* WebButton.swift */; };
 		57F126A4FF28E620BF554D0D /* WebIcon.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCD9E7CBEB81D068FA568DD2 /* WebIcon.swift */; };
 		DB249DB9D0FF833647E29581 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6F9973165E2B0FD4A3AAC566 /* Assets.xcassets */; };
+		551031562B8D7474F2B013DC /* MPVKit in Frameworks */ = {isa = PBXBuildFile; productRef = 65DADAB72CF84A00339EA0E6 /* MPVKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -63,6 +66,8 @@
 		9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCacheStore.swift; sourceTree = "<group>"; };
 		26564CB8956642BA586CAE68 /* AudioEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioEngine.swift; sourceTree = "<group>"; };
 		5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LyricLines.swift; sourceTree = "<group>"; };
+		783BF2F4517233EFACE2E93D /* MpvPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MpvPlayer.swift; sourceTree = "<group>"; };
+		F136E033A67925E23AD446B4 /* MpvProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MpvProbe.swift; sourceTree = "<group>"; };
 		059196BD216930E1443BF606 /* Notifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Notifier.swift; sourceTree = "<group>"; };
 		29822D920A5A97C4DD3B16BC /* PlaybackService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaybackService.swift; sourceTree = "<group>"; };
 		1399D0B8EF48C482BBA3942C /* AnchorSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorSheet.swift; sourceTree = "<group>"; };
@@ -109,6 +114,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				551031562B8D7474F2B013DC /* MPVKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,6 +168,8 @@
 				9C13D9C2A71D39F96E042F00 /* AudioCacheStore.swift */,
 				26564CB8956642BA586CAE68 /* AudioEngine.swift */,
 				5C44D31C1FF9B6DD84CFB27E /* LyricLines.swift */,
+				783BF2F4517233EFACE2E93D /* MpvPlayer.swift */,
+				F136E033A67925E23AD446B4 /* MpvProbe.swift */,
 				059196BD216930E1443BF606 /* Notifier.swift */,
 				29822D920A5A97C4DD3B16BC /* PlaybackService.swift */,
 			);
@@ -242,6 +250,14 @@
 			dependencies = (
 			);
 			name = App;
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = App;
+			packageProductDependencies = (
+				65DADAB72CF84A00339EA0E6 /* MPVKit */,
+			);
 			productName = App;
 			productReference = 2029A639DD8022543C17416B /* App.app */;
 			productType = "com.apple.product-type.application";
@@ -270,6 +286,9 @@
 				Base,
 			);
 			mainGroup = B9340614599AB78F485950C7;
+			packageReferences = (
+				CEE9AD617C656DFBFCC1AF36 /* XCRemoteSwiftPackageReference "MPVKit" */,
+			);
 			productRefGroup = 547D009064F7C3F13BEF3460 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -303,6 +322,8 @@
 				2CC1734B80EB096854C0A995 /* AudioCacheStore.swift in Sources */,
 				0FF79552A38BA5CCFE075DCA /* AudioEngine.swift in Sources */,
 				66E1E36271D662A6E11C8CDA /* LyricLines.swift in Sources */,
+				1F3CF45FF33997E55A00B08A /* MpvPlayer.swift in Sources */,
+				B12FDD6F246B8904A6C6FEA6 /* MpvProbe.swift in Sources */,
 				1402A7BD79028A13707BEB2B /* Notifier.swift in Sources */,
 				27F5989A61368C71B560E576 /* PlaybackService.swift in Sources */,
 				576222D79669E976B4A16257 /* AnchorSheet.swift in Sources */,
@@ -479,6 +500,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CEE9AD617C656DFBFCC1AF36 /* XCRemoteSwiftPackageReference "MPVKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mpvkit/MPVKit";
+			requirement = {
+				kind = exactVersion;
+				version = "1.1.0-n9.0.2";
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		65DADAB72CF84A00339EA0E6 /* MPVKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CEE9AD617C656DFBFCC1AF36 /* XCRemoteSwiftPackageReference "MPVKit" */;
+			productName = MPVKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 	};
 	rootObject = 46F86FAA6BBF9AC94A7E4595 /* Project object */;
