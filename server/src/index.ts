@@ -15,6 +15,7 @@ import { buildApp, SERVER_VERSION } from './app.ts';
 import { closeDatabase, migrate, openDatabase } from './db/index.ts';
 import { pruneExpired } from './services/resolver.ts';
 import { pruneLoginThrottle } from './services/auth.ts';
+import { applyPersistedJwtSecret } from './services/jwt-secret.ts';
 import { loadBilibiliCookieFromDb } from './services/bilibili-account.ts';
 import { loadNeteaseCookieFromDb, initNeteaseVendor } from './services/netease-account.ts';
 import { pruneTokens } from './db/repo/tokens.ts';
@@ -140,16 +141,19 @@ async function main(): Promise<void> {
 
   logger.info(`SuenMusic 服务端 v${SERVER_VERSION} 启动中`);
 
-  if (config.jwtSecretIsEphemeral) {
-    logger.warn(
-      '未配置 SUENMUSIC_JWT_SECRET，已生成临时密钥：' +
-        '重启后所有登录态失效。生产环境请在 .env 中显式配置'
-    );
-  }
-
   openDatabase();
   const applied = migrate();
   if (applied > 0) logger.info(`已应用 ${applied} 个数据库迁移`);
+
+  /**
+   * ★ 密钥必须在任何签名/校验发生**之前**就位（S-20）：
+   * 未显式配置 `SUENMUSIC_JWT_SECRET` 时，把「每次启动随机」换成
+   * 数据库里持久化的那一把（存在就复用，不存在则生成并写库）。
+   * 否则重启即让所有登录令牌、流令牌、酷狗验证票据一起失效。
+   *
+   * 只能放在 migrate 之后：要读 app_settings。失败不阻塞启动（退化为临时密钥 + WARN）。
+   */
+  applyPersistedJwtSecret();
 
   // 必须紧跟迁移、且在 listen 之前：数据库里的凭证要覆盖环境变量那份，
   // 否则界面上"已登录 B 站"与实际的出网身份会不一致

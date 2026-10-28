@@ -101,6 +101,25 @@ final class AudioEngine: NSObject {
         }
     }
 
+    /// 回收不再可能被用到的直链（N-4）。
+    ///
+    /// `directLinks` 是「曲目 id → 直链」的旁路缓存：解析结果与预取都往里写，但之前从来没人删 ——
+    /// 换歌单后旧曲目的链接一直留到 `expiresAt` 过期（有兜底、无功能危害，是内存与 hygiene 问题）。
+    /// 这里只保留「还在队列里」且「未过期」的条目。
+    ///
+    /// ⚠️ 必须等 `tracks` 已经是**新队列**之后再调：`PlaybackService.play()` 的顺序是先对目标曲
+    /// `setDirect()`、再 `setQueue()` —— 过早清空会把刚解析好的直链一起扔掉，首播退回代理流。
+    private func pruneDirectLinks() {
+        guard !directLinks.isEmpty else { return }
+        let live = Set(tracks.map(\.id))
+        let now = Date()
+        let before = directLinks.count
+        directLinks = directLinks.filter { live.contains($0.key) && $0.value.expiresAt > now }
+        if directLinks.count != before {
+            NSLog("%@", "[DirectCDN] 回收直链 \(before - directLinks.count) 条 → 余 \(directLinks.count)")
+        }
+    }
+
     /// 把「已建好但还不是当前项」的条目按最新直链重建（不动 items 顺序、不动 currentItem）。
     ///
     /// AVQueuePlayer 的 currentItem 永远是 items 的第一个，所以非当前项一定排在其后：
@@ -369,6 +388,7 @@ final class AudioEngine: NSObject {
             } else {
                 self.tracks = tracks   // 防御：startIndex 越界时以传入为准
             }
+            pruneDirectLinks()   // 尾段被替换 = 旧尾段的直链再也不会被用到（N-4）
             let queue = player.items()
             if let pos = queue.firstIndex(of: current) {
                 for stale in queue[(pos + 1)...] {
@@ -386,6 +406,9 @@ final class AudioEngine: NSObject {
         // 整队列重发：全量重建。player 队列装载 [startIndex, 队尾) 必要条目，
         // 由 AVQueuePlayer 原生接续，锁屏熄屏不依赖 JS 唤醒。
         self.tracks = effectiveTracks
+        // 换整条队列：旧队列曲目的直链全部作废（N-4）。注意 `tracks` 已更新为**新队列**，
+        // 所以刚在本曲上 setDirect 的那条会保留，首播仍然走直连 CDN。
+        pruneDirectLinks()
         cancelCacheTasks()   // 换整条队列 = 当前曲变了（规格 3.1）
         forgetAllItems()   // 旧条目的 status 观察随条目一起失效（I-8）
         player.removeAllItems()
@@ -528,6 +551,7 @@ final class AudioEngine: NSObject {
         }
         itemIndex = remapped
         if insertedThrough >= index { insertedThrough -= 1 }
+        pruneDirectLinks()   // 被摘掉的那首的直链再也不会被用到（N-4）
         return wasCurrent
     }
 
@@ -915,23 +939,34 @@ final class AudioEngine: NSObject {
         playOrder = [safe] + tracks.indices.filter { $0 != safe }.shuffled()
     }
 
-    /// 当前曲在顺序表里的位置（找不到就退回 0）
-    private var orderPosition: Int {
-        playOrder.firstIndex(of: currentIndex) ?? 0
-    }
-
     /// 下一首的逻辑下标；nil = 到头且不允许回绕
     func nextLogicalIndex() -> Int? {
         guard !tracks.isEmpty else { return nil }
         if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
-        let pos = orderPosition
+        // 步进规则只有一份实现（见 nextIndex(after:)）；基准是「当前曲」，
+        // 当前曲不在顺序表里（异常态）时沿用旧口径：以表头为基准（等价「位置退回 0」）
+        let base = playOrder.contains(currentIndex) ? currentIndex : (playOrder.first ?? currentIndex)
+        return nextIndex(after: base)
+    }
+
+    /// 以给定逻辑下标为基准、按**播放顺序表**再走一步的下一首（N-2）。
+    ///
+    /// 与 `nextLogicalIndex()` 是同一套步进规则，只是基准由调用方指定 ——
+    /// 「连点下一首」时当前曲还没落地，必须从上一个意图目标在 playOrder 上前进，
+    /// 而不是在数组下标上 +1（随机模式下数组序 ≠ 播放序）。
+    func nextIndex(after index: Int) -> Int? {
+        guard !tracks.isEmpty else { return nil }
+        if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: index) }
+        guard let pos = playOrder.firstIndex(of: index) else { return nil }
         if pos + 1 < playOrder.count { return playOrder[pos + 1] }
         switch repeatMode {
         case .listLoop:
             return playOrder.first
         case .shuffle:
-            // 随机播放到末尾：重洗一轮继续（首位避开刚刚播完的那首）
-            rebuildPlayOrder(startingAt: currentIndex)
+            // 随机播放到末尾：重洗一轮继续（首位避开刚刚播完的那首）。
+            // 与 nextLogicalIndex() 同口径 —— 哪怕是「乐观推进」先算到这里，重洗也照做：
+            // 重洗本身是随机的，提前一步发生不改变落点集合，却能让连点与真正接续完全一致。
+            rebuildPlayOrder(startingAt: index)
             return playOrder.count > 1 ? playOrder[1] : playOrder.first
         default:
             return nil
@@ -942,7 +977,15 @@ final class AudioEngine: NSObject {
     func previousLogicalIndex() -> Int? {
         guard !tracks.isEmpty else { return nil }
         if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: currentIndex) }
-        let pos = orderPosition
+        let base = playOrder.contains(currentIndex) ? currentIndex : (playOrder.first ?? currentIndex)
+        return previousIndex(before: base)
+    }
+
+    /// 以给定逻辑下标为基准、按播放顺序表退一步的上一首（N-2）；口径与 previousLogicalIndex() 相同。
+    func previousIndex(before index: Int) -> Int? {
+        guard !tracks.isEmpty else { return nil }
+        if playOrder.count != tracks.count { rebuildPlayOrder(startingAt: index) }
+        guard let pos = playOrder.firstIndex(of: index) else { return nil }
         if pos > 0 { return playOrder[pos - 1] }
         return repeatMode == .listLoop ? playOrder.last : nil
     }

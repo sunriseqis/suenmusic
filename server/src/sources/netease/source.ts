@@ -86,6 +86,14 @@ interface PlayableUrlResult {
   url: string;
   level: string;
   bitrate?: number;
+  /**
+   * **本次这首曲子真实可取**的档位（S-23）。
+   *
+   * 以前这里是账号级能力（VIP 就报 4 档），与单曲实际版权无关：
+   * 一首没有 FLAC 版权的歌也会把「原声」点亮，用户点下去被静默降级到 exhigh。
+   * 现在由本次实际拿到的档位推导 —— 声明即真能取，取不到的档不声明（宁可少报）。
+   */
+  availableQualities: string[];
 }
 
 /** 网易 level → 本项目通用音质档位名（认不出返回 null） */
@@ -128,16 +136,20 @@ function computeNeteaseLevels(vip: boolean, quality?: string, preferMp3 = false)
 }
 
 /**
- * 本账号**真的取得到**的档位 —— 与 computeNeteaseLevels 同源（取最宽请求序列映射），
- * 不会出现「一边放行请求、一边对外声明没有」的自相矛盾响应。
+ * 由**实际拿到的档位**推导本次可声明的档位（S-23）。
+ *
+ * 依据：网易同一首歌「高码率可取 ⇒ 低码率必可取」（freeTrialInfo 只会出现在
+ * 高于账号/曲目权限的那几档），所以拿到 L 档时 L 及以下各档都是真的能播的；
+ * 高于 L 的一律不声明 —— 那正是以前谎报的来源。
+ *
+ * 注意 QUALITY_ORDER 是「低 → 高」，因此取前缀 = 取 ≤ L 的全部档位。
+ * preferMp3（iOS 流播不了 FLAC）已经在上游的候选序列里剔掉 lossless，
+ * 所以这里不会因为前缀而把 lossless 又说回来。
  */
-function neteaseAvailableQualities(vip: boolean, preferMp3: boolean): string[] {
-  const caps = new Set(
-    computeNeteaseLevels(vip, 'lossless', preferMp3)
-      .map(levelToQuality)
-      .filter((q): q is string => Boolean(q)),
-  );
-  return QUALITY_ORDER.filter(q => caps.has(q));
+function availableUpTo(quality: string): string[] {
+  const idx = QUALITY_ORDER.indexOf(quality);
+  if (idx < 0) return ['standard'];
+  return QUALITY_ORDER.slice(0, idx + 1);
 }
 
 /** 映射网易 level 到本项目通用音质档位：认不出就退回本次请求的档，再不行 standard（绝不往上猜） */
@@ -178,10 +190,20 @@ async function fetchPlayableUrl(
       // freeTrialInfo 非空 = 该档位只有试听，往下一档试
       if (entry.freeTrialInfo) continue;
       if (!entry.url) continue;
+      /**
+       * preferMp3（iOS）：万一上游仍回执无损（请求档与回执档不符的异常情形），
+       * 那个 URL 就是 FLAC —— AVPlayer 流播不了，按"这一档失败"处理继续往下试，
+       * 否则会把一个播不动的档当成结果返回，还会被声明成可取。
+       */
+      if (options?.preferMp3 && levelToQuality(entry.level) === 'lossless') continue;
+      // 以**上游回执里的真实档位**为准（可能是比请求更低的档），声明只到它为止
+      const got = mapNeteaseQuality(entry.level, level);
       return {
         url: String(entry.url),
-        level: mapNeteaseQuality(entry.level, level),
+        level: got,
         bitrate: typeof entry.br === 'number' ? entry.br : undefined,
+        /** 本次这首真的能取到的档位（S-23，见 availableUpTo 注释） */
+        availableQualities: availableUpTo(got),
       };
     } catch (err) {
       const status = (err as { status?: number })?.status;
@@ -209,8 +231,6 @@ export async function resolveNeteaseSource(
 ): Promise<ResolveResult> {
   const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const rawId = String(track.id ?? '').trim();
-  // 与 computeNeteaseLevels 同源：能请求到的档才声明；preferMp3 下连无损都不声明
-  const availableQualities = neteaseAvailableQualities(vip, Boolean(options?.preferMp3));
 
   // ---- 直取快径：`ne_<songId>` 自带网易云 songId，直接调 songUrlV1（0 次搜索） ----
   if (rawId.startsWith('ne_')) {
@@ -231,7 +251,8 @@ export async function resolveNeteaseSource(
           bandwidth: direct.bitrate,
           source: 'netease',
           currentQuality: direct.level,
-          availableQualities,
+          // 曲目级声明：只有本次这首歌真能取的档位（S-23）
+          availableQualities: direct.availableQualities,
         };
       }
       log.debug(`网易云直取无完整流 songId=${directId}，回退按歌名搜索`);
@@ -337,7 +358,7 @@ export async function resolveNeteaseSource(
     source: 'netease',
     coverUrl,
     currentQuality: playable.level,
-    availableQualities,
+    availableQualities: playable.availableQualities,
   };
 
   log.info(

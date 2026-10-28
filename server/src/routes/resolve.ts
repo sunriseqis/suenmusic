@@ -27,7 +27,7 @@ import {
 } from '../sources/bilibili/stream.ts';
 import type { ResolveResult } from '../sources/bilibili/stream.ts';
 import { scoreCandidate } from '../sources/bilibili/matcher.ts';
-import { cacheKeyFor, invalidateTrack, resolveTrack } from '../services/resolver.ts';
+import { cacheKeyFor, invalidateTrack, resolveTrack, whitelistQuality } from '../services/resolver.ts';
 import { getPin, setPin, deletePin } from '../db/repo/pins.ts';
 import { resolveKugouSource } from '../sources/kugou/stream.ts';
 import {
@@ -55,17 +55,15 @@ function directEnabled(): boolean {
 /** BVID 形如 BV + 10 位字母数字 */
 const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
 
-/** 音质白名单。不在名单里的值一律忽略，绝不把原始串写进缓存键（每换一个串就是一次完整上游解析） */
-const QUALITY_WHITELIST = ['standard', 'high', 'exhigh', 'lossless'] as const;
-
 /**
  * 归一化音质参数（doc2 §四.1）：白名单命中就用它（统一小写），否则按平台缺省 ——
  * iOS 缺省 exhigh（避开 FLAC 的播放器兼容问题），其他端缺省 lossless。
+ *
+ * 白名单本身由 services/resolver.ts 提供（与缓存键规则同一个家）：
+ * 代理侧读键前也要过同一份名单，两处各留一份迟早漂移。
  */
 function normalizeQuality(raw: string, ios: boolean): string {
-  const q = raw.trim().toLowerCase();
-  if ((QUALITY_WHITELIST as readonly string[]).includes(q)) return q;
-  return ios ? 'exhigh' : 'lossless';
+  return whitelistQuality(raw) ?? (ios ? 'exhigh' : 'lossless');
 }
 
 type TrackMeta = Awaited<ReturnType<typeof loadTrack>>;
@@ -145,7 +143,8 @@ function shape(
      * 服务端地址（已带短期令牌）。客户端直接拿它喂给播放器 ——
      * 不要自己去取 B 站地址，那条路必然 403。
      */
-    streamUrl: outcome.ok ? buildStreamUrl(outcome.trackId) : null,
+    // 档位一并透传：代理侧要靠它读同一个缓存键（S-16，见 buildStreamUrl 注释）
+    streamUrl: outcome.ok ? buildStreamUrl(outcome.trackId, undefined, quality) : null,
     /**
      * **直链通道**（设备直接向 CDN 取流，不经过服务端）。
      *

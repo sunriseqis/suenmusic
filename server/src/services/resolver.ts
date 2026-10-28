@@ -124,6 +124,29 @@ export function cacheKeyFor(trackId: string, preferMp3 = false, quality?: string
   return q ? `${base}:${q}` : base;
 }
 
+/**
+ * 音质白名单（doc2 §四.1）。不在这里的值一律当「没带档位」——
+ * 每换一个原始串就多出一个平行缓存键，等于一次完整的重复上游解析。
+ *
+ * 放在本文件是因为**键规则**在这里：读键（/api/stream 代理）与写键（resolve/批量）
+ * 必须过同一个白名单，两处各留一份名单迟早漂移（S-16 就是这么来的）。
+ */
+export const QUALITY_WHITELIST = ['standard', 'high', 'exhigh', 'lossless'] as const;
+
+export type QualityName = (typeof QUALITY_WHITELIST)[number];
+
+/**
+ * 白名单归一化：命中返回小写档位，否则返回 null。
+ *
+ * **不猜缺省值** —— 缺省由调用方按平台身份决定（routes/resolve.ts 的 normalizeQuality：
+ * iOS 缺省 exhigh、其余端 lossless）。代理侧只想知道「这次请求带了哪个档」，
+ * 替它猜一个缺省值只会让它去读一个跟写侧不一致的键。
+ */
+export function whitelistQuality(raw: unknown): QualityName | null {
+  const q = String(raw ?? '').trim().toLowerCase();
+  return (QUALITY_WHITELIST as readonly string[]).includes(q) ? (q as QualityName) : null;
+}
+
 // ---------- 内存 LRU ----------
 
 function memoryGet(key: string): ResolveResult | null {

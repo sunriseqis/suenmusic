@@ -73,7 +73,8 @@ struct RootView: View {
             }
             #endif
         }
-        // 灵动岛 / 锁屏卡点击 → suenmusic://player：直接落到播放页（对应 widget 的 .widgetURL）
+        // 深链 suenmusic://player（外部链接 / 通知点击）→ 直接落到播放页。
+        // 注：Widget / 灵动岛卡片已在 60ecdcd 整体移除，这里只剩 URL Scheme 本身（Info.plist 的 CFBundleURLSchemes）。
         .onOpenURL { url in
             guard url.scheme == "suenmusic" else { return }
             if url.host == "player" {

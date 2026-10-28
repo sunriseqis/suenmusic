@@ -465,8 +465,12 @@ async function streamFirstPlayable(
   // 若无概念 SVIP（仅普通畅听 VIP），上游无 320k/FLAC 权限，锁定仅尝试 128k 完整版
   if (!svip) {
     qualityOrder = ['128'];
-  } else if (reqQ === 'standard' || reqQ === 'high') {
+  } else if (reqQ === 'standard') {
     qualityOrder = ['128'];
+  } else if (reqQ === 'high') {
+    // 酷狗无 160-192k 档位（只有 128k / 320k / FLAC）：用户选「高」时取 320k 这一更高档，
+    // 超出需求不算欺骗；若继续只给 128k，就成了「点了高只听到标准」的静默降级。
+    qualityOrder = ['320', '128'];
   } else if (reqQ === 'exhigh' || options?.preferMp3) {
     qualityOrder = ['320', '128'];
   } else if (reqQ === 'lossless') {

@@ -219,7 +219,10 @@ export class OfflineCache {
     return this.protectedId;
   }
 
-  /** 配额（2GB 常量，UI 显示用） */
+  /**
+   * 配额（**1GB** 常量，UI 显示用）。H-18：旧注释误写 2GB —— 唯一真源是文件头的
+   * `QUOTA_BYTES = 1 * 1024 * 1024 * 1024`（规格 6.2 就是 1GB），请勿按注释去「修正」常量。
+   */
   quotaBytes(): number {
     return QUOTA_BYTES;
   }
@@ -469,6 +472,20 @@ export class OfflineCache {
         }
         file = fileIo.openSync(tmp,
           fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        /**
+         * 流式落盘：**同步 writeSync**（H-21 评估后保留，故意不改异步）。
+         *
+         * 已知代价：快 CDN 下回调频率高，同步写占用主线程，理论上可能掉帧（洛雪式实现同样如此，
+         * 规格未要求规避）。评估过改成异步 `fileIo.write`，但会**引入真时序问题**，故不动：
+         *   1) `received` 是完整性判据的一部分（isComplete：落盘字节必须等于 received）——
+         *      改成异步后必须在 dataEnd 前 await 写完队列，否则尾块没落盘就判「不完整」，
+         *      把好文件删掉；
+         *   2) 异步写不保证顺序，需要自建串行写队列 + 失败回压，出错还要能取消 settle，
+         *      等于在下载状态机上再叠一层状态机；
+         *   3) settle(false) 会 destroy 会话并 unlink .part，队列里未落地的写必须一起取消，
+         *      否则写进已删文件（fd 有效但路径没了）。
+         * 结论：留待真机掉帧实证后再做（届时按「写队列 + dataEnd await drain」整体改）。
+         */
         session.on('dataReceive', (chunk: ArrayBuffer) => {
           if (file !== null) {
             fileIo.writeSync(file.fd, chunk);
@@ -500,7 +517,15 @@ export class OfflineCache {
           opts.header = headers;
         }
         const code: number = await session.requestInStream(streamUrl, opts);
-        if (code !== 200) {
+        // H-20：**206（Partial Content）也是成功**。部分 CDN 对带 Referer/Range 的请求回 206，
+        // 旧写法 `code !== 200` 会把已经下完整的整首歌判成失败并删掉 .part（白下 + 永远缓存不上）。
+        // 真失败（4xx/5xx）仍由 settle(false) 收口；实际码一律记日志，方便按 CDN 排障。
+        if (code === 200 || code === 206) {
+          if (code === 206) {
+            hilog.info(DOMAIN, TAG, '缓存下载 HTTP 206 Partial Content，按成功处理 %{public}s', trackId);
+          }
+        } else {
+          hilog.warn(DOMAIN, TAG, '缓存下载 HTTP %{public}d，按失败处理 %{public}s', code, trackId);
           settle(false);
         }
       } catch (e) {

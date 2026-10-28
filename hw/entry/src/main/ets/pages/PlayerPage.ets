@@ -25,7 +25,7 @@ import {
   K_PREFERRED_QUALITY, K_AVAILABLE_QUALITIES
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
-import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse, normalizeQuality } from '../core/Models';
+import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse, normalizeQuality, QUALITY_LEVELS } from '../core/Models';
 import { OfflineCache } from '../core/OfflineCache';
 import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
@@ -49,14 +49,41 @@ interface QualityOpt {
   desc: string;
 }
 
+/**
+ * 单档位的展示文案（**只有文案**，不决定「有哪些档位」）。
+ * 档位集合的唯一真源是 Models.QUALITY_LEVELS（H-19 / 清单 H-13），这里只负责把 key 翻成
+ * 中文名 + 参数说明。新增档位时 QUALITY_LEVELS 加一项即可，此处可以不给文案（走 default 兜底）。
+ */
+function qualityDisplay(key: string): QualityOpt {
+  switch (key) {
+    case 'lossless': return { key: key, name: '原声', desc: 'FLAC 无损 (~800k-1000k)' };
+    case 'exhigh': return { key: key, name: '极高', desc: '320kbps 高保真 MP3/AAC' };
+    case 'high': return { key: key, name: '高', desc: '192kbps / 160kbps' };
+    case 'standard': return { key: key, name: '标准', desc: '128kbps / 64kbps' };
+    // 兜底：QUALITY_LEVELS 里新增、这里还没写文案的档位 —— 直接显示 key，绝不从面板里消失
+    default: return { key: key, name: key, desc: '' };
+  }
+}
+
+/**
+ * 音质面板的档位清单（H-19）：key 从 Models.QUALITY_LEVELS **派生**，
+ * 顺序按「高 → 低」展示（QUALITY_LEVELS 是 low → high 升序，这里反向遍历）。
+ */
+function buildQualityOptions(): QualityOpt[] {
+  const out: QualityOpt[] = [];
+  for (let i = QUALITY_LEVELS.length - 1; i >= 0; i--) {
+    out.push(qualityDisplay(QUALITY_LEVELS[i]));
+  }
+  return out;
+}
+
 @Component
 export struct PlayerPage {
-  private readonly qualityOptions: QualityOpt[] = [
-    { key: 'lossless', name: '原声', desc: 'FLAC 无损 (~800k-1000k)' },
-    { key: 'exhigh', name: '极高', desc: '320kbps 高保真 MP3/AAC' },
-    { key: 'high', name: '高', desc: '192kbps / 160kbps' },
-    { key: 'standard', name: '标准', desc: '128kbps / 64kbps' }
-  ];
+  /**
+   * 音质面板档位清单（H-19）：**不再硬编码**，key 全部来自 Models.QUALITY_LEVELS，
+   * 这里只提供展示顺序与文案（见模块顶部的 qualityDisplay / buildQualityOptions）。
+   */
+  private readonly qualityOptions: QualityOpt[] = buildQualityOptions();
 
   private qualityIconResource(q: string): Resource {
     switch (q) {

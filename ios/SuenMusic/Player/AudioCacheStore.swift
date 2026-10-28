@@ -106,6 +106,38 @@ final class AudioCacheStore: @unchecked Sendable {
         return count
     }
 
+    /// 一次遍历同时给出「列表 + 总占用 + 条数」（N-6）。
+    ///
+    /// 缓存页刷新原来要 `usedBytes` + `entries()` 各 stat 一遍全部 `.bin`（条目上百时
+    /// 一次 onAppear 就是两百多次同步 stat，而且还在主线程）；这里只 stat 一遍，
+    /// 调用方把整个调用挪到后台即可。
+    struct Snapshot {
+        let entries: [Entry]
+        let usedBytes: Int64
+        var count: Int { entries.count }
+    }
+
+    /// 一次遍历产出快照（磁盘 stat 都发生在这里，调用方负责别在主线程调）
+    func snapshot() -> Snapshot {
+        let snap: Snapshot = locked {
+            loadIndexLocked()
+            var out: [Entry] = []
+            var total: Int64 = 0
+            for meta in index.values {
+                guard let size = fileSize(binURL(meta.trackId)), size > 0 else { continue }
+                total += size
+                out.append(Entry(trackId: meta.trackId,
+                                 name: meta.name,
+                                 artist: meta.artist,
+                                 bytes: size,
+                                 createdAt: Date(timeIntervalSince1970: meta.createdAt),
+                                 lastAccessAt: Date(timeIntervalSince1970: meta.lastAccessAt)))
+            }
+            return Snapshot(entries: out.sorted { $0.lastAccessAt > $1.lastAccessAt }, usedBytes: total)
+        }
+        return snap
+    }
+
     /// 列表（最近听过的在前）—— 缓存页逐条删除用
     func entries() -> [Entry] {
         let list: [Entry] = locked {
@@ -179,10 +211,21 @@ final class AudioCacheStore: @unchecked Sendable {
             NSLog("%@", "[AudioCache] 拒绝代理流下载源 id=\(trackId)")
             return nil
         }
+        // N-1：入口守卫必须是「真的可播」，不能只看 index 里有没有 meta。
+        // 只看 meta 的话，meta 还在、`.bin` 被系统清理（或用户删掉）之后，这首歌永远进不了
+        // 下载分支 —— isCached() 说没缓存、download() 又说「已缓存」，只能手动清空整个缓存。
+        // cachedFileURL 内部已经 locked，而 NSLock 不可重入：先算出布尔再进 locked，
+        // 绝不能在 locked 闭包里调 cachedFileURL（会死锁）。
+        if cachedFileURL(trackId) != nil { return nil }
         let begin: Bool = locked {
             loadIndexLocked()
-            if index[trackId] != nil { return false }
+            // 去重优先且语义不变：正在下就直接返回，绝不在这条路径上动任何文件
+            // （否则可能删掉 fetch 刚落盘、还没登记完的 .bin）。
             if inflight.contains(trackId) { return false }
+            // 能走到这里只有两种可能：没有 meta，或 meta 在但文件不可用。
+            // 后者是陈旧 meta（索引里的垃圾），顺手清掉，免得它永远挡着重新下载。
+            // removeLocked 内部只是 FileManager + 字典操作，不加锁，不会重入。
+            if index[trackId] != nil { removeLocked(trackId) }
             inflight.insert(trackId)
             return true
         }
@@ -318,8 +361,12 @@ final class AudioCacheStore: @unchecked Sendable {
             NSLog("%@", "[AudioCache] 建目录失败 " + dir.path + " err=" + error.localizedDescription)
             return
         }
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
         var target = dir
-        try? target.setResourceValue(true, forKey: .isExcludedFromBackupKey)
+        do { try target.setResourceValues(values) } catch {
+            NSLog("%@", "[AudioCache] 设置排除备份失败 " + dir.path + " err=" + error.localizedDescription)
+        }
     }
 
     /// 旧位置（cachesDirectory/SuenAudioCache）的历史文件一次性清理：

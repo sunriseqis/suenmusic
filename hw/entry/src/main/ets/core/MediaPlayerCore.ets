@@ -119,6 +119,14 @@ export class MediaPlayerCore {
   private openFile: fileIo.File | null = null;
   /** 本次装载新开、等 reset 之后才接管的文件 */
   private pendingFile: fileIo.File | null = null;
+  /**
+   * 打开 pendingFile 的那次装载的 seq（-1 = 槽位空）。**H-16**
+   *
+   * pendingFile 是实例级单槽：3 秒内连点切歌时，新任务的 buildUrl 会 openSync 后直接把它
+   * 换成自己的 fd。所以只有「开着它的那次装载」有权关闭 —— 旧任务若无条件 close，
+   * 会把新任务已赋给 url 的 `fd://N` 关成非法句柄，等于换一种方式自杀。
+   */
+  private pendingFileSeq: number = -1;
   /** 本次装载期望自动起播（prepared 之后才真正 play） */
   private pendingAutoplay: boolean = false;
   /** 换服重建队列时要恢复到的位置（-1 = 无需恢复）；prepared 后 seek 一次即清 */
@@ -888,17 +896,53 @@ export class MediaPlayerCore {
 
   // ---------------- 内部 ----------------
 
+  /** 关闭一个文件句柄（**H-16**：openFile / pendingFile 共用同一套关闭口径，失败只记日志） */
+  private closeFileQuietly(file: fileIo.File): void {
+    try {
+      fileIo.closeSync(file);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '关闭缓存文件失败: %{public}s', JSON.stringify(e));
+    }
+  }
+
   /** 归还交给 AVPlayer 的本地文件句柄（缓存播放专用） */
   private releaseOpenFile(): void {
     const file = this.openFile;
     this.openFile = null;
     if (file !== null) {
-      try {
-        fileIo.closeSync(file);
-      } catch (e) {
-        hilog.warn(DOMAIN, TAG, '关闭缓存文件失败: %{public}s', JSON.stringify(e));
-      }
+      this.closeFileQuietly(file);
     }
+  }
+
+  /** 无条件清空 pendingFile 槽位并关掉句柄 */
+  private closePendingFile(): void {
+    const file = this.pendingFile;
+    this.pendingFile = null;
+    this.pendingFileSeq = -1;
+    if (file !== null) {
+      this.closeFileQuietly(file);
+    }
+  }
+
+  /**
+   * 回收「本次装载自己打开、但还没交给播放器」的缓存句柄（**H-16** 主修）。
+   *
+   * ownerSeq 不匹配就什么都不做：那是后继装载刚开的 fd，关掉它等于把新任务正在用的
+   * `fd://` 变成非法句柄（比泄漏更难查）。
+   */
+  private discardPendingFile(ownerSeq: number): void {
+    if (this.pendingFile === null || this.pendingFileSeq !== ownerSeq) { return; }
+    this.closePendingFile();
+  }
+
+  /**
+   * buildUrl 开新 fd 前的兜底回收（**H-16**）：pendingFile 里若躺着不属于本次装载的句柄，
+   * 直接关掉 —— 每次装载只调用一次 buildUrl，所以 `pendingFileSeq === this.seq` 永远不会成立，
+   * 走到这里的必然是「上一次装载早退/异常后没人认领」的遗物。
+   */
+  private closeStalePendingFile(): void {
+    if (this.pendingFile === null || this.pendingFileSeq === this.seq) { return; }
+    this.closePendingFile();
   }
 
   /**
@@ -971,12 +1015,19 @@ export class MediaPlayerCore {
       const p = this.player;
       // 换曲必须 reset 回 idle（url 只允许在 idle 态赋值）
       if (p.state !== 'idle') { await p.reset(); }
-      if (mySeq !== this.seq) { return; }
+      // H-16：buildUrl 可能已经把缓存文件 open 进 pendingFile，而下面还没接管 —— 这条早退正是
+      // 「3 秒内连点切歌」的主路径。不在这里关，下一次 buildUrl 会 openSync 覆盖 pendingFile，
+      // 旧 fd 就再没人认领 —— 每连点一次漏一个 fd，直到进程被回收。
+      if (mySeq !== this.seq) {
+        this.discardPendingFile(mySeq);
+        return;
+      }
       // reset 之后播放器已释放旧的资源句柄，这时才能安全关闭，避免 fd 泄漏
       this.releaseOpenFile();
       if (this.pendingFile !== null) {
         this.openFile = this.pendingFile;
         this.pendingFile = null;
+        this.pendingFileSeq = -1;
       }
       this.currentUrl = url;
       // 本地有缓存直接拿本地缓存（fd://），不管音质，秒播零流量
@@ -997,6 +1048,12 @@ export class MediaPlayerCore {
           try {
             const ms = media.createMediaSourceWithUrl(direct.url, direct.headers);
             await p.setMediaSource(ms);
+            // H-17：setMediaSource 也是 await —— H-1 在它**之前**复检过 seq，这里是残余窄缝。
+            // await 期间用户切歌时，新任务已经 reset 并重新装源；旧任务此刻再碰 p 只会把新任务
+            // 刚装好的源打掉，所以补一次复检后**静默放弃**本次装载（与下面 !usedDirect 分支对称）。
+            // 注意：这里刻意不 reset —— 共享同一个 player 实例，旧任务 reset 会毁掉新任务的装载，
+            // 而新任务的看门狗/重新装载本来就能自愈（代价只是一轮回退，比互相踩踏小）。
+            if (mySeq !== this.seq) { return; }
             usedDirect = true;
             hilog.info(DOMAIN, TAG, '直链装载 track=%{public}s exp=%{public}dms',
               track.id, direct.expiresAt - Date.now());
@@ -1011,6 +1068,9 @@ export class MediaPlayerCore {
         }
       }
     } catch (e) {
+      // H-16：异常可能出在 reset / setMediaSource 之前，pendingFile 还没被接管（上一段未执行），
+      // fail → 重试路径的 buildUrl 会把它顶掉，所以这里同样要回收（ownerSeq 匹配才关）
+      this.discardPendingFile(mySeq);
       this.fail('赋流地址', e);
     }
   }
@@ -1287,9 +1347,12 @@ export class MediaPlayerCore {
       // 规格 6.3：命中即刷新「最后使用时间」—— 否则超配额淘汰会按「最后写入时间」算
       // （节流窗口与落盘方式都在 OfflineCache.touchAccess 里）
       cache.touchAccess(track.id);
+      // H-16 兜底：先回收上一次装载留下的无主句柄，别让下面的 openSync 把它顶成永久泄漏
+      this.closeStalePendingFile();
       try {
         const file = fileIo.openSync(cached, fileIo.OpenMode.READ_ONLY);
         this.pendingFile = file;
+        this.pendingFileSeq = this.seq;
         return 'fd://' + file.fd;
       } catch (e) {
         hilog.warn(DOMAIN, TAG, '打开缓存文件失败: %{public}s', JSON.stringify(e));

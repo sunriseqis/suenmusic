@@ -100,6 +100,40 @@ interface VipQueryResult {
 let cachedVip: { key: string; at: number; result: VipQueryResult } | null = null;
 let lastForceUpgradeAt = 0;
 
+/**
+ * 最近一次**成功**查到的会员判定（S-19）。
+ *
+ * 为什么需要它：网络抖动时状态是 unknown，而旧实现让 unknown 恒报 svipActive=false →
+ * 取流层把 SVIP 用户的尝试序列锁成「仅 128k」、availableQualities 只报 standard。
+ * 「临时抖动不该降低体验」是 unknown 态存在的理由（见 kugouUsable 注释），
+ * 所以抖动窗口内沿用最后一次有效判定，而不是凭空降级。
+ *
+ * 与 cachedVip 的分工：cachedVip 是**5 分钟内、同一凭据+同一签到状态**的查询缓存
+ * （决定要不要再打上游）；这里是「最后一次问出结果的那份会员能力」，只给 unknown 兜底。
+ */
+let lastVipSnapshot: { userid: string; at: number; result: VipQueryResult } | null = null;
+
+/** 快照可复用的最长年龄：超过它就是「长时间问不出来」，unknown 应老实降级 */
+const SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * unknown 态可复用的 SVIP 能力。没有快照 / 换了账号 / 快照里的 SVIP 已过期 → false。
+ *
+ * 概念 SVIP 只有 24 小时（每次升级续期），快照可能比它活得久，所以必须校验到期时间 ——
+ * 复用一个已过期的 svipActive=true 会真去请求 320k/FLAC，拿不到反而多打上游。
+ */
+function snapshotSvipFlags(userid: string): { svipActive: boolean; svipEndTime: string } {
+  const snap = lastVipSnapshot;
+  if (!snap || !snap.result.ok || !snap.result.svipActive) return { svipActive: false, svipEndTime: '' };
+  // 凭据换了就不是「同一个账号上次的判定」，不能拿来当这次的能力
+  if (userid && snap.userid !== userid) return { svipActive: false, svipEndTime: '' };
+  // 太久没成功问过（一整天都在抖）就不猜了：宁可降级，也不要拿一份陈旧的会员能力去请求
+  if (Date.now() - snap.at > SNAPSHOT_MAX_AGE_MS) return { svipActive: false, svipEndTime: '' };
+  const endMs = parseKugouTime(snap.result.svipEndTime);
+  if (endMs !== null && endMs <= Date.now()) return { svipActive: false, svipEndTime: '' };
+  return { svipActive: true, svipEndTime: snap.result.svipEndTime };
+}
+
 export function invalidateKugouStatusCache(): void {
   cachedVip = null;
   transientFailureUntil = 0;
@@ -120,6 +154,12 @@ function unknownState(args: {
   checkinDate: string;
   reason?: string;
 }): KugouLoginState {
+  /**
+   * 会员能力沿用「最近一次有效快照」（S-19）：unknown 只表示**这次没问出来**，
+   * 不表示账号掉了会员。没有快照时才是 false（真正的「无从判定」）。
+   * 注意只影响 unknown —— invalid / logged_out / vip_expired 的判定一律照旧。
+   */
+  const svip = snapshotSvipFlags(args.userid);
   return {
     state: 'unknown',
     label: '状态未知',
@@ -131,8 +171,8 @@ function unknownState(args: {
     checkedIn: args.checkedIn,
     upgraded: args.upgraded,
     checkinDate: args.checkinDate,
-    svipActive: false,
-    svipEndTime: '',
+    svipActive: svip.svipActive,
+    svipEndTime: svip.svipEndTime,
     accountLabel: args.accountLabel,
     statusLabel: '状态未知',
     savedAt: args.savedAt,
@@ -348,6 +388,8 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
       }
       if (vip.ok) {
         cachedVip = { key: cacheKey, at: Date.now(), result: vip };
+        // 记下这次问出来的会员能力：unknown 态（网络抖动）复用它，见 snapshotSvipFlags
+        lastVipSnapshot = { userid, at: Date.now(), result: vip };
       }
     }
 

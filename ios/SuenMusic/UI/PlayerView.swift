@@ -883,7 +883,13 @@ struct QualitySheet: View {
                 .padding(.horizontal, Dim.s2)
                 .padding(.bottom, Dim.s4)
             }
-            .padding(.bottom, Dim.safeBottom)
+            // 底部只补「自己的呼吸留白」，用常规间距档 Dim.s4，不另造安全区常量：
+            // 本卡片的父容器（PlayerView 的浮层 ZStack）本身遵守安全区，卡片下沿已经落在
+            // home indicator 之上（铺满全屏的只有遮罩，见上方 p.scrim.ignoresSafeArea()）；
+            // 再叠一次「安全区高度」＝双重避让，卡片会被整体顶高一截。
+            // 与 LyricPanel「顶部/底部避让由容器承担，这里只补呼吸留白」以及
+            // QueueSheet / SettingsSheets 面板底部只给 s3/s4 的既有约定一致。
+            .padding(.bottom, Dim.s4)
             .background(
                 RoundedRectangle(cornerRadius: Dim.radiusLg, style: .continuous)
                     .fill(p.panel)

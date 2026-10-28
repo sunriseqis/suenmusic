@@ -49,6 +49,54 @@ const V_TYPE_LOGIN = 38;
 /** 短信验证码下发（参考实现 module/captcha_sent.js） */
 const SEND_SMS_URL = 'http://login.user.kugou.com/v7/send_mobile_code';
 
+/**
+ * 短信下发频控（S-17）：**同号 60 秒一次 + 每小时最多 5 次**。
+ *
+ * 为什么必须在服务端做：60 秒冷却以前只存在于 Web 验证页（KugouVerify.vue 的
+ * smsCountdown），而拿不到前端的调用者（改几个请求、或原生端/串）可以在票据的
+ * 30 分钟窗口内对同一个号码无限触发上游 send_mobile_code —— 短信轰炸机主 +
+ * 烧酷狗侧配额 + 给本机 IP 招风控。
+ *
+ * 内存计数即可：验证事件本身也只存内存、票据 30 分钟就过期，重启丢计数不会放大风险
+ * （重启后旧票据也一起失效了）。
+ */
+const SMS_MIN_INTERVAL_MS = 60_000;
+const SMS_MAX_PER_WINDOW = 5;
+const SMS_WINDOW_MS = 60 * 60_000;
+/** 超限文案。**不返回 429**：三端只认 { ok, message }，非 2xx 会被当成"网络错误"提示 */
+export const SMS_RATE_LIMIT_MESSAGE = '发送过于频繁，请稍后再试';
+
+/** mobile → 窗口内每次受理的时间戳（升序） */
+const smsSendLog = new Map<string, number[]>();
+
+/** 频控判定：先看 60 秒间隔，再看每小时次数。命中即拒，不写计数 */
+function smsRateLimited(mobile: string, now = Date.now()): boolean {
+  const hits = (smsSendLog.get(mobile) ?? []).filter(t => now - t < SMS_WINDOW_MS);
+  if (hits.length === 0) {
+    smsSendLog.delete(mobile);
+    return false;
+  }
+  smsSendLog.set(mobile, hits);
+  if (now - hits[hits.length - 1] < SMS_MIN_INTERVAL_MS) return true;
+  return hits.length >= SMS_MAX_PER_WINDOW;
+}
+
+/**
+ * 记一次受理。**在调上游之前记**：上游失败/超时也算一次，
+ * 否则「打上游→失败→立刻再打」就是一条绕开频控的免费通道。
+ */
+function noteSmsSend(mobile: string, now = Date.now()): void {
+  const hits = smsSendLog.get(mobile) ?? [];
+  hits.push(now);
+  smsSendLog.set(mobile, hits.slice(-SMS_MAX_PER_WINDOW));
+  // 号码条目无界增长（每个新号码一行）：超过 200 个号就把窗口内已空的清掉
+  if (smsSendLog.size > 200) {
+    for (const [key, times] of smsSendLog) {
+      if (times.every(t => now - t >= SMS_WINDOW_MS)) smsSendLog.delete(key);
+    }
+  }
+}
+
 export type KugouVerifyProvider =
   | 'TX'
   | 'GT'
@@ -157,6 +205,12 @@ interface VerifyEvent {
   info: KugouVerifyInfo | null;
   /** 最近一次上游失败文案；成功刷新后清空 */
   error: string;
+  /**
+   * 登记这个事件时的酷狗 userid。事件与「哪套凭据撞的 20028」绑定：
+   * 换了账号/退出登录后，旧事件对谁都无用（上游查不到 ev_data），必须自己作废 ——
+   * 否则它会因为「不覆盖已有事件」（S-22）而把新账号的验证页堵满 30 分钟。
+   */
+  userid: string;
 }
 
 let currentEvent: VerifyEvent | null = null;
@@ -346,6 +400,20 @@ function activeEvent(now = Date.now()): VerifyEvent | null {
     currentEvent = null;
     return null;
   }
+  /**
+   * 凭据已不是登记时的那个账号 → 事件作废（惰性过期，不额外挂清理任务）。
+   *
+   * 为什么必须这么做：S-22 起「已有未过期事件不覆盖」，如果换账号后旧事件还赖着，
+   * 新账号撞 20028 也登记不进来，玩家会被引到一张验证的是别人事件的页面（上游回
+   * no find ev_data），而且这一堵就是 30 分钟。
+   */
+  if (currentEvent.userid !== (readCreds()?.userid ?? '')) {
+    log.warn(
+      `酷狗登录凭据已更换（eventid=${currentEvent.eventId} 登记于 userid=${currentEvent.userid || '(空)'}），作废该验证事件`,
+    );
+    currentEvent = null;
+    return null;
+  }
   return currentEvent;
 }
 
@@ -355,10 +423,33 @@ function activeEvent(now = Date.now()): VerifyEvent | null {
  */
 export function noteKugouVerifyEvent(eventIdRaw: string, via: string): void {
   const eventId = String(eventIdRaw ?? '').trim();
+  // 上游没给 ssa-code（响应头缺失或为空）时不登记：没有 eventid 的验证页必然失败。
+  // 一旦登记，/api/resolve 就会下发 need_verification + verifyUrl，把用户引到死路；
+  // 同时也不覆盖可能仍然有效的旧事件。
+  if (!eventId) {
+    log.warn(`酷狗要求二次验证（20028 via ${via}），但上游未给 ssa-code，拒绝登记（不下发验证页）`);
+    return;
+  }
   const now = Date.now();
   const existing = activeEvent(now);
-  if (existing && existing.eventId === eventId) {
+  /**
+   * 已有**未过期**事件时一律不覆盖，只续期（S-22）。
+   *
+   * 旧写法只在 eventId 相同时续期，不同就整体覆盖 —— 多设备/多用户同时撞 20028 时
+   * 后来者会顶掉前者：sessionId 重置、正在验证的那张票据指向的事件被换走，
+   * 用户表现为「验证页突然说没在验证」。
+   *
+   * 现在的语义：一个事件在它的 30 分钟寿命内独占，直到它过期（或验证通过被清掉）
+   * 之后才接受新事件。后到的那次 20028 只把存活期往后推，不换内容。
+   */
+  if (existing) {
     existing.expiresAt = now + VERIFY_EVENT_TTL_MS;
+    if (existing.eventId !== eventId) {
+      log.warn(
+        `酷狗要求二次验证（20028 via ${via}）：已有未过期事件 eventid=${existing.eventId}，` +
+          `忽略新事件 eventid=${eventId}（不覆盖，仅续期）`,
+      );
+    }
     return;
   }
   currentEvent = {
@@ -368,8 +459,9 @@ export function noteKugouVerifyEvent(eventIdRaw: string, via: string): void {
     expiresAt: now + VERIFY_EVENT_TTL_MS,
     info: null,
     error: '',
+    userid: readCreds()?.userid ?? '',
   };
-  log.warn(`酷狗要求二次验证（20028 via ${via}）：eventid=${eventId || '(缺失 ssa-code)'}`);
+  log.warn(`酷狗要求二次验证（20028 via ${via}）：eventid=${eventId}`);
 }
 
 /**
@@ -599,6 +691,18 @@ export async function sendKugouVerifySms(mobile: string): Promise<{ ok: boolean;
    */
   const target = String(mobile ?? '').trim() || readCreds()?.mobile || '';
   if (!target) return { ok: false, message: '未取到手机号，请手动填写后再发送' };
+
+  /**
+   * 频控按**最终号码**算（显式传入优先、空则回落凭据里的号）：
+   * 键必须是真正会收到短信的那个号，否则空 body 回落路径就是一个绕过口。
+   */
+  const now = Date.now();
+  if (smsRateLimited(target, now)) {
+    log.warn(`短信下发过于频繁，已拒绝 mobile=${maskMobile(target)}`);
+    return { ok: false, message: SMS_RATE_LIMIT_MESSAGE };
+  }
+  noteSmsSend(target, now);
+
   try {
     const { status, json, text } = await postJson(
       SEND_SMS_URL,

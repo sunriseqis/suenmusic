@@ -31,7 +31,14 @@ export interface Config {
   matchThreshold: number;
   upstreamTimeoutMs: number;
   logLevel: LogLevel;
-  /** JWT 密钥是否为随机生成（生产环境应显式配置） */
+  /**
+   * JWT 密钥是否只是「本次进程内临时生成」（= 既没配 env，也没落库）。
+   *
+   * config 在模块加载期读不到数据库，所以这里初始表示「env 没配」；
+   * DB 打开后由 services/jwt-secret.ts 的 applyPersistedJwtSecret() 换成
+   * app_settings 里持久化的那把，并把本标记置 false（S-20）。
+   * 仍为 true = 只可能是持久化失败，此时重启会让所有令牌失效。
+   */
   jwtSecretIsEphemeral: boolean;
   /** 访问令牌有效期（毫秒） */
   accessTokenTtlMs: number;
@@ -232,6 +239,11 @@ export const config: Config = {
   webRoot: resolve(SERVER_ROOT, envStr('SUENMUSIC_WEB_ROOT', '../web/dist')),
   bilibiliCookie: envStr('SUENMUSIC_BILIBILI_COOKIE', ''),
   neteaseCookie: envStr('SUENMUSIC_NETEASE_COOKIE', ''),
+  /**
+   * 未显式配置时先给一把进程内随机值：启动早期（openDatabase 之前）可能已经有
+   * 签名发生，必须先有个可用密钥。DB 打开后 applyPersistedJwtSecret()
+   * 会把它换成 app_settings 里持久化的那把（没有就落库），见 services/jwt-secret.ts。
+   */
   jwtSecret: explicitSecret || randomBytes(32).toString('hex'),
   jwtSecretIsEphemeral: explicitSecret === '',
   matchThreshold: envNum('SUENMUSIC_MATCH_THRESHOLD', 60),

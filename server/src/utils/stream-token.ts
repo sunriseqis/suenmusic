@@ -74,7 +74,19 @@ export function signSessionStreamToken(
   return `${expiresAt}.${sign('*', expiresAt)}`;
 }
 
-/** 生成完整的流地址（含令牌），供 `/api/resolve` 返回给客户端 */
-export function buildStreamUrl(trackId: string, ttlMs?: number): string {
-  return `/api/stream/${encodeURIComponent(trackId)}?t=${signStreamToken(trackId, ttlMs)}`;
+/**
+ * 生成完整的流地址（含令牌），供 `/api/resolve` 返回给客户端。
+ *
+ * ★ `quality` 随地址透传（S-16）：代理侧据此读**同一个**缓存键
+ * （`cacheKeyFor(trackId, preferMp3, quality)`）。不带的话，iOS 直链失效回退代理时
+ * 读的是无档位键 → 必 miss 一次重解析，且重解析结果又写进无档位键，
+ * 下次 resolve 读带档位键仍是旧地址（S-2 的尾巴）。
+ *
+ * 令牌签名只覆盖 trackId，附加查询参数不影响校验（客户端改档位读的是另一行缓存，
+ * 内容仍是它自己有权取的那一份，不是越权）。
+ */
+export function buildStreamUrl(trackId: string, ttlMs?: number, quality?: string): string {
+  const url = `/api/stream/${encodeURIComponent(trackId)}?t=${signStreamToken(trackId, ttlMs)}`;
+  const q = String(quality ?? '').trim().toLowerCase();
+  return q ? `${url}&quality=${encodeURIComponent(q)}` : url;
 }

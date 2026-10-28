@@ -165,10 +165,18 @@ struct CachePage: View {
 
     // MARK: - 数据
 
+    /// 刷新用量与列表（N-6）。
+    ///
+    /// 一次遍历取快照，且整个磁盘 stat 都在后台线程：原来在 onAppear 里主线程
+    /// `usedBytes` + `entries()` 各 stat 一遍全部 `.bin`，条目上百时会卡住首帧。
     private func refresh() {
-        let store = AudioCacheStore.shared
-        used = store.usedBytes
-        entries = store.entries()
+        Task { @MainActor in
+            let snap = await Task.detached(priority: .userInitiated) {
+                AudioCacheStore.shared.snapshot()
+            }.value
+            entries = snap.entries
+            used = snap.usedBytes
+        }
     }
 
     /// 与 hw `CachePage.fmtBytes` 逐值同口径：

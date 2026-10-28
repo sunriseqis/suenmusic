@@ -48,7 +48,13 @@ import { getAnchor } from '../db/repo/anchors.ts';
 import { getTrack, upsertTracks } from '../db/repo/tracks.ts';
 import { getSongDetail } from '../sources/qq/home.ts';
 import { fetchAudioStream, resolveTrackSource } from '../sources/bilibili/stream.ts';
-import { cacheKeyFor, invalidateTrack, resolveTrack, isFlacUrl } from '../services/resolver.ts';
+import {
+  cacheKeyFor,
+  invalidateTrack,
+  resolveTrack,
+  isFlacUrl,
+  whitelistQuality,
+} from '../services/resolver.ts';
 import { isIosClient, wantsMp3 } from '../http/platform.ts';
 
 const log = createLogger('routes:stream');
@@ -364,12 +370,33 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      */
     const upstreamRange = range ?? (headOnly ? 'bytes=0-0' : undefined);
 
-    // 代理侧拿不到 quality（客户端不会为流地址再带一次档位），
-    // 但键规则必须与写侧共用 cacheKeyFor —— 两处各拼一套必然继续漂移。
+    /**
+     * ★ 档位从 URL 透传（`&quality=<档>`，由 /api/resolve 的 buildStreamUrl 签发，S-16）。
+     *
+     * 旧写法里代理侧「拿不到 quality」，只能按无档位键读 —— 而写侧
+     * （resolver）是按 `cacheKeyFor(trackId, preferMp3, quality)` 落库的，
+     * 于是 iOS 直链失效回退代理时永远读不到本次写下的那一行：必 miss 一次重解析，
+     * 且重解析结果又落到无档位键，下次 resolve 读 `:mp3:exhigh` 还是旧地址。
+     *
+     * 现在读键与写键用同一个 quality 值 + 同一个 cacheKeyFor，键真正同源。
+     * 只认白名单值：非法/缺失一律当「没带档位」，绝不把客户端随手发来的原始串拼进键。
+     */
     const isIos = isIosClient(req);
     const preferMp3 = wantsMp3(req);
-    const cacheKey = cacheKeyFor(trackId, preferMp3);
+    const quality =
+      whitelistQuality((req.query as Record<string, unknown> | undefined)?.quality) ?? undefined;
+    const cacheKey = cacheKeyFor(trackId, preferMp3, quality);
     let row = getSource(cacheKey);
+    /**
+     * 键降级试探：带档位的键 miss 时回落到不加档位的旧键。
+     *
+     * 覆盖两类历史行 —— 本改造之前写入的行，以及老版本已经签发出去的流地址
+     * （那些地址没有 quality 参数，读的仍是无档位键）。读到就少打一次上游，
+     * 读不到再走下方重解析（重解析会按带档位的键重新落库，随后自愈）。
+     */
+    if (!row && quality) {
+      row = getSource(cacheKeyFor(trackId, preferMp3));
+    }
     if (preferMp3 && row && isFlacUrl(row.audioUrl)) {
       row = null;
     }
@@ -438,7 +465,9 @@ export function registerStreamRoutes(app: FastifyInstance): void {
           // 无 Q 音专辑封面时网易云路径会去取网易云侧专辑封面（显示层兜底）
           hasAlbumCover: Boolean(track.al?.picUrl),
         },
-        { force: urlExpired, preferMp3 }
+        // quality 必须一起带上（S-16）：否则兜底重解析把结果写进无档位键，
+        // 下次 resolve 读带档位键仍是旧地址，等于白重解析一轮
+        { force: urlExpired, preferMp3, quality }
       );
 
       if (!outcome.ok || !outcome.sourceUrl) {

@@ -104,11 +104,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 正在加载/已加载歌词的曲目 id（保证「当前曲一定已经发起过歌词请求」）
     private var lyricTrackId: String = ""
 
-    /// 当前位置应该显示的歌词（没有歌词返回空串）
-    private var currentLyricLine: String {
-        LyricParser.line(atMs: positionMs, in: lyricLines)
-    }
-
     /// 拉取当前曲目的歌词（失败静默 —— 没有歌词不影响播放）
     ///
     /// 走 `LyricStore`：播放页歌词面板与 peek 预热的是同一份缓存，
@@ -322,9 +317,13 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     func warm(_ tracks: [Track], limit: Int = 8) {
         let head = Array(tracks.prefix(limit))
         guard !head.isEmpty else { return }
+        // 预热必须与播放解析**同键**（N-3）：服务端按 quality 落 play_sources 行，
+        // 不带 quality 打的是缺省档 —— 之后带 exhigh 播放时再解析一次，预热等于白打；
+        // 更糟的是可能给服务端写进一条非目标档位的缓存行，被旧键读取路径命中。
+        let quality = requestQuality
         Task.detached(priority: .utility) {
             for track in head {
-                _ = try? await APIClient.shared.resolve(trackId: track.id)
+                _ = try? await APIClient.shared.resolve(trackId: track.id, quality: quality)
             }
         }
     }
@@ -426,26 +425,35 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 连点两下时不能拿引擎的 nextLogicalIndex() 当基准：引擎的逻辑下标要等 resolve
     /// 回来才前进，两次点击会算出同一个目标（I-2：只前进一首，且同一首被重建两次）。
     /// 所以有「已下发但还没落地」的意图时，在 pendingTargetIndex 上乐观再走一格。
+    ///
+    /// ⚠️ 这一格必须走**播放顺序表**（N-2）：`nextIndex(after:)` 与引擎 `nextLogicalIndex()`
+    /// 是同一套步进规则（按 playOrder 前进）。绝不能写成 `pendingTargetIndex + 1`
+    /// —— 那只是数组下标 +1，随机模式下数组序 ≠ 播放序，第二次点击会落到一首
+    /// playOrder 之外的歌上（用户听到的不是「随机序列的下一首」）。
     private func nextTargetIndex() -> Int? {
-        guard !queue.isEmpty else { return nil }
+        guard !queue.isEmpty, let engine else { return nil }
         if queue.indices.contains(pendingTargetIndex) {
-            let stepped = pendingTargetIndex + 1
-            return queue.indices.contains(stepped) ? stepped : nil
+            guard let stepped = engine.nextIndex(after: pendingTargetIndex),
+                  queue.indices.contains(stepped) else { return nil }
+            return stepped
         }
-        if let logical = engine?.nextLogicalIndex(), queue.indices.contains(logical) { return logical }
+        if let logical = engine.nextLogicalIndex(), queue.indices.contains(logical) { return logical }
         return nil
     }
 
-    /// 上一首的预期下标；nil = 队头且不循环（原地不动）。乐观推进口径同上。
+    /// 上一首的预期下标；nil = 队头且不循环（原地不动）。
+    /// 乐观推进口径与「下一首」完全相同：走播放顺序表，而不是数组下标 -1（N-2）。
     private func previousTargetIndex() -> Int? {
-        guard !queue.isEmpty else { return nil }
+        guard !queue.isEmpty, let engine else { return nil }
         if queue.indices.contains(pendingTargetIndex) {
-            let stepped = pendingTargetIndex - 1
-            return queue.indices.contains(stepped) ? stepped : nil
+            guard let stepped = engine.previousIndex(before: pendingTargetIndex),
+                  queue.indices.contains(stepped) else { return nil }
+            return stepped
         }
-        if let logical = engine?.previousLogicalIndex(), queue.indices.contains(logical) { return logical }
+        if let logical = engine.previousLogicalIndex(), queue.indices.contains(logical) { return logical }
         return nil
     }
+
     func seek(to ms: Int) { engine?.seek(to: max(0, ms)) }
 
     func setRepeat(_ mode: String) { engine?.setRepeatMode(mode) }
