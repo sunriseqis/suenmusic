@@ -302,7 +302,9 @@ export type ResolveReason =
   | 'cooldown'
   | 'error'
   | 'unavailable'
-  | 'not_found';
+  | 'not_found'
+  /** 酷狗撞 20028 要求人机验证 —— 服务端会同时下发 verifyUrl（含短期票据） */
+  | 'need_verification';
 
 export interface ResolveCandidate {
   bvid: string;
@@ -319,6 +321,12 @@ export interface ResolveResult {
   reason: ResolveReason | null;
   /** 面向用户的失败说明，服务端已写好中文 */
   message: string | null;
+  /**
+   * 需要人机验证时的验证页地址（相对路径，形如 /verify/kugou?t=…）。
+   * 它是服务端签发的 30 分钟短期票据，也是设置页探测验证状态的唯一凭据；
+   * 不需要验证时为 null。见 api/kugou-verify.ts 的 saveVerifyToken。
+   */
+  verifyUrl?: string | null;
   score: number;
   bvid: string | null;
   matchedTitle: string | null;
@@ -460,7 +468,7 @@ export interface BilibiliQrPoll {
 
 export type KugouQrState = 'waiting' | 'confirmed' | 'expired' | 'failed';
 
-export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok';
+export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok' | 'unknown';
 
 export interface KugouStatus {
   ok: boolean;

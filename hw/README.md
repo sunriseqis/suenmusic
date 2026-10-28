@@ -29,7 +29,7 @@ hw/
             ├── core/
             │   ├── MediaPlayerCore.ets # 原生播放引擎核心（AVPlayer / 直连 CDN / 缓存 / 熔断）
             │   ├── APIClient.ets       # RESTful API 客户端（单例 / 超时熔断 / 令牌自动续签）
-            │   └── Models.ets          # 数据模型与音质枚举
+            │   └── Models.ets          # 数据模型 + 音质档位常量（QUALITY_LEVELS / normalizeQuality，唯一真源）
             ├── pages/
             │   ├── NativeRoot.ets      # 根路由与底部 Tab 容器（无过度切页动效，瞬时切换）
             │   ├── PlayerPage.ets      # 完整沉浸式播放页（封面光晕/歌词 Sheet/音质切换弹层）

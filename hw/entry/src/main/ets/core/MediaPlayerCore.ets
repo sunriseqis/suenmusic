@@ -21,12 +21,13 @@ import { common } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { preferences } from '@kit.ArkData';
-import { Track, artistLine, ResolveResponse, DirectLink } from './Models';
+import { Track, artistLine, ResolveResponse, DirectLink, QUALITY_LEVELS, normalizeQuality } from './Models';
 import { OfflineCache } from './OfflineCache';
 import { HarmonyAVSessionManager, MusicMetadataParam } from '../common/AVSessionManager';
 import { Notifier } from '../common/Notifier';
 import { AppToast } from '../common/AppToast';
 import { APIClient } from './APIClient';
+import { KugouVerify } from './KugouVerify';
 
 const TAG = 'SuenMusic_Player';
 const DOMAIN = 0x0000;
@@ -54,7 +55,11 @@ const STALL_MS = 6000;
 const NO_SOURCE_LABEL = '无音源';
 /** 播放模式偏好键（web localStorage `suenmusic.playMode` 同口径） */
 const MODE_KEY = 'play_mode';
-
+/**
+ * 缓存起下延时（规格 2.1）：**起播 25 秒后**才发起整首缓存下载。
+ * 25 秒门槛是「试听过滤」——不喜欢的歌在 25 秒内切走，一个字节都不下（规格 2.2：启动前不做任何播放状态检查）。
+ */
+const CACHE_START_DELAY_MS = 25000;
 /** 播放模式环（web MODES 同序）：顺序 → 随机 → 单曲循环 → 列表循环 → 随机不重复 */
 const PLAY_MODES: string[] = ['order', 'shuffle', 'repeat-one', 'list-loop', 'shuffle-once'];
 
@@ -90,9 +95,8 @@ export const K_PLAY_MODE = 'np_play_mode';
  *  播放页 eyebrow 用「状态 · 来源」口径展示；队列内切歌不改写（web FullPlayer 同口径） */
 export const K_ORIGIN = 'np_origin';
 
-/** 音质控制常量 */
+/** 音质控制常量（没有「当前实际档位」这个键 —— 界面显示的就是用户选择的 K_PREFERRED_QUALITY） */
 export const K_PREFERRED_QUALITY = 'np_preferred_quality';
-export const K_CURRENT_QUALITY = 'np_current_quality';
 export const K_AVAILABLE_QUALITIES = 'np_available_qualities';
 
 export class MediaPlayerCore {
@@ -160,6 +164,10 @@ export class MediaPlayerCore {
   private restoring: boolean = false;
   /** 歌词拉取序号：切歌后旧请求回来直接丢弃 */
   private lyricSeq: number = 0;
+  /** 缓存起下定时器（-1 = 无）；切歌 / 暂停 / 停止 / 播完都要撤销（规格 2.1 / 3.1） */
+  private cacheTimer: number = -1;
+  /** 已发起下载的曲目 id（终止时据此取消并删 .part，规格 3.1/3.2/3.3）；空串 = 无 */
+  private cacheDownloadId: string = '';
   // ---- 播放模式（T10 批次 F，web player.ts 模式区同口径） ----
   /** 当前播放模式（默认顺序；loadPrefs 从偏好恢复） */
   private playMode: string = 'order';
@@ -183,10 +191,11 @@ export class MediaPlayerCore {
       if (typeof saved === 'string' && PLAY_MODES.indexOf(saved) >= 0) {
         this.playMode = saved;
       }
+      // H-5：偏好里的档位必须过白名单（QUALITY_LEVELS 是唯一真源），脏值归一为 lossless
       const savedQ = this.prefs.getSync('quality', 'lossless');
-      AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY, typeof savedQ === 'string' ? savedQ : 'lossless');
-      AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, 'lossless');
-      AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, ['standard', 'high', 'exhigh', 'lossless']);
+      AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY,
+        typeof savedQ === 'string' ? normalizeQuality(savedQ) : 'lossless');
+      AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, QUALITY_LEVELS.slice(0));
     } catch (e) {
       hilog.warn(DOMAIN, TAG, '打开播放会话偏好失败: %{public}s', JSON.stringify(e));
     }
@@ -374,10 +383,10 @@ export class MediaPlayerCore {
     // 重建是新服务器的账：上一台服务器的失败计数不能带过来
     this.failStreak = 0;
     this.failHandled = false;
-    this.pendingSeekMs = pos;
     AppStorage.setOrCreate<number>(K_POS, pos);
     this.bumpQueue();
-    await this.loadCurrent(wasPlaying);
+    // H-7：位置改由 loadCurrent 的 seekMs 形参带入（该字段不再跨曲残留）
+    await this.loadCurrent(wasPlaying, pos);
   }
 
   /** 装载整条队列并从 startIndex 起播；origin = 队列来源（播放页 eyebrow 显示用，见 K_ORIGIN） */
@@ -469,6 +478,8 @@ export class MediaPlayerCore {
         hilog.warn(DOMAIN, TAG, 'pause 失败: %{public}s', JSON.stringify(e));
       }
     }
+    // 规格 2.1：25 秒窗口内暂停 → 待发的缓存下载作废（已发起的不打断，规格 2.3 一口气下完）
+    this.clearCacheTimer();
     // 官方建议：收到暂停后如果不再需要播放，主动取消长时任务，
     // 否则"申请了但没在播"会被系统判定异常并挂起
     await this.av?.stopContinuousTask();
@@ -621,9 +632,10 @@ export class MediaPlayerCore {
     }
   }
 
-  /** 自然到头停播（wantPlay 关 + 长时任务取消） */
+  /** 自然到头停播（wantPlay 关 + 长时任务取消 + 终止缓存下载，规格 3.1） */
   private stopAtEnd(): void {
     this.wantPlay = false;
+    this.abortCacheDownload();
     this.publishState();
     this.av?.stopContinuousTask();
   }
@@ -734,6 +746,8 @@ export class MediaPlayerCore {
       clearTimeout(this.stallTimer);
       this.stallTimer = -1;
     }
+    // 规格 3.1/3.2/3.3：手动停止 = 终止语义，取消进行中的缓存下载并丢弃 .part
+    this.abortCacheDownload();
     // 停播后不再占用缓存文件：解除删除保护
     OfflineCache.shared().setProtected('');
     const p = this.player;
@@ -748,6 +762,69 @@ export class MediaPlayerCore {
     this.releaseOpenFile();
     await this.av?.stopContinuousTask();
     this.publishState();
+  }
+
+  // ---------------- 缓存下载调度（规格 2 触发 / 规格 3 终止） ----------------
+
+  /** 撤销待发的 25 秒缓存定时器（暂停 / 切歌 / 停止 / 播完都走它；-1 = 无） */
+  private clearCacheTimer(): void {
+    if (this.cacheTimer === -1) { return; }
+    clearTimeout(this.cacheTimer);
+    this.cacheTimer = -1;
+  }
+
+  /**
+   * 排「起播后 25 秒」的缓存下载（规格 2.1）。
+   * 同一次起播重复进入（playing 事件多次）只保留最后一个定时器，不会重复起下。
+   */
+  private armCacheDownload(trackId: string): void {
+    this.clearCacheTimer();
+    this.cacheTimer = setTimeout(() => {
+      this.cacheTimer = -1;
+      this.startCacheDownload(trackId).catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, TAG, '缓存下载启动失败: %{public}s', JSON.stringify(e));
+      });
+    }, CACHE_START_DELAY_MS);
+  }
+
+  /**
+   * 25 秒到点，真正发起整首下载（规格 2.3：一旦启动就一口气下完，中途不暂停、不让路、不降速）。
+   *
+   * 下载源**只能是本曲的 CDN 直链**（规格 4.1/4.2：绝不用 /api/stream 代理地址，
+   * 服务端不再为缓存承担任何带宽）。到点时直链已过期或不属于本曲就重新解析一次；
+   * 仍拿不到 → 本轮不缓存（宁可不下，也不走代理兜底）。
+   */
+  private async startCacheDownload(trackId: string): Promise<void> {
+    const track = this.current;
+    // 这 25 秒里已经切歌：本次下载作废（规格 3.3 不留任何残余状态）
+    if (track === null || track.id !== trackId) { return; }
+    if (OfflineCache.shared().isCached(trackId)) { return; }
+    let dl: DirectLink | null = this.direct;
+    if (dl === null || dl.id !== trackId || dl.expiresAt <= Date.now()) {
+      dl = await this.resolveDirect(track);
+    }
+    // 解析最长阻塞 3s：回来必须复检当前曲，避免把上一首的链接落成新曲的缓存
+    const cur = this.current;
+    if (cur === null || cur.id !== trackId) { return; }
+    if (dl === null || dl.id !== trackId) {
+      hilog.info(DOMAIN, TAG, '拿不到本曲 CDN 直链，本轮不缓存 %{public}s', trackId);
+      return;
+    }
+    this.cacheDownloadId = trackId;
+    OfflineCache.shared().ensureDownload(trackId, dl.url, track.name, artistLine(track), dl.headers);
+  }
+
+  /**
+   * 终止语义（规格 3.1 / 3.2 / 3.3）：撤销待发的 25 秒定时器，并让 OfflineCache
+   * **销毁会话 + 删掉 `.part`** —— 已下载的部分直接丢弃，不留残片、不续传。
+   * 切歌 / 播完 / 手动停止都走这里。
+   */
+  private abortCacheDownload(): void {
+    this.clearCacheTimer();
+    const id = this.cacheDownloadId;
+    this.cacheDownloadId = '';
+    if (id.length === 0) { return; }
+    OfflineCache.shared().cancelDownload(id);
   }
 
   /**
@@ -794,14 +871,14 @@ export class MediaPlayerCore {
         this.shuffleWholeQueue(true);
       }
       this.token = tokenRes.token;
-      if (intent === 'play') { this.pendingSeekMs = posMs; }
       this.failStreak = 0;
       this.failHandled = false;
       hilog.info(DOMAIN, TAG,
         '恢复播放会话：%{public}d 首，下标 %{public}d，位置 %{public}dms，意图 %{public}s',
         this.queue.length, this.index, posMs, intent);
       this.bumpQueue();
-      await this.loadCurrent(true);
+      // H-7：续播位置只对本条装载有效；意图不是 play 时不带位置（-1 = 从 0 开播）
+      await this.loadCurrent(true, intent === 'play' ? posMs : -1);
     } catch (e) {
       hilog.warn(DOMAIN, TAG, '恢复播放会话失败: %{public}s', JSON.stringify(e));
     } finally {
@@ -841,14 +918,26 @@ export class MediaPlayerCore {
    * →（等 stateChange 通知 initialized）→ `audioRendererInfo` + `prepare()`
    * →（等 prepared）→ `play()`。全部状态迁移都在 `attachEvents` 里处理。
    */
-  private async loadCurrent(autoplay: boolean): Promise<void> {
+  private async loadCurrent(autoplay: boolean, seekMs: number = -1): Promise<void> {
     const track = this.current;
     if (track === null) { return; }
+    /**
+     * H-7：本次装载要恢复到哪个位置由形参决定（缺省 -1 = 从 0 开播）。
+     * 以前这是跨曲残留的字段，除了换服/冷启动续播没人清，新歌会从上一首的中间位置开播。
+     */
+    this.pendingSeekMs = seekMs;
     // 换曲才重置「直链回退」状态；同一首内部重载（回退重试）不得重置，否则会无限循环
-    if (track.id !== this.fallbackTrackId) {
+    const trackChanged = track.id !== this.fallbackTrackId;
+    if (trackChanged) {
       this.fallbackTrackId = track.id;
       this.proxyFallbackUsed = false;
       this.direct = null;
+      // 切歌 = 终止上一首的缓存（规格 3.1/3.2/3.3）：撤销待发的 25 秒定时器 + 取消进行中的
+      // 下载并丢弃 .part，不留残片、不续传。同一首的重载（直链失败回退等）不算切歌，不打断。
+      this.abortCacheDownload();
+      // 界面显示的是用户选择的档位，切歌不影响音质显示；
+      // 这里只把「各档可选/置灰」的可用档位复位成完整四档，解析结果回来再覆盖。
+      AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, QUALITY_LEVELS.slice(0));
     }
     const mySeq = ++this.seq;
     this.failHandled = false;
@@ -858,22 +947,8 @@ export class MediaPlayerCore {
       this.failTimer = -1;
     }
     // 卡死看门狗：本次装载若在 STALL_MS 内没进 playing，就当失败处理
-    if (this.stallTimer !== -1) {
-      clearTimeout(this.stallTimer);
-    }
-    this.stallTimer = setTimeout(() => {
-      this.stallTimer = -1;
-      if (mySeq !== this.seq) {
-        return;
-      }
-      const pl = this.player;
-      if (pl !== null && pl.state === 'playing') {
-        return;
-      }
-      hilog.error(DOMAIN, TAG, '装载超时 %{public}dms 仍未起播（状态=%{public}s），按失败处理',
-        STALL_MS, pl === null ? 'null' : pl.state);
-      this.fail('装载超时', 'stall:' + STALL_MS + 'ms');
-    }, STALL_MS);
+    // H-4：直链解析最长阻塞 3s 不算「装载卡死」，解析归来后还会再起算一次（见下方 armStallWatchdog）
+    this.armStallWatchdog(mySeq);
     this.pendingAutoplay = autoplay || this.wantPlay;
     // 登记删除保护：缓存面板删文件必须跳过正在播的这一首（fd:// 占用中删了直接断播）
     OfflineCache.shared().setProtected(track.id);
@@ -906,10 +981,17 @@ export class MediaPlayerCore {
       this.currentUrl = url;
       // 本地有缓存直接拿本地缓存（fd://），不管音质，秒播零流量
       if (url.startsWith('fd://')) {
+        // 缓存绝对优先（不因偏好更高档就弃用缓存），但音质显示与缓存无关：
+        // 界面显示的是用户选择的档位，这里不再从缓存里取什么档位上报。
         p.url = url;
       } else {
         // 没缓存的带音质请求找服务端拿直链，服务端下发对应链接，播放器启播
         const direct = this.proxyFallbackUsed ? null : await this.resolveDirect(track);
+        // H-1：await 期间（最长 3s）用户可能已经连点切歌 —— 回来必须复检 seq，
+        // 否则会把上一首的直链装进新曲，听到的是错误的那首歌
+        if (mySeq !== this.seq) { return; }
+        // H-4：解析已经吃掉的时间不该记在「装载卡死」账上，从这里重新起算看门狗
+        this.armStallWatchdog(mySeq);
         let usedDirect = false;
         if (direct !== null) {
           try {
@@ -923,12 +1005,38 @@ export class MediaPlayerCore {
           }
         }
         if (!usedDirect) {
+          // H-1：setMediaSource 也是 await，写 p.url 前再复检一次 seq（不等则直接放弃本次装载）
+          if (mySeq !== this.seq) { return; }
           p.url = url;
         }
       }
     } catch (e) {
       this.fail('赋流地址', e);
     }
+  }
+
+  /**
+   * 卡死看门狗起算（H-4）。**装载入口**与**直链解析归来之后**各起算一次：
+   * `resolveDirect` 最长阻塞 3000ms，若把这段算进装载时间，慢网下会对本来赶得及的曲目误判超时。
+   * 每次都先清旧计时器，语义是「从现在起再给 STALL_MS」。
+   */
+  private armStallWatchdog(mySeq: number): void {
+    if (this.stallTimer !== -1) {
+      clearTimeout(this.stallTimer);
+    }
+    this.stallTimer = setTimeout(() => {
+      this.stallTimer = -1;
+      if (mySeq !== this.seq) {
+        return;
+      }
+      const pl = this.player;
+      if (pl !== null && pl.state === 'playing') {
+        return;
+      }
+      hilog.error(DOMAIN, TAG, '装载超时 %{public}dms 仍未起播（状态=%{public}s），按失败处理',
+        STALL_MS, pl === null ? 'null' : pl.state);
+      this.fail('装载超时', 'stall:' + STALL_MS + 'ms');
+    }, STALL_MS);
   }
 
   /**
@@ -948,14 +1056,14 @@ export class MediaPlayerCore {
     const prefQ = AppStorage.get<string>(K_PREFERRED_QUALITY) ?? 'lossless';
     APIClient.shared().resolve(id, prefQ)
       .then((r: ResolveResponse): void => {
+        // 酷狗 20028 风控：连播时每首的解析都会撞同一次风控，交给 KugouVerify 去重后再提示
+        KugouVerify.consume(r);
         const cur = this.current;
         if (cur === null || cur.id !== id) {
           return;
         }
         AppStorage.setOrCreate<string>(K_SOURCE, r.ok ? r.source : '');
-        if (r.currentQuality !== undefined) {
-          AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, r.currentQuality);
-        }
+        // 服务端回的实际档位**不**进界面（显示的是用户选择的档位，只保留「各档可选/置灰」的可用档位）
         if (r.availableQualities !== undefined) {
           AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, r.availableQualities);
         }
@@ -972,7 +1080,7 @@ export class MediaPlayerCore {
   /**
    * 取当前曲的直链（服务端 `/api/resolve` 下发）。
    *
-   * 约束：**最多等 1.2 秒**（起播不能被解析拖住）——超时直接回 proxy；
+   * 约束：**最多等 3 秒**（起播不能被解析拖住）——超时直接回 proxy；
    * 结果按 id 缓存，同一首只问一次；服务端关掉直链时返回 null。
    */
   private async resolveDirect(track: Track): Promise<DirectLink | null> {
@@ -981,25 +1089,33 @@ export class MediaPlayerCore {
     if (cached !== null && cached.id === track.id && cached.quality === prefQ && cached.expiresAt > Date.now() + 60_000) {
       return cached;
     }
+    // H-8：超时定时器必须记住 id 并在出口清掉，否则解析成功后它仍在后台白挂一次
+    let timer: number = -1;
     try {
       const r = await Promise.race([
         APIClient.shared().resolve(track.id, prefQ),
         new Promise<ResolveResponse | null>((resolve) => {
-          // 3000ms：冷解析或跨源搜索需 600-1200ms，放宽超时避免过早放弃直链退化为代理
-          setTimeout(() => { resolve(null); }, 3000);
+          // 3000ms（与上方「最多等 3 秒」一致）：冷解析或跨源搜索需 600-1200ms，
+          // 放宽超时避免过早放弃直链退化为代理
+          timer = setTimeout(() => { resolve(null); }, 3000);
         }),
       ]);
+      // 直链拿不到时服务端也可能给的是 need_verification：同一入口去重（与 refreshSourceLabel 共享节流）
+      if (r !== null) {
+        KugouVerify.consume(r);
+      }
       if (r === null || r.ok !== true || r.directUrl === undefined || r.directUrl.length === 0) {
         this.direct = null;
         return null;
       }
-      if (r.currentQuality !== undefined) {
-        AppStorage.setOrCreate<string>(K_CURRENT_QUALITY, r.currentQuality);
-      }
+      // 实际档位不上报（界面显示的是用户选择的档位）；可用档位仍需回来做置灰判定
       if (r.availableQualities !== undefined) {
         AppStorage.setOrCreate<string[]>(K_AVAILABLE_QUALITIES, r.availableQualities);
       }
-      const expiresAt = Date.now() + Math.max(0, (r.directExpiresInSec ?? 0)) * 1000;
+      // H-3：服务端可能给 0/缺省（未知）；0 不能被当成「已过期」，未知一律按 3600s 兜底
+      const expiresInSec = (r.directExpiresInSec !== undefined && r.directExpiresInSec > 0)
+        ? r.directExpiresInSec : 3600;
+      const expiresAt = Date.now() + expiresInSec * 1000;
       const item: DirectLink = { id: track.id, url: r.directUrl, headers: r.directHeaders ?? {}, expiresAt, quality: prefQ };
       this.direct = item;
       return item;
@@ -1007,21 +1123,31 @@ export class MediaPlayerCore {
       hilog.warn(DOMAIN, TAG, '直链解析失败，回退代理: %{public}s', JSON.stringify(e));
       this.direct = null;
       return null;
+    } finally {
+      if (timer !== -1) {
+        clearTimeout(timer);
+        timer = -1;
+      }
     }
   }
 
   /** 切换偏好音质（下首生效） */
   setPreferredQuality(quality: string): void {
+    // H-5：写入点同样过白名单（QUALITY_LEVELS 唯一真源），非法值归一为 lossless
+    const next = normalizeQuality(quality);
     const cur = AppStorage.get<string>(K_PREFERRED_QUALITY) ?? 'lossless';
-    if (cur === quality) {
+    if (cur === next) {
       return;
     }
-    AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY, quality);
+    AppStorage.setOrCreate<string>(K_PREFERRED_QUALITY, next);
     if (this.prefs !== null) {
-      this.prefs.putSync('quality', quality);
-      this.prefs.flush();
+      this.prefs.putSync('quality', next);
+      // H-12：flush 返回 Promise，不 catch 会变成未处理拒绝（与 persistSession / persistPosition 同口径）
+      this.prefs.flush().catch((e: BusinessError) => {
+        hilog.warn(DOMAIN, TAG, '持久化音质偏好失败: %{public}s', JSON.stringify(e));
+      });
     }
-    AppToast.show(`已切换至「${this.qualityLabel(quality)}」，下一首生效`);
+    AppToast.show(`已切换至「${this.qualityLabel(next)}」，下一首生效`);
   }
 
   qualityLabel(level: string): string {
@@ -1105,6 +1231,8 @@ export class MediaPlayerCore {
       clearTimeout(this.stallTimer);
       this.stallTimer = -1;
     }
+    // 落定为「播不动」= 终止语义同样生效（规格 3.1/3.3：不留残余状态，不在停播后偷偷下缓存）
+    this.abortCacheDownload();
     this.pendingAutoplay = false;
     this.wantPlay = false;
     AppStorage.setOrCreate<boolean>(K_PLAYING, false);
@@ -1153,8 +1281,12 @@ export class MediaPlayerCore {
 
   /** 离线优先：命中缓存走 `fd://`，否则走服务端流（带短期令牌） */
   private buildUrl(track: Track): string {
-    const cached = OfflineCache.shared().cachedPath(track.id);
+    const cache = OfflineCache.shared();
+    const cached = cache.cachedPath(track.id);
     if (cached.length > 0) {
+      // 规格 6.3：命中即刷新「最后使用时间」—— 否则超配额淘汰会按「最后写入时间」算
+      // （节流窗口与落盘方式都在 OfflineCache.touchAccess 里）
+      cache.touchAccess(track.id);
       try {
         const file = fileIo.openSync(cached, fileIo.OpenMode.READ_ONLY);
         this.pendingFile = file;
@@ -1241,13 +1373,13 @@ export class MediaPlayerCore {
         // 成功起播清掉上一首的失败提示，避免陈旧错误一直挂在播放页
         AppStorage.setOrCreate<string>('np_error', '');
         this.publishState();
-        // 只有真正播起来了才落缓存：装载即下载会让同一首并发两个上游请求，
-        // 解析失败时也会双倍失败（实测 503 成对出现）
+        // 规格 2.1：起播成功**只排一个 25 秒后的定时器**，到点才真正发起整首下载；
+        // 这 25 秒里切歌/暂停/停止立即作废（clearCacheTimer / abortCacheDownload）。
+        // 只有真播起来才排：装载即下载会让同一首并发两个上游请求，解析失败时也会双倍失败。
         const track = this.current;
         if (track !== null && this.currentUrl.startsWith('http')
           && !OfflineCache.shared().isCached(track.id)) {
-          OfflineCache.shared().ensureDownload(track.id, this.currentUrl,
-            track.name, artistLine(track));
+          this.armCacheDownload(track.id);
         }
         this.av?.startContinuousTask();
         return;

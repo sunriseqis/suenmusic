@@ -81,10 +81,9 @@ struct Palette {
 
     /// 固定值调色板（**不随系统 trait 变化**）。
     ///
-    /// 为什么需要：`DesignTokens` 里的颜色是动态 `Color(light:dark:)`，在 widget / Live Activity
-    /// 那个独立进程里按**系统**外观解析。所以即便主 App 把 `dark` 传对了，锁屏卡与灵动岛
-    /// 也会一直跟着系统走（用户实测「灵动岛不会随 app 主题变」）。
-    /// 这里直接用十六进制字面量构造颜色，绕开动态解析。
+    /// `DesignTokens` 里的颜色是动态 `Color(light:dark:)`，按环境里的 colorScheme 解析；
+    /// 这里直接用十六进制字面量构造颜色，由调用方显式传入 dark 决定取值 ——
+    /// 同一个值在任何渲染上下文里都完全确定，不受环境 trait 波动影响。
     init(dark: Bool) {
         func c(_ light: UInt32, _ darkValue: UInt32, _ alpha: Double = 1) -> Color {
             let v = dark ? darkValue : light

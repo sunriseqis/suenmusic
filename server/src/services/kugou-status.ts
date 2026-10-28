@@ -25,7 +25,37 @@ const SALT_LITE = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA';
 const UA = 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi';
 const STATUS_CACHE_TTL_MS = 5 * 60_000;
 
-export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok';
+/**
+ * 概念版 SVIP 在 `busi_vip.product_type` 上的取值白名单。
+ *
+ * 实测（docs/memory/2026-10-26-酷狗接入交接-暂停点.md:70）：
+ *   get_union_vip busi_type=concept → busi_vip: is_vip=1, busi_type=concept,
+ *   product_type=**tvip**，到期 2026-10-27 14:53
+ * 上游把概念版会员标成 `tvip` 而非 `svip`，只认 `svip` 会让真会员恒判为「无 SVIP」。
+ * 上游以后若再改取值/换名，只需在这里补一项。
+ */
+const CONCEPT_SVIP_PRODUCT_TYPES: readonly string[] = ['svip', 'tvip'];
+
+/**
+ * 上游异常（网络抖动 / 非 20018·35005 的失败）的短期负缓存：
+ * 窗口内不再重复打上游，直接报 unknown。30 秒足够躲过抖动，又不至于把状态卡太久。
+ */
+const TRANSIENT_TTL_MS = 30_000;
+
+/** 上游异常窗口的截止时间戳（0 = 无） */
+let transientFailureUntil = 0;
+
+export type KugouState = 'logged_out' | 'invalid' | 'vip_expired' | 'ok' | 'unknown';
+
+/**
+ * 能否尝试用这套凭据取流。
+ *
+ * unknown（上游暂时问不出来）必须**仍然尝试**：临时抖动不该让整条酷狗音源被跳过；
+ * 而 invalid / logged_out 是明确结论，试了也是白打。
+ */
+export function kugouUsable(state: KugouState): boolean {
+  return state === 'ok' || state === 'unknown';
+}
 
 export interface KugouLoginState {
   state: KugouState;
@@ -72,6 +102,42 @@ let lastForceUpgradeAt = 0;
 
 export function invalidateKugouStatusCache(): void {
   cachedVip = null;
+  transientFailureUntil = 0;
+}
+
+/**
+ * 「上游暂时问不出来」的状态。**绝不冒充 ok** ——
+ * 旧代码在这条路上直接返回 state:'ok'，把网络抖动谎报成「会员有效」，
+ * 面板与解析链路都当真的用（会员信息其实是空的）。
+ */
+function unknownState(args: {
+  userid: string;
+  nickname: string;
+  accountLabel: string;
+  savedAt: number;
+  checkedIn: boolean;
+  upgraded: boolean;
+  checkinDate: string;
+  reason?: string;
+}): KugouLoginState {
+  return {
+    state: 'unknown',
+    label: '状态未知',
+    userid: args.userid,
+    nickname: args.nickname,
+    vipEndTime: '',
+    vipExpireAt: '',
+    vipRemainingMs: null,
+    checkedIn: args.checkedIn,
+    upgraded: args.upgraded,
+    checkinDate: args.checkinDate,
+    svipActive: false,
+    svipEndTime: '',
+    accountLabel: args.accountLabel,
+    statusLabel: '状态未知',
+    savedAt: args.savedAt,
+    invalidReason: args.reason ?? '',
+  };
 }
 
 function md5(s: string): string {
@@ -154,7 +220,12 @@ async function queryVip(token: string, userid: string): Promise<VipQueryResult> 
     null,
   );
 
-  const svipRow = activeRows.find(r => r.productType === 'svip');
+  // 概念版 SVIP：只在 concept 行里认（上方 candidates 已优先过滤 busi_type === 'concept'），
+  // 避免把非 concept 的畅听 VIP 行误判成 SVIP。
+  const svipRow = activeRows.find(r => CONCEPT_SVIP_PRODUCT_TYPES.includes(r.productType));
+  if (svipRow) {
+    log.debug(`命中概念版 SVIP：product_type=${svipRow.productType}，到期 ${svipRow.endTime}`);
+  }
   const endTime = bestRow?.endTime ?? '';
   const remainingMs = bestRow?.remainingMs ?? null;
   const isVip = activeRows.length > 0;
@@ -243,11 +314,24 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
     };
   }
 
+  // 近期上游异常过 → 30s 内不再白打一遍上游，直接报「状态未知」
+  if (Date.now() < transientFailureUntil) {
+    const ci = readKugouCheckinState(userid);
+    return unknownState({
+      userid,
+      nickname,
+      accountLabel,
+      savedAt,
+      checkedIn: Boolean(ci.signed),
+      upgraded: Boolean(ci.upgraded),
+      checkinDate: ci.date,
+    });
+  }
+
   // 查询状态前先确保今日签到与概念 SVIP 升级已完成（已签则毫秒级读本地缓存）
   let checkin = await ensureKugouCheckin();
   const checkedIn = Boolean(checkin.signed);
   const upgraded = Boolean(checkin.upgraded);
-  const signTag = checkedIn ? '已签' : '未签';
 
   try {
     const cacheKey = `${userid}|${token}|${checkin.date}|${checkedIn ? 1 : 0}|${upgraded ? 1 : 0}`;
@@ -293,25 +377,19 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
     }
 
     if (!vip.ok) {
-      // 网络抖动等：不改状态，按已登录展示
-      return {
-        state: 'ok',
-        label: finalSignTag,
+      // 明确的凭据无效已在上面（vip.rejected）判成 invalid；
+      // 走到这里都是网络抖动/上游异常 —— 报 unknown，并做短期负缓存避免连续白打。
+      transientFailureUntil = Date.now() + TRANSIENT_TTL_MS;
+      return unknownState({
         userid,
         nickname,
-        vipEndTime: '',
-        vipExpireAt: '',
-        vipRemainingMs: null,
+        accountLabel,
+        savedAt,
         checkedIn: finalCheckedIn,
         upgraded: finalUpgraded,
         checkinDate: checkin.date,
-        svipActive: false,
-        svipEndTime: '',
-        accountLabel,
-        statusLabel: finalSignTag,
-        savedAt,
-        invalidReason: '',
-      };
+        reason: '上游查询会员失败（网络抖动或上游异常）',
+      });
     }
 
     const vipExpireAt = shortExpireDate(vip.endTime);
@@ -360,23 +438,17 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
       invalidReason: '',
     };
   } catch (err) {
-    return {
-      state: 'ok',
-      label: signTag,
+    // 抛异常 = 上游完全没应答：同样是 unknown，不是 ok
+    transientFailureUntil = Date.now() + TRANSIENT_TTL_MS;
+    return unknownState({
       userid,
       nickname,
-      vipEndTime: '',
-      vipExpireAt: '',
-      vipRemainingMs: null,
+      accountLabel,
+      savedAt,
       checkedIn,
       upgraded,
       checkinDate: checkin.date,
-      svipActive: false,
-      svipEndTime: '',
-      accountLabel,
-      statusLabel: signTag,
-      savedAt,
-      invalidReason: (err as Error).message,
-    };
+      reason: (err as Error).message,
+    });
   }
 }

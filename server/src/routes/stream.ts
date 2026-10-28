@@ -48,8 +48,8 @@ import { getAnchor } from '../db/repo/anchors.ts';
 import { getTrack, upsertTracks } from '../db/repo/tracks.ts';
 import { getSongDetail } from '../sources/qq/home.ts';
 import { fetchAudioStream, resolveTrackSource } from '../sources/bilibili/stream.ts';
-import { invalidateTrack, resolveTrack, isFlacUrl } from '../services/resolver.ts';
-import { isIosClient } from '../http/platform.ts';
+import { cacheKeyFor, invalidateTrack, resolveTrack, isFlacUrl } from '../services/resolver.ts';
+import { isIosClient, wantsMp3 } from '../http/platform.ts';
 
 const log = createLogger('routes:stream');
 
@@ -364,8 +364,11 @@ export function registerStreamRoutes(app: FastifyInstance): void {
      */
     const upstreamRange = range ?? (headOnly ? 'bytes=0-0' : undefined);
 
-    const preferMp3 = isIosClient(req);
-    const cacheKey = preferMp3 ? `${trackId}:mp3` : trackId;
+    // 代理侧拿不到 quality（客户端不会为流地址再带一次档位），
+    // 但键规则必须与写侧共用 cacheKeyFor —— 两处各拼一套必然继续漂移。
+    const isIos = isIosClient(req);
+    const preferMp3 = wantsMp3(req);
+    const cacheKey = cacheKeyFor(trackId, preferMp3);
     let row = getSource(cacheKey);
     if (preferMp3 && row && isFlacUrl(row.audioUrl)) {
       row = null;
@@ -373,6 +376,8 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     let upstream: Response | null = null;
     /// 本次取流的真实源地址（供 MIME 嗅探用；upstream 的 URL 拿不到原始字符串）
     let sniffSourceUrl: string | null = null;
+    /// 本次重解析拿到的音源（缓存 miss 时 row 为空，嗅探类型只能从这里取）
+    let resolvedSource: 'bilibili' | 'netease' | 'kugou' | undefined;
     /** 缓存里的地址已被上游拒绝，需要强制重解析 */
     let urlExpired = false;
 
@@ -455,6 +460,7 @@ export function registerStreamRoutes(app: FastifyInstance): void {
       }
 
       sniffSourceUrl = outcome.sourceUrl;
+      resolvedSource = outcome.source;
       upstream = await fetchAudioStream(outcome.sourceUrl, upstreamRange, { source: outcome.source });
     }
 
@@ -495,13 +501,16 @@ export function registerStreamRoutes(app: FastifyInstance): void {
     const anchorSec = getAnchor(trackId)?.durationSec ?? 0;
     const sourceMs = anchorSec > 0 ? Math.round(anchorSec * 1000) : metadataMs;
     // MIME 修正：AVPlayer 认 MIME，上游给 octet-stream 时必须改写成真实音频类型（见 sniffAudioType 注释）
-    const sniffSourceKind = (row?.source ?? 'bilibili') as 'bilibili' | 'netease' | 'kugou';
+    const sniffSourceKind = (row?.source ?? resolvedSource ?? 'bilibili') as
+      | 'bilibili'
+      | 'netease'
+      | 'kugou';
     const sniffedType = sniffSourceUrl ? await sniffUpstreamType(sniffSourceUrl, upstream, sniffSourceKind) : null;
     return forward(
       reply,
       upstream,
       headOnly,
-      streamRate(upstream, sourceMs, Boolean(range), preferMp3),
+      streamRate(upstream, sourceMs, Boolean(range), isIos),
       sourceMs,
       sniffedType
     );

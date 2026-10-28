@@ -48,6 +48,13 @@ export interface PlaySourceRow {
   source: 'bilibili' | 'netease' | 'kugou';
   /** B 站视频封面（显示层兜底，曲目无 Q 音专辑封面时用） */
   coverUrl: string;
+  /**
+   * 解析当时**实际生效**的音质（lossless / exhigh / high / standard）。
+   * 空串 = 旧行或上游没给 → 读出方一律保守报 standard，绝不猜更高档。
+   */
+  currentQuality: string;
+  /** 该音源真的取得到的档位列表（音源层产出，空数组 = 未知） */
+  availableQualities: string[];
 }
 
 /**
@@ -89,6 +96,19 @@ interface SourceDbRow {
   expires_at: number;
   source: string;
   cover_url: string;
+  current_quality: string;
+  available_qualities: string;
+}
+
+/** available_qualities 以 JSON 数组文本落库；解不开就当未知（空数组） */
+function parseQualities(text: string | null | undefined): string[] {
+  if (!text) return [];
+  try {
+    const arr = JSON.parse(text) as unknown;
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 function toRow(r: SourceDbRow): PlaySourceRow {
@@ -110,6 +130,8 @@ function toRow(r: SourceDbRow): PlaySourceRow {
     //    静默改标成 bilibili（客户端音源角标跟着错、CDN 请求头也跟着错）。
     source: r.source === 'netease' || r.source === 'kugou' ? r.source : 'bilibili',
     coverUrl: r.cover_url ?? '',
+    currentQuality: r.current_quality ?? '',
+    availableQualities: parseQualities(r.available_qualities),
   };
 }
 
@@ -131,8 +153,9 @@ export function saveSource(
       `INSERT INTO play_sources (
          track_id, ok, bvid, score, audio_url, bandwidth,
          matched_title, matched_author, duration_diff, reason, message,
-         resolved_at, expires_at, source, cover_url
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         resolved_at, expires_at, source, cover_url,
+         current_quality, available_qualities
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(track_id) DO UPDATE SET
          ok             = excluded.ok,
          bvid           = excluded.bvid,
@@ -147,7 +170,9 @@ export function saveSource(
          resolved_at    = excluded.resolved_at,
          expires_at     = excluded.expires_at,
          source         = excluded.source,
-         cover_url      = excluded.cover_url`
+         cover_url      = excluded.cover_url,
+         current_quality = excluded.current_quality,
+         available_qualities = excluded.available_qualities`
     )
     .run(
       trackId,
@@ -164,7 +189,9 @@ export function saveSource(
       ts,
       expiresAt,
       result.source ?? 'bilibili',
-      result.coverUrl ?? ''
+      result.coverUrl ?? '',
+      result.currentQuality ?? '',
+      JSON.stringify(result.availableQualities ?? [])
     );
 }
 
@@ -198,8 +225,12 @@ export function rowToResult(row: PlaySourceRow): ResolveResult {
     };
   }
 
-  const qMatch = /:(lossless|exhigh|high|standard)$/.exec(row.trackId);
-  const currentQuality = qMatch ? qMatch[1] : (row.source === 'bilibili' ? 'high' : 'lossless');
+  /**
+   * 音质只信列里的实际值，**不再从 trackId 后缀猜**：
+   * 猜不出来时报 standard（宁可少报，绝不虚报 —— 旧代码在这里按源猜 high/lossless，
+   * 客户端据此把「无损/极高」从置灰变可点，用户点完必然降级）。
+   */
+  const currentQuality = row.currentQuality || 'standard';
 
   return {
     ok: true,
@@ -213,6 +244,7 @@ export function rowToResult(row: PlaySourceRow): ResolveResult {
     source: row.source,
     coverUrl: row.coverUrl || undefined,
     currentQuality,
+    availableQualities: row.availableQualities.length ? row.availableQualities : undefined,
   };
 }
 
@@ -221,6 +253,19 @@ export function pruneSources(): number {
   const res = getDatabase()
     .prepare('DELETE FROM play_sources WHERE expires_at <= ?')
     .run(now());
+  return toNumber(res.changes);
+}
+
+/**
+ * 清掉某个音源的**失败缓存行**（成功行不动）。
+ *
+ * 唯一用途是酷狗验证码通过后：60 秒负缓存里躺着一条 20028 的失败结论，
+ * 不清掉的话用户点完验证回来再解析仍会命中它、继续被提示去验证。
+ */
+export function deleteNegativeSources(source: 'bilibili' | 'netease' | 'kugou'): number {
+  const res = getDatabase()
+    .prepare('DELETE FROM play_sources WHERE source = ? AND ok = 0')
+    .run(source);
   return toNumber(res.changes);
 }
 

@@ -235,6 +235,12 @@ struct ResolveResponse: Codable {
     let directHeaders: [String: String]?
     let directExpiresInSec: Int?
 
+    /// 酷狗源被 20028 风控拦下时（reason == "need_verification"）下发的
+    /// **相对路径**验证页（/verify/kugou?t=...）；必须拼当前生效 baseURL 才能用
+    let verifyUrl: String?
+    /// 同一次验证事件的稳定 id —— 端侧按它去重，避免连播时每首都弹一次通知
+    let eventId: String?
+
     /// 当前音质档位：lossless / exhigh / high / standard
     let currentQuality: String?
     /// 本曲可用音质档位列表

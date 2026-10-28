@@ -10,6 +10,29 @@
 import Foundation
 import SwiftUI
 
+/// 音质档位白名单（I-5）。
+///
+/// iOS 只承认这三档：lossless（HTTP 裸 FLAC）AVPlayer 播不了，服务端若下发一律回落 exhigh。
+/// 对外仍然用 String 表示（UI / UserDefaults 不动），只在**读写边界**做校验 ——
+/// 旧版本写进去的脏值（lossless / 空串 / 拼错）不会再被当成请求参数发给服务端。
+enum Quality: String, CaseIterable {
+    case standard
+    case high
+    case exhigh
+
+    /// 兜底档位：用户偏好非法、或服务端下发未知档位时用它
+    static let fallback: Quality = .exhigh
+
+    /// 白名单校验：nil / 未知值 → fallback
+    static func normalize(_ raw: String?) -> Quality {
+        guard let raw, let q = Quality(rawValue: raw) else { return fallback }
+        return q
+    }
+
+    /// 三档全量（String 形态，喂给 UI 的 availableQualities）
+    static var allRawValues: [String] { allCases.map { $0.rawValue } }
+}
+
 @MainActor
 final class PlaybackService: ObservableObject, AudioEngineEvents {
 
@@ -31,17 +54,23 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     @Published private(set) var noSource: Bool = false
 
     /// 用户全局偏好音质（存储于本地 UserDefaults，iOS 默认 exhigh 320k）
-    @Published var preferredQuality: String = UserDefaults.standard.string(forKey: "preferred_audio_quality") ?? "exhigh"
-    /// 当前播放曲目的实际生效音质
-    @Published private(set) var currentQuality: String = "exhigh"
+    /// 读取时过一遍白名单：老版本可能存了 lossless / 空串，脏值不许进播放参数（I-5）
+    @Published var preferredQuality: String = Quality.normalize(UserDefaults.standard.string(forKey: "preferred_audio_quality")).rawValue
+    /// 界面显示的音质档位 = **用户当前选择的档位**（`preferredQuality` 经白名单归一）。
+    /// 播放页音质按钮（图标 / 短标签 / 无障碍文案）与音质面板「当前生效：X」共用它，
+    /// 所以显示值恒与面板里带 ✓ 的偏好项一致，也不随本次实际解析到的档位变化。
+    /// 计算属性不存第二份值：偏好一变，两处同时刷新。
+    var currentQuality: String { Quality.normalize(preferredQuality).rawValue }
     /// 当前曲目可用的音质档位
-    @Published private(set) var availableQualities: [String] = ["standard", "high", "exhigh"]
+    @Published private(set) var availableQualities: [String] = Quality.allRawValues
 
     func setPreferredQuality(_ next: String) {
-        guard preferredQuality != next else { return }
-        preferredQuality = next
-        UserDefaults.standard.set(next, forKey: "preferred_audio_quality")
-        ToastCenter.shared.show("已切换至「\(qualityLabel(for: next))」，下一首生效")
+        // 写入路径只接受白名单：拼错或越权（如 lossless）一律回落 exhigh，不落库脏值
+        let normalized = Quality.normalize(next).rawValue
+        guard preferredQuality != normalized else { return }
+        preferredQuality = normalized
+        UserDefaults.standard.set(normalized, forKey: "preferred_audio_quality")
+        ToastCenter.shared.show("已切换至「\(qualityLabel(for: normalized))」，下一首生效")
     }
 
     func qualityLabel(for level: String) -> String {
@@ -76,7 +105,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     private var lyricTrackId: String = ""
 
     /// 当前位置应该显示的歌词（没有歌词返回空串）
-    var currentLyricLine: String {
+    private var currentLyricLine: String {
         LyricParser.line(atMs: positionMs, in: lyricLines)
     }
 
@@ -112,7 +141,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 于是「本次会话第一首」永远没有歌词行，而 `emitProgress` 又只在换行时推，
     /// 连带进度条整首不动。这里做成自愈：任何一次推状态前都核对一遍当前曲。
     /// 确保当前曲的歌词已发起拉取请求。
-    func ensureLyrics() {
+    private func ensureLyrics() {
         guard let id = currentTrack?.id, !id.isEmpty, id != lyricTrackId else { return }
         loadLyrics(for: id)
     }
@@ -125,6 +154,11 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     private var failStreak = 0
     private var graceTask: Task<Void, Never>?
     private var loadWatchdog: Task<Void, Never>?
+    /// 切歌代际号：jumpTo 每次 +1；解析结果回来只认最新一代（I-2）
+    private var jumpGeneration = 0
+    /// 已下发但还没落地的目标下标（-1 = 没有未落地的意图）。
+    /// 连点时的乐观基准 —— 引擎的逻辑下标要等 resolve 回来才动，不能拿它当基准。
+    private var pendingTargetIndex: Int = -1
 
     var currentTrack: Track? {
         guard queue.indices.contains(currentIndex) else { return nil }
@@ -159,6 +193,114 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         } catch {
             return sessionToken ?? ""
         }
+    }
+
+    // MARK: 音质 / 音源状态的统一出口（I-4 / I-5 / I-6）
+
+    /// 请求音质：用户偏好经白名单校验后的值
+    private var requestQuality: String { Quality.normalize(preferredQuality).rawValue }
+
+    /// 直链有效期防御：0 / 负数 / nil 一律按 3600s 处理（I-4）。
+    ///
+    /// 两个问号运算符挡不住 0：服务端曾把 directExpiresInSec = 0 当成「永久有效」下发，
+    /// 端侧照单当真实过期时刻存下来 —— 链接一存进去就被判过期，每次建条目都回退代理流。
+    private static func directExpirySec(_ raw: Int?) -> Int {
+        if let raw, raw > 0 { return raw }
+        return 3600
+    }
+
+    /// 可用档位白名单过滤：过滤后为空就用三档全量（不让 UI 拿到空列表）
+    private static func sanitizedQualities(_ raw: [String]) -> [String] {
+        let kept = raw.filter { Quality(rawValue: $0) != nil }
+        return kept.isEmpty ? Quality.allRawValues : kept
+    }
+
+    /// 进入新曲先复位音源角标与可用档位（I-6）：绝不拿上一首的角标冒充新曲。
+    /// 角标留空（=「未匹配」）。「当前音质」不在复位之列 —— 它取用户选择的档位，与单曲无关。
+    private func resetTrackSourceState() {
+        source = ""
+        availableQualities = Quality.allRawValues
+    }
+
+    /// 把一次 /api/resolve 的结果落到对外状态与引擎直链表（play / jumpTo / refreshSource 共用）。
+    ///
+    /// nil 或 !ok 走「少报」分支：角标留空。
+    /// ⚠️ 解析结果不参与「当前音质」显示：它取用户选择的档位，解析失败/降档都不改这行
+    /// —— 原来的「失败落 standard」已删除。
+    private func applyResolution(_ r: ResolveResponse?, trackId: String) {
+        // 酷狗 20028 风控：这一条是「用户必须动手才能恢复」的状态，先提示再照常走少报分支
+        if let r, r.ok == false, r.reason == "need_verification" {
+            promptVerify(r)
+        }
+        guard let r, r.ok else {
+            source = ""
+            return
+        }
+        source = r.source ?? ""
+        // 只用于面板的「可选 / 置灰」判定（本次保持现状）；服务端下发的 currentQuality
+        // 不参与「当前音质」显示，显示值只来自用户选择的档位
+        if let avail = r.availableQualities { availableQualities = Self.sanitizedQualities(avail) }
+        if let directUrl = r.directUrl, !directUrl.isEmpty {
+            engine?.setDirect(
+                trackId: trackId,
+                url: directUrl,
+                headers: r.directHeaders,
+                expiresInSec: Self.directExpirySec(r.directExpiresInSec)
+            )
+        }
+    }
+
+    // MARK: 酷狗人工验证（reason == "need_verification"）
+
+    /// 10 分钟窗口：连播时每首的解析都会撞同一次风控，不加节流通知会刷屏
+    private static let verifyThrottleSec: TimeInterval = 600
+    /// 上次提示的事件 id（空 = 没提示过）
+    private var verifyEventId: String = ""
+    /// 上次提示的时间戳（0 = 没提示过）
+    private var verifyPromptAt: TimeInterval = 0
+
+    /// 酷狗源被 20028 拦下时提示用户去浏览器完成验证。
+    ///
+    /// 去重：同一 eventId 只提示一次；不同 eventId 也要隔 10 分钟。
+    /// 通知授权被拒 → 退应用内 Toast（用户必须动手才能恢复，不能静默吞掉）。
+    private func promptVerify(_ r: ResolveResponse) {
+        guard let raw = r.verifyUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else {
+            NSLog("[Verify] 需要验证但服务端没给 verifyUrl，跳过提示")
+            return
+        }
+        guard let absolute = Self.absoluteURL(APIClient.shared.baseURL, raw) else {
+            NSLog("[Verify] 当前没有生效的服务端地址，无法拼出验证链接")
+            return
+        }
+        let eid = r.eventId ?? ""
+        let now = Date().timeIntervalSince1970
+        if !eid.isEmpty, eid == verifyEventId { return }
+        if verifyPromptAt > 0, now - verifyPromptAt < Self.verifyThrottleSec { return }
+        verifyEventId = eid
+        verifyPromptAt = now
+        NSLog("[Verify] 酷狗需要验证，提示前往浏览器 event=%@", eid)
+        Notifier.notifyVerify(title: "酷狗账号需要验证",
+                              body: "点击前往浏览器完成验证",
+                              url: absolute) {
+            // 授权被拒：应用内轻提示（ToastCenter 是 @MainActor，回调在主线程）
+            Task { @MainActor in
+                ToastCenter.shared.show("酷狗账号需要验证，请用系统浏览器打开 " + absolute)
+            }
+        }
+    }
+
+    /// 相对路径拼「当前生效 baseURL」（首尾斜杠都归一；服务端给了绝对地址就原样用）
+    static func absoluteURL(_ base: String, _ path: String) -> String? {
+        let raw = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        if raw.contains("://") { return raw }
+        var origin = base.trimmingCharacters(in: .whitespacesAndNewlines)
+        while origin.hasSuffix("/") { origin.removeLast() }
+        var rel = raw
+        while rel.hasPrefix("/") { rel.removeFirst() }
+        guard !origin.isEmpty, !rel.isEmpty else { return nil }
+        return origin + "/" + rel
     }
 
     // MARK: 预热（降低起播延迟）
@@ -198,6 +340,9 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         failStreak = 0
         // 手动点播：失败要停在当前曲并标「无音源」，不自动跳（hw `manualLoad = true`）
         manualLoad = true
+        // 换整条队列：作废所有在途的切歌意图 —— 否则上一次 jumpTo 的解析回来会把队列拉回去（I-2）
+        jumpGeneration += 1
+        pendingTargetIndex = -1
         self.origin = origin
         queue = tracks
         currentIndex = index
@@ -206,7 +351,6 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         // 第一首播放时「专属推荐理由」卡从不出现，用户也就看不到卡右上角的「不喜欢」按钮。
         ensureRecoReasons()
         currentRecoReason = recoReasons[tracks[index].id]
-        armLoadWatchdog()
 
         NSLog("[Start] play() 进入 id=\(tracks[index].id) origin=\(origin)")
         let token = await validToken()
@@ -214,25 +358,12 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
 
         // 优先直链直连 CDN（对齐鸿蒙端：先解析出 directUrl + directHeaders 并注入引擎）
         let targetId = tracks[index].id
-        let targetQuality = preferredQuality
+        resetTrackSourceState()   // 新曲先复位角标/档位，解析结果再覆盖（I-6）
+        let targetQuality = requestQuality
         if let r = try? await APIClient.shared.resolve(trackId: targetId, quality: targetQuality) {
-            if r.ok {
-                self.source = r.source ?? ""
-                if let directUrl = r.directUrl, !directUrl.isEmpty {
-                    engine.setDirect(
-                        trackId: targetId,
-                        url: directUrl,
-                        headers: r.directHeaders,
-                        expiresInSec: r.directExpiresInSec ?? 3600
-                    )
-                }
-                if let curQ = r.currentQuality {
-                    self.currentQuality = curQ
-                }
-                if let avail = r.availableQualities {
-                    self.availableQualities = avail
-                }
-            }
+            // 传原始响应（不再先折叠成 nil）：!ok 与 nil 在 applyResolution 里同样走「角标留空」，
+            // 但 need_verification 的响应体必须原样进去才能拿到 verifyUrl。
+            applyResolution(r, trackId: targetId)
         } else {
             refreshSource(for: targetId)
         }
@@ -248,6 +379,9 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 autoplay: true,
                 tailOnly: false
             )
+            // 装载看门狗必须从「已经下发装载」起算：解析往返（冷曲目实测 2-8s）不算装载，
+            // 否则冷曲目会被 6s 窗口误判成「无音源」（I-3）
+            armLoadWatchdog()
         } catch {
             loading = false
             errorMessage = "无法装载音源：\(error.localizedDescription)"
@@ -270,26 +404,47 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     }
 
     /// 手动切歌：优先拿到直链再起播，避免走服务端代理流
+    ///
+    /// 队尾语义（I-9）：不再无条件 `(currentIndex + 1) % count` 回绕 ——
+    /// 回绕会让「顺序播放」在队尾从最后一首跳回第一首，与锁屏按钮的可用性判断
+    /// （引擎 nextLogicalIndex() 为 nil 就置灰）也不一致。现在与引擎/锁屏同口径：
+    /// 顺序模式播到队尾 = 原地不动；列表循环/随机由引擎的顺序表决定要不要环绕。
     func next() {
         manualLoad = true
-        armLoadWatchdog()
-        if let nextIndex = engine?.nextLogicalIndex(), queue.indices.contains(nextIndex) {
-            jumpTo(nextIndex)
-        } else if !queue.isEmpty {
-            let nextIndex = (currentIndex + 1) % queue.count
-            jumpTo(nextIndex)
-        }
+        guard let target = nextTargetIndex() else { return }
+        jumpTo(target)
     }
 
     func prev() {
         manualLoad = true
-        armLoadWatchdog()
-        if let prevIndex = engine?.previousLogicalIndex(), queue.indices.contains(prevIndex) {
-            jumpTo(prevIndex)
-        } else if !queue.isEmpty {
-            let prevIndex = (currentIndex - 1 + queue.count) % queue.count
-            jumpTo(prevIndex)
+        guard let target = previousTargetIndex() else { return }
+        jumpTo(target)
+    }
+
+    /// 下一首的预期下标；nil = 到队尾且不循环（原地不动）
+    ///
+    /// 连点两下时不能拿引擎的 nextLogicalIndex() 当基准：引擎的逻辑下标要等 resolve
+    /// 回来才前进，两次点击会算出同一个目标（I-2：只前进一首，且同一首被重建两次）。
+    /// 所以有「已下发但还没落地」的意图时，在 pendingTargetIndex 上乐观再走一格。
+    private func nextTargetIndex() -> Int? {
+        guard !queue.isEmpty else { return nil }
+        if queue.indices.contains(pendingTargetIndex) {
+            let stepped = pendingTargetIndex + 1
+            return queue.indices.contains(stepped) ? stepped : nil
         }
+        if let logical = engine?.nextLogicalIndex(), queue.indices.contains(logical) { return logical }
+        return nil
+    }
+
+    /// 上一首的预期下标；nil = 队头且不循环（原地不动）。乐观推进口径同上。
+    private func previousTargetIndex() -> Int? {
+        guard !queue.isEmpty else { return nil }
+        if queue.indices.contains(pendingTargetIndex) {
+            let stepped = pendingTargetIndex - 1
+            return queue.indices.contains(stepped) ? stepped : nil
+        }
+        if let logical = engine?.previousLogicalIndex(), queue.indices.contains(logical) { return logical }
+        return nil
     }
     func seek(to ms: Int) { engine?.seek(to: max(0, ms)) }
 
@@ -301,32 +456,35 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     var queueSnapshot: [Track] { queue }
 
     /// 跳到指定下标并起播（hw `jumpTo(i, true)`，优先拿 CDN 直链）
+    ///
+    /// 代际号（I-2）：每次调用 +1 并记下 pendingTargetIndex。解析回来时只要代际号已被更新
+    /// （用户又点了下一首），本次结果整体作废 —— 否则两次点击的 resolve 会各自重建一次，
+    /// 表现为「连点只前进一首 + 同一首被重建两次」。
+    /// 落地前还要过两道闸：代际号仍是最新、且队列没被删/移过（目标仍是当初点的那一首）。
     func jumpTo(_ index: Int) {
         guard queue.indices.contains(index), let engine else { return }
         manualLoad = true
-        armLoadWatchdog()
+        jumpGeneration += 1
+        let generation = jumpGeneration
+        pendingTargetIndex = index
         let targetId = queue[index].id
-        let targetQuality = preferredQuality
+        resetTrackSourceState()   // 新曲先复位角标/档位，解析结果再覆盖（I-6）
+        let targetQuality = requestQuality
         Task {
-            if let r = try? await APIClient.shared.resolve(trackId: targetId, quality: targetQuality), r.ok {
-                await MainActor.run {
-                    self.source = r.source ?? ""
-                    if let directUrl = r.directUrl, !directUrl.isEmpty {
-                        engine.setDirect(
-                            trackId: targetId,
-                            url: directUrl,
-                            headers: r.directHeaders,
-                            expiresInSec: r.directExpiresInSec ?? 3600
-                        )
-                    }
-                    if let curQ = r.currentQuality { self.currentQuality = curQ }
-                    if let avail = r.availableQualities { self.availableQualities = avail }
-                    engine.jumpTo(index, autoplay: true)
+            let r = try? await APIClient.shared.resolve(trackId: targetId, quality: targetQuality)
+            await MainActor.run {
+                // ① 已有更新的切歌意图 → 本次解析作废（连点只落最后一首）
+                guard self.jumpGeneration == generation, self.pendingTargetIndex == index else { return }
+                // ② 引擎状态与预期一致才落地：队列没被删/移过，目标仍是当初那一首
+                guard self.queue.indices.contains(index), self.queue[index].id == targetId else {
+                    self.pendingTargetIndex = -1
+                    return
                 }
-            } else {
-                await MainActor.run {
-                    engine.jumpTo(index, autoplay: true)
-                }
+                self.applyResolution(r, trackId: targetId)
+                self.pendingTargetIndex = -1
+                engine.jumpTo(index, autoplay: true)
+                // 看门狗从真正装载起算（与 play() 同口径，见 I-3）：解析往返不算装载窗口
+                self.armLoadWatchdog()
             }
         }
     }
@@ -373,11 +531,10 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
-    /// 强制重装当前曲（修正音源锚定后走新锚点）：清该曲离线缓存 → 丢缓冲重装 → 起播。
+    /// 强制重装当前曲（修正音源锚定后走新锚点）：丢缓冲重装 → 起播。
     /// hw `retryCurrent(true)` 同口径：锚定后服务端已清解析缓存，重装即走新音源。
     func reloadCurrentTrack(autoplay: Bool) async {
         guard let engine, queue.indices.contains(currentIndex) else { return }
-        AudioCacheStore.shared.evict(id: queue[currentIndex].id)
         manualLoad = true
         armLoadWatchdog()
         engine.reloadCurrent(index: currentIndex, positionMs: 0, autoplay: autoplay)
@@ -388,27 +545,13 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     /// 走 `/api/resolve/<id>`（命中服务端缓存很快，还顺带暖热 `/api/stream`）。
     /// 切歌先清空，不拿上一首的音源冒充；失败按「未匹配」。
     private func refreshSource(for trackId: String) {
-        source = ""
-        let quality = preferredQuality
+        resetTrackSourceState()   // 先清空：不拿上一首的角标/档位冒充；失败按「未匹配」+「标准」
+        let quality = requestQuality
         Task { [weak self] in
             let r = try? await APIClient.shared.resolve(trackId: trackId, quality: quality)
             await MainActor.run {
                 guard let self, self.currentTrack?.id == trackId else { return }
-                self.source = (r?.ok ?? false) ? (r?.source ?? "") : ""
-                if let directUrl = r?.directUrl, !directUrl.isEmpty {
-                    self.engine?.setDirect(
-                        trackId: trackId,
-                        url: directUrl,
-                        headers: r?.directHeaders,
-                        expiresInSec: r?.directExpiresInSec ?? 3600
-                    )
-                }
-                if let curQ = r?.currentQuality {
-                    self.currentQuality = curQ
-                }
-                if let avail = r?.availableQualities {
-                    self.availableQualities = avail
-                }
+                self.applyResolution(r, trackId: trackId)
             }
         }
     }
@@ -417,7 +560,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
     private func prefetchNextDirect() {
         guard let nextIndex = engine?.nextLogicalIndex(), queue.indices.contains(nextIndex) else { return }
         let nextTrackId = queue[nextIndex].id
-        let quality = preferredQuality
+        let quality = requestQuality
         Task { [weak self] in
             guard let self else { return }
             if let r = try? await APIClient.shared.resolve(trackId: nextTrackId, quality: quality), r.ok,
@@ -427,7 +570,7 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                         trackId: nextTrackId,
                         url: directUrl,
                         headers: r.directHeaders,
-                        expiresInSec: r.directExpiresInSec ?? 3600
+                        expiresInSec: Self.directExpirySec(r.directExpiresInSec)
                     )
                 }
             }
@@ -632,6 +775,8 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
             // reason 1 = 播完自动切下一首（hw：advance 走 manualLoad=false）
             if reason == 1 { self.manualLoad = false }
             self.currentIndex = index
+            // 引擎已经落地到目标（含连播自动接续）→ 清掉乐观基准，下回切歌回到引擎顺序表
+            if index == self.pendingTargetIndex { self.pendingTargetIndex = -1 }
             self.ensureRecoReasons()
             self.currentRecoReason = self.recoReasons[id]
             self.lyricTrackId = id

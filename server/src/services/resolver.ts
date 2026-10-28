@@ -29,7 +29,7 @@ import {
 import { deleteAnchor, getAnchor, saveAnchor } from '../db/repo/anchors.ts';
 import { biliCooldown, resolveTrackSource } from '../sources/bilibili/stream.ts';
 import { resolveKugouDirect, resolveKugouSource, type KugouStoredMeta } from '../sources/kugou/stream.ts';
-import { readKugouLoginState } from './kugou-status.ts';
+import { kugouUsable, readKugouLoginState } from './kugou-status.ts';
 import { getPin } from '../db/repo/pins.ts';
 import { getTracks } from '../db/repo/tracks.ts';
 import { parseId } from '../http/ids.ts';
@@ -107,6 +107,21 @@ export function cacheKey(input: ResolveInput): string {
   const name = (input.name || '').trim();
   if (!name) return '';
   return `name:${name}|${(input.artists || []).join(',')}`;
+}
+
+/**
+ * 缓存键的**唯一**构造入口。
+ *
+ * 读（getSource / memoryGet）与写（saveSource / memorySet）必须走同一个函数：
+ * 一旦两处各拼一套，同一首歌就会出现「写一套键、读另一套键」的错配，
+ * 响应里的 directUrl / directHeaders / source 会取自另一个音质档位的历史行。
+ *
+ * 规则：`trackId` + 可选的 `:mp3`（iOS 要 mp3 容器）+ 可选的 `:<quality>`。
+ */
+export function cacheKeyFor(trackId: string, preferMp3 = false, quality?: string): string {
+  const q = String(quality ?? '').trim().toLowerCase();
+  const base = preferMp3 ? `${trackId}:mp3` : trackId;
+  return q ? `${base}:${q}` : base;
 }
 
 // ---------- 内存 LRU ----------
@@ -200,8 +215,7 @@ export function resolveTrack(
 
   const preferMp3 = Boolean(options.preferMp3);
   const quality = options.quality ? String(options.quality).trim().toLowerCase() : '';
-  const qPart = quality ? `:${quality}` : '';
-  const cKey = preferMp3 ? `${key}:mp3${qPart}` : `${key}${qPart}`;
+  const cKey = cacheKeyFor(key, preferMp3, quality);
 
   /**
    * 用户源钉（锚定页「只用某源」）。
@@ -343,7 +357,7 @@ export function resolveTrack(
 
   const kgChain = async (): Promise<ResolveResult> => {
     const kgStatus = await readKugouLoginState();
-    if (kgStatus.state !== 'ok') {
+    if (!kugouUsable(kgStatus.state)) {
       log.debug(`酷狗无有效会员（${kgStatus.state}），直接走 B 站兜底`);
       return resolveTrackSource(input, { preferMp3, quality: options.quality });
     }
@@ -392,7 +406,7 @@ export function resolveTrack(
    */
   const qqChain = async (): Promise<ResolveResult> => {
     const kgStatus = await readKugouLoginState();
-    if (kgStatus.state !== 'ok') {
+    if (!kugouUsable(kgStatus.state)) {
       log.debug(`酷狗无有效会员（${kgStatus.state}），跳过酷狗直接走 B 站`);
       return resolveTrackSource(input, { preferMp3, quality: options.quality });
     }
@@ -520,8 +534,11 @@ async function resolveFromAnchor(
        */
       matchedDurationSec: anchor.durationSec || result.matchedDurationSec,
     };
-    saveSource(key, enriched);
-    memorySet(key, enriched, computeExpiry(enriched.sourceUrl ?? '', ts));
+    // 锚点路径也必须写「本次请求的那个键」：写裸键的话，带 quality 的读取永远 miss，
+    // 而裸键里的旧行又会被别的档位读到（S-1 的根因）。
+    const anchorKey = cacheKeyFor(key, Boolean(options.preferMp3), options.quality);
+    saveSource(anchorKey, enriched);
+    memorySet(anchorKey, enriched, computeExpiry(enriched.sourceUrl ?? '', ts));
     log.info(`锚点命中 ${key} → ${anchor.bvid}（${anchor.pinned ? '手动' : '自动'}）`);
     return decorate(enriched, key, 'anchor', started);
   }

@@ -9,9 +9,10 @@
 ```
 App/        SuenMusicApp.swift（@main）、AppState.swift、Info.plist
 Net/        Models.swift（服务端契约）、APIClient.swift（Bearer + 401 单飞刷新 + 多服务端选路）
-Player/     AudioEngine.swift（从 Capacitor 插件抽出的播放内核，去掉了桥接层）
-            AudioCacheStore.swift（4GB 磁盘 LRU + LocalStreamProxy 本地回环，整文件搬来）
-            PlaybackService.swift（引擎 ↔ SwiftUI 的绑定）
+Player/     AudioEngine.swift（从 Capacitor 插件抽出的播放内核，去掉了桥接层；条目先查本地缓存）
+            AudioCacheStore.swift（轻量离线缓存：起播 25s 后 CDN 直链下载**完整文件** + 1GB 按最久未访问淘汰；
+                                  切歌即取消、不留 .part、缓存不含音质；不含 LocalStreamProxy —— 播放不经过本机回环代理）
+            PlaybackService.swift（引擎 ↔ SwiftUI 的绑定；音源解析 / 音质白名单 / 直链表；音质显示 = 用户选择的档位）
 UI/         RootView / LoginView / HomeView / PlayerBar / PlayerView / SettingsView
 ```
 
@@ -37,7 +38,7 @@ UI/         RootView / LoginView / HomeView / PlayerBar / PlayerView / SettingsV
 | 3 | 点歌播放 | 点任意一首 3 秒内出声，播放页进度在走 |
 | 4 | 锁屏控制 | 锁屏显示曲名/歌手/进度，暂停/播放/上一首/下一首都生效 |
 | 5 | 自动切歌 | 一首放完**自动**接下一首（锁屏状态下也要接） |
-| 6 | 断网播缓存 | 完整播放过的歌，飞行模式下仍可播放；未缓存的歌给出明确提示、不连跳 |
+| 6 | 断网兜底 | **完整缓存过的曲目可离线播放**（直链下载完整结束、已落盘的才进缓存）；未缓存的歌给出明确提示、不连跳 |
 
 ## 已知的 S0 边界（S1 补）
 

@@ -68,6 +68,15 @@ final class AudioEngine: NSObject {
     }
     private var directLinks: [String: DirectMediaLink] = [:]
 
+
+    /// 起播后 **25 秒**才发起整首缓存下载（规格 2.1）；延时期间切歌 / 暂停 / 停止即作废（3.1 / 3.3）。
+    ///
+    /// 不引入状态机：延时是一个可取消的 Task，下载本身是另一个可取消的 Task。
+    /// 延时秒数只是常量，不是可配置项。
+    private static let cacheDelaySeconds: UInt64 = 25
+    private var cacheDelayTask: Task<Void, Never>?
+    private var cacheDownloadTask: Task<Void, Never>?
+
     func setDirect(trackId: String, url: String?, headers: [String: String]?, expiresInSec: Int = 3600) {
         if let url, !url.isEmpty {
             directLinks[trackId] = DirectMediaLink(
@@ -75,8 +84,42 @@ final class AudioEngine: NSObject {
                 headers: headers,
                 expiresAt: Date().addingTimeInterval(Double(max(60, expiresInSec)))
             )
+            // 直链几乎总是晚于起播到达：当前曲已经在播就补一次缓存预约（25s 到点才真正开下，规格 2.1）
+            cacheIfPlaying(trackId: trackId)
+            // 直链通常比条目晚到（解析在后台）：已经建好、但还没轮到播的尾项就地换一次，
+            // 否则它带着代理流 URL 一路播到完 —— 自动连播永远走代理（I-1 选项 b）。
+            // 换条目要动 AVQueuePlayer：非主线程调用时切回主线程，别在后台队列改播放器。
+            if Thread.isMainThread {
+                replacePendingItemIfNeeded(trackId: trackId)
+            } else {
+                EngineThread.onMain { [weak self] in
+                    self?.replacePendingItemIfNeeded(trackId: trackId)
+                }
+            }
         } else {
             directLinks.removeValue(forKey: trackId)
+        }
+    }
+
+    /// 把「已建好但还不是当前项」的条目按最新直链重建（不动 items 顺序、不动 currentItem）。
+    ///
+    /// AVQueuePlayer 的 currentItem 永远是 items 的第一个，所以非当前项一定排在其后：
+    /// 重建方式 = 摘掉旧条目 → 在它的前一个条目之后再插一条新的，顺序与下标映射都不变。
+    /// 当前项（正在播的那首）故意不动：中途换 URL 等于「重头再播」，用户能听出来。
+    private func replacePendingItemIfNeeded(trackId: String) {
+        let items = player.items()
+        guard items.count > 1 else { return }
+        for (offset, item) in items.enumerated() where offset > 0 {
+            guard let idx = itemIndex[ObjectIdentifier(item)],
+                  tracks.indices.contains(idx), tracks[idx].id == trackId else { continue }
+            let predecessor = items[offset - 1]
+            let fresh = makeItem(for: tracks[idx])
+            forgetItem(item)   // 旧条目的 status 观察随条目一起失效（I-8）
+            itemIndex[ObjectIdentifier(fresh)] = idx
+            player.remove(item)
+            player.insert(fresh, after: predecessor)
+            NSLog("%@", "[DirectCDN] 尾项换直链 id=\(trackId) idx=\(idx)（顺序不变）")
+            return
         }
     }
 
@@ -143,7 +186,8 @@ final class AudioEngine: NSObject {
     private static let playReadyMaxTries = 100   // 100 × 100ms = 10s：冷曲目首拉实测要 9-10s 才 ready
     private var playAttempts = 0
     /// 每个 AVPlayerItem 的 status 观察（随条目创建/丢弃增删）
-    private var itemObservations: [NSKeyValueObservation] = []
+    /// 用 ObjectIdentifier 寻址：条目被摘掉时才能精确 invalidate 掉它那一个（I-8）
+    private var itemObservations: [ObjectIdentifier: NSKeyValueObservation] = [:]
     /// startPlayback 的起算时刻（用于打印「item 多久才 ready」）
     private var playbackStartedAt: Date?
     private var playRetries = 0
@@ -262,6 +306,8 @@ final class AudioEngine: NSObject {
         }
         observations.forEach { $0.invalidate() }
         observations.removeAll()
+        itemObservations.values.forEach { $0.invalidate() }
+        itemObservations.removeAll()
         player.pause()
     }
 
@@ -326,7 +372,7 @@ final class AudioEngine: NSObject {
             let queue = player.items()
             if let pos = queue.firstIndex(of: current) {
                 for stale in queue[(pos + 1)...] {
-                    itemIndex.removeValue(forKey: ObjectIdentifier(stale))
+                    forgetItem(stale)
                     player.remove(stale)
                 }
             }
@@ -340,8 +386,9 @@ final class AudioEngine: NSObject {
         // 整队列重发：全量重建。player 队列装载 [startIndex, 队尾) 必要条目，
         // 由 AVQueuePlayer 原生接续，锁屏熄屏不依赖 JS 唤醒。
         self.tracks = effectiveTracks
+        cancelCacheTasks()   // 换整条队列 = 当前曲变了（规格 3.1）
+        forgetAllItems()   // 旧条目的 status 观察随条目一起失效（I-8）
         player.removeAllItems()
-        itemIndex.removeAll()
         let start = min(max(0, startIndex), max(0, effectiveTracks.count - 1))
         insertedThrough = start - 1
         ensureLookahead()
@@ -372,15 +419,20 @@ final class AudioEngine: NSObject {
         // 无论走没走进上面的分支都表一次"要播"。去重后不会重复发事件，
         // 但能保证"用户按了播放"这件事一定被 Web 端听到。
         reportPlaying(true)
+        // 暂停作废过预约后，恢复播放等于「重新起播」→ 重新计时 25 秒（规格 3.3）
+        scheduleCacheIfNeeded()
     }
 
     func pause() {
         player.pause()
+        // 暂停只作废**还没开下**的预约；已经开始下的必须一口气下完（规格 2.3，不让路）
+        cancelCacheDelay()
         reportPlaying(false)
     }
 
     func stop() {
         player.pause()
+        cancelCacheDelay()
         reportPlaying(false)
     }
 
@@ -465,8 +517,8 @@ final class AudioEngine: NSObject {
         }
         let victimKeys = Set(victims.map { ObjectIdentifier($0) })
         for item in victims {
+            forgetItem(item)
             player.remove(item)
-            reportedFailures.remove(ObjectIdentifier(item))
         }
         // ② 逻辑队列摘除 + 剩余条目下标整体前移一位
         tracks.remove(at: index)
@@ -532,9 +584,12 @@ final class AudioEngine: NSObject {
         }
         suppressTransitionEvent = true
         logicalIndex = index
+        // 切歌 = 立即取消未完成的下载并丢弃已下部分（规格 3.1 / 3.2）；
+        // 下一首的预约由 startPlayback → playWhenReady 重新发起。
+        cancelCacheTasks()
 
+        forgetAllItems()   // 旧条目的 status 观察随条目一起失效（I-8）
         player.removeAllItems()
-        itemIndex.removeAll()
         insertedThrough = index - 1
         // ⚠️ 惰性装载（2026-10-25 修「点了不出声」）：
         // 原来一次性 insert 队列里全部 40 首，每首都要 AVFoundation 准备，实测在模拟器要 10s+，
@@ -584,12 +639,17 @@ final class AudioEngine: NSObject {
                 if next == idx + 1 && self.player.items().count > 1 && !self.repeatMode.isShuffle {
                     self.player.advanceToNextItem()
                     self.onCurrentItemChanged(self.player.currentItem)
+                    // 播完即取消上一首未完成的下载（规格 3.1），新曲起播重新计时 25 秒（2.1）。
+                    // 这条接续不经过 rebuildQueue，所以必须在这里单独处理。
+                    self.cancelCacheTasks()
+                    self.scheduleCacheIfNeeded()
                 } else {
                     self.rebuildQueue(from: next, positionMs: 0, autoplay: true, reason: 1)
                 }
             } else {
                 // 顺序播完 / 随机不重复播完：停在末尾（等价 Media3 STATE_ENDED）
                 self.player.pause()
+                self.cancelCacheTasks()   // 播完立即取消未完成的下载（规格 3.1）
                 self.reportPlaying(false)
             }
         }
@@ -621,7 +681,6 @@ final class AudioEngine: NSObject {
             let positionMs = Int(max(0, self.player.currentTime().seconds) * 1000)
             NSLog("%@", "[Stall] 缓冲停顿超过 10s，第 \(self.stallRetries) 次自愈 \(positionMs)ms")
             if self.stallRetries == 1 {
-                AudioCacheStore.shared.retryStalledDownloads()
                 self.reloadCurrent(index: self.currentIndex, positionMs: positionMs,
                                    autoplay: self.playingIntent)
             } else {
@@ -784,6 +843,9 @@ final class AudioEngine: NSObject {
         if ready || playAttempts > Self.playReadyMaxTries {
             player.playImmediately(atRate: 1.0)
             reportPlaying(true)
+            // 真起播之后**不立刻**下载：只预约，25 秒后才发起（规格 2.1）。
+            // 25 秒内切走的歌一个字节都不下（试听过滤）。
+            scheduleCacheIfNeeded()
             let st = player.currentItem.map { Int($0.status.rawValue) } ?? -1
             NSLog("[Start] play 后立即 tcs=\(player.timeControlStatus.rawValue) item=\(st)")
             EngineThread.after(1.5) { [weak self] in
@@ -933,8 +995,6 @@ final class AudioEngine: NSObject {
 
     /// 时长是从哪儿来的（排查「页面显示元数据长度」用）
     private func durationSource() -> String {
-        let idxNow = currentIndex
-        if tracks.indices.contains(idxNow), AudioCacheStore.shared.realDurationMs(tracks[idxNow].id) > 0 { return "header" }
         if let item = player.currentItem, item.duration.seconds.isFinite, item.duration.seconds > 0 { return "item" }
         return "metadata"
     }
@@ -948,13 +1008,8 @@ final class AudioEngine: NSObject {
             let sec = item.duration.seconds
             if sec.isFinite && sec > 0 { return Int(sec * 1000) }
         }
-        // ② 条目还没解析出时长时，才用服务端响应头（锚定曲目它就是真实视频时长）
-        let idxNow = currentIndex
-        if tracks.indices.contains(idxNow) {
-            let real = AudioCacheStore.shared.realDurationMs(tracks[idxNow].id)
-            if real > 0 { return real }
-        }
-        // 流尚未探测到时长时退回元数据（Web 端还会用已知真实时长覆盖）
+        // ② 条目还没解析出时长时退回元数据（Web 端还会用已知真实时长覆盖）。
+        //    本地缓存只存音频文件本身、不存响应头，所以时长永远来自 ① 的条目解析或这里的元数据。
         let idx = currentIndex
         return tracks.indices.contains(idx) ? tracks[idx].durationMs : 0
     }
@@ -963,8 +1018,14 @@ final class AudioEngine: NSObject {
         let raw: String
         var headers: [String: String]? = nil
 
-        // 优先 CDN 直链（对齐鸿蒙端直连体系，零服务端带宽）
-        if let direct = directLinks[track.id], direct.expiresAt > Date() {
+        // ① 本地完整缓存优先：命中就直接放本地文件（不需要任何 headers，也不走网络）
+        let cached = AudioCacheStore.shared.cachedFileURL(track.id)
+        if let cached {
+            raw = cached.absoluteString
+            AudioCacheStore.shared.setAccess(track.id)
+            NSLog("%@", "[AudioCache] makeItem id=\(track.id) 命中本地 file=\(cached.lastPathComponent)")
+        // ② 其次 CDN 直链（对齐鸿蒙端直连体系，零服务端带宽）
+        } else if let direct = directLinks[track.id], direct.expiresAt > Date() {
             raw = direct.url
             headers = direct.headers
             NSLog("%@", "[DirectCDN] makeItem id=\(track.id) directUrl=\(raw.prefix(200))")
@@ -973,7 +1034,7 @@ final class AudioEngine: NSObject {
             NSLog("%@", "[StreamUrl] makeItem id=\(track.id) proxyUrl=\(raw.prefix(200))")
         }
 
-        let url = URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 }
+        let url = cached ?? URL(string: raw).flatMap { $0.scheme == nil ? nil : $0 }
             ?? URL(string: "suenmusic://invalid-stream/\(track.id)")!
 
         var assetOptions: [String: Any] = [:]
@@ -999,8 +1060,111 @@ final class AudioEngine: NSObject {
                 self.handlePlaybackFailure()
             }
         }
-        itemObservations.append(obs)
+        itemObservations[key] = obs
         return item
+    }
+
+    /// 条目被摘掉时同步失效它那一个 status 观察（I-8：原来只增不减，只在 deinit 里统一失效）。
+    /// 顺手清掉下标映射与失败去重表里属于它的记录 —— ObjectIdentifier 会被复用，
+    /// 留着旧记录会让新条目被当成"已经报过失败的旧条目"。
+    private func forgetItem(_ item: AVPlayerItem) {
+        let key = ObjectIdentifier(item)
+        itemObservations.removeValue(forKey: key)?.invalidate()
+        reportedFailures.remove(key)
+        itemIndex.removeValue(forKey: key)
+    }
+
+    /// 整队丢弃（每个 removeAllItems 之前调用）
+    private func forgetAllItems() {
+        for obs in itemObservations.values { obs.invalidate() }
+        itemObservations.removeAll()
+        itemIndex.removeAll()
+        reportedFailures.removeAll()
+    }
+
+    /// 起播后落盘缓存的取数口：当前曲 + **未过期**的 CDN 直链。
+    ///
+    /// 没有直链就返回 nil —— 上层据此放弃缓存，绝不用 `/api/stream` 代理 URL 当下载源。
+    func currentCacheSource() -> (track: SuenTrack, url: String, headers: [String: String]?)? {
+        let idx = currentIndex
+        guard tracks.indices.contains(idx) else { return nil }
+        let track = tracks[idx]
+        guard let direct = directLinks[track.id], direct.expiresAt > Date(), !direct.url.isEmpty else {
+            return nil
+        }
+        return (track, direct.url, direct.headers)
+    }
+
+    /// **预约**当前曲的整首缓存：起播后 25 秒才真正发起（规格 2.1）。
+    ///
+    /// 只在「起播点」调用（playWhenReady / play），因此 25 秒内切走就等于一个字节都没下。
+    /// 这里**不做**播放状态检查（规格 2.2）：起播就是唯一条件。也不检查有没有直链 ——
+    /// 直链可能几秒后才到，那时由 `setDirect` → `cacheIfPlaying` 补一次预约。
+    /// 已有预约就不重置计时：直链刷新 / 重复起播不应该把 25 秒往后推。
+    private func scheduleCacheIfNeeded() {
+        let idx = currentIndex
+        guard tracks.indices.contains(idx) else { return }
+        guard cacheDelayTask == nil else { return }
+        let delay = Self.cacheDelaySeconds * 1_000_000_000
+        cacheDelayTask = Task { [weak self] in
+            // 取消（切歌 / 暂停 / 停止）时 sleep 立刻抛错返回，后面的下载根本不会发起
+            try? await Task.sleep(nanoseconds: delay)
+            guard !Task.isCancelled, let self else { return }
+            EngineThread.onMain { self.startCacheDownloadNow() }
+        }
+    }
+
+    /// 预约到点：一口气下完当前曲（规格 2.3），并留下句柄供「切歌即取消」用（规格 3.1）。
+    ///
+    /// 下载源只可能是**当前曲的 CDN 直链**（规格 4.1 / 4.2）；没有直链就放弃本次缓存。
+    private func startCacheDownloadNow() {
+        cacheDelayTask = nil
+        guard let src = currentCacheSource() else {
+            NSLog("%@", "[AudioCache] 25s 到点但无直链，本次不缓存")
+            return
+        }
+        if AudioCacheStore.shared.isCached(src.track.id) {
+            AudioCacheStore.shared.setAccess(src.track.id)
+            return
+        }
+        cacheDownloadTask = AudioCacheStore.shared.download(
+            trackId: src.track.id,
+            name: src.track.title,
+            artist: src.track.artist,
+            url: src.url,
+            headers: src.headers
+        )
+        if cacheDownloadTask != nil {
+            NSLog("%@", "[AudioCache] 起播 25s 到点，开始整首下载 id=\(src.track.id)")
+        }
+    }
+
+    /// 作废预约 + 取消在飞下载（规格 3.1 / 3.2 / 3.3）。
+    ///
+    /// 取消后 `AudioCacheStore.fetch` 从 `URLSession.download` 抛错返回：临时文件被丢弃，
+    /// 不写 `.bin`、不写 meta —— 下次起播重新从头判断（3.3）。
+    private func cancelCacheTasks() {
+        cancelCacheDelay()
+        // 已经在下的整首必须取消并丢弃（规格 3.1 / 3.2）：切歌 / 播完都不留残片
+        cacheDownloadTask?.cancel()
+        cacheDownloadTask = nil
+    }
+
+    /// 只作废「25 秒预约」，不动已在进行的下载（规格 2.3：一旦启动就一口气下完）。
+    private func cancelCacheDelay() {
+        cacheDelayTask?.cancel()
+        cacheDelayTask = nil
+    }
+
+    /// 直链晚到时补一次**预约**：当前曲确实在播才预约（否则等于替用户偷偷下载）。
+    private func cacheIfPlaying(trackId: String) {
+        let fire = { [weak self] in
+            guard let self, self.playingIntent else { return }
+            let idx = self.currentIndex
+            guard self.tracks.indices.contains(idx), self.tracks[idx].id == trackId else { return }
+            self.scheduleCacheIfNeeded()
+        }
+        if Thread.isMainThread { fire() } else { EngineThread.onMain(fire) }
     }
 
     /// 直连上游（对齐 Android SuenAudio.streamUrlFor，防御双斜杠）

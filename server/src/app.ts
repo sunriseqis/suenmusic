@@ -25,6 +25,7 @@ import { registerCatalogRoutes } from './routes/catalog.ts';
 import { registerFavoriteRoutes } from './routes/favorites.ts';
 import { registerHealthRoutes } from './routes/health.ts';
 import { registerHistoryRoutes } from './routes/history.ts';
+import { registerKugouVerifyRoutes } from './routes/kugou-verify.ts';
 import { registerResolveRoutes } from './routes/resolve.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerUpdateRoutes } from './routes/update.ts';
@@ -243,6 +244,7 @@ export function buildApp(): FastifyInstance {
   registerFavoriteRoutes(app);
   registerHistoryRoutes(app);
   registerResolveRoutes(app);
+  registerKugouVerifyRoutes(app);
   registerStreamRoutes(app);
   registerUpdateRoutes(app);
 

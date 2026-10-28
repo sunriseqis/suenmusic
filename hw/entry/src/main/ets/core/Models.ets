@@ -168,6 +168,18 @@ export interface AvailabilityBilibili {
   top?: BiliTop;
 }
 
+/**
+ * 音质档位（**唯一真源**）：标准 → 高 → 极高 → 原声。
+ * 内核偏好的读写、播放页档位弹层、缓存落盘时的档位标注都必须过这里校验，
+ * 避免契约外的乱值（历史版本曾把服务端/偏好里的任意字符串原样当成档位）。
+ */
+export const QUALITY_LEVELS: string[] = ['standard', 'high', 'exhigh', 'lossless'];
+
+/** 非法/缺失音质归一为 lossless（偏好被外部写脏时守住用户期望，不静默降级） */
+export function normalizeQuality(q: string): string {
+  return QUALITY_LEVELS.indexOf(q) >= 0 ? q : 'lossless';
+}
+
 export interface ResolveResponse {
   trackId: string;
   ok: boolean;
@@ -189,6 +201,13 @@ export interface ResolveResponse {
   currentQuality?: string;
   /** 本曲可用音质列表 */
   availableQualities?: string[];
+  /**
+   * 酷狗源被 20028 风控拦下时（reason = 'need_verification'）服务端下发的
+   * **相对路径**验证页（/verify/kugou?t=<token>）。必须拼当前生效 baseUrl 才能用。
+   */
+  verifyUrl?: string;
+  /** 同一次验证事件的稳定 id —— 端侧按它去重，避免每首歌都弹一次通知 */
+  eventId?: string;
 }
 
 export interface StreamSessionToken {

@@ -488,6 +488,9 @@ struct PlayerView: View {
         .foregroundStyle(p.text2)
     }
 
+    /// 音质按钮（播放页七键那一排）显示 = **用户当前选择的档位**（`player.currentQuality`）。
+    /// 与音质面板「当前生效：X」、面板里带 ✓ 的偏好项同一个出处，
+    /// 不随本次实际解析到的档位变化（解析降档不改这行）。
     private var qualityButton: some View {
         Button {
             openSheet(.quality)
@@ -808,6 +811,9 @@ struct QualitySheet: View {
                         .font(.system(size: Dim.fsBody, weight: .semibold))
                         .foregroundStyle(p.text1)
                     Spacer()
+                    // 「当前生效」= 用户选择的档位（`player.currentQuality`），与下面带 ✓ 的偏好项
+                    // 同一个出处，也与播放页音质按钮一致。只读显示，不参与写入 / 置灰判定
+                    // （`availableQualities` 仍独立决定可选性）。
                     Text("当前生效：\(player.qualityLabel(for: player.currentQuality))")
                         .font(.system(size: Dim.fsCaption))
                         .foregroundStyle(p.text2)
@@ -818,7 +824,7 @@ struct QualitySheet: View {
                 VStack(spacing: Dim.s1) {
                     ForEach(qualityOptions, id: \.key) { opt in
                         let isAvailable = player.availableQualities.contains(opt.key)
-                        let isSelected = player.preferredQuality == opt.key
+                        let isSelected = player.currentQuality == opt.key
 
                         Button {
                             if isAvailable {

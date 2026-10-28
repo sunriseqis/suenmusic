@@ -19,9 +19,20 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 const TAG = 'SuenMusic_Cache';
 const DOMAIN = 0x0000;
 
-/** 缓存配额：2GB（鸿蒙端先给保守值，iOS 是 4GB） */
-const QUOTA_BYTES: number = 2 * 1024 * 1024 * 1024;
+/** 缓存配额：1GB（规格 6.2；最高音质单曲约 10MB 级，可容纳 100 首以上） */
+const QUOTA_BYTES: number = 1 * 1024 * 1024 * 1024;
+/**
+ * 「明显过小 = 残片」兜底门槛。
+ * ⚠️ 它**只是兜底**，不是完整性判据：完整性按规格 5.1/5.2 用 Content-Length 比对
+ * （没有 Content-Length 则以 dataEnd 流正常结束为准），见 isComplete()。
+ */
+const MIN_VALID_BYTES: number = 32 * 1024;
 const DIR_NAME: string = 'audio_cache';
+/**
+ * 命中刷新的节流窗口（规格 6.3）。
+ * 命中路径每次起播/重试都会走一遍；同一 trackId 在窗口内只 touch 一次，避免无谓 IO。
+ */
+const TOUCH_THROTTLE_MS: number = 60 * 1000;
 
 interface CacheEntry {
   trackId: string;
@@ -38,13 +49,17 @@ export interface CacheEntryInfo {
   trackId: string;
   path: string;
   bytes: number;
-  /** 毫秒时间戳（文件 mtime） */
+  /** 毫秒时间戳（文件 mtime；命中播放时会刷新，语义是「最后一次使用」，规格 6.3） */
   savedAt: number;
   name?: string;
   artist?: string;
 }
 
-/** 曲名旁挂文件（`<id>.bin.meta`）的形状：缓存面板要显示曲名/歌手，而文件名只有 id */
+/**
+ * 曲名旁挂文件（`<id>.bin.meta`）的形状：缓存面板要显示曲名/歌手，而文件名只有 id。
+ * **不记录音质**（规格 6.4 / 7.2）：缓存与音质解耦，一首歌一份；界面显示的是
+ * 用户选择的档位，与缓存命中的实际档位无关，因此这里没有任何档位信息。
+ */
 interface CacheMeta {
   name: string;
   artist: string;
@@ -62,8 +77,12 @@ export class OfflineCache {
   private ready: boolean = false;
   /** 正在下载的 trackId（防止同一首重复起任务） */
   private downloading: Set<string> = new Set<string>();
+  /** 进行中的下载 → 取消闭包（切歌/播完/停止时销毁会话并删 `.part`，规格 3.1/3.2） */
+  private cancels: Map<string, () => void> = new Map<string, () => void>();
   /** 已完整落盘的 trackId → 路径 */
   private complete: Map<string, string> = new Map<string, string>();
+  /** trackId → 上次刷新访问时间的毫秒值（命中节流用，见 touchAccess） */
+  private touchedAt: Map<string, number> = new Map<string, number>();
   /** 当前正在播放的 trackId：remove/clearAll 必须跳过它（`fd://` 播放期间删文件会直接打断播放） */
   private protectedId: string = '';
 
@@ -91,12 +110,28 @@ export class OfflineCache {
       const names: string[] = fileIo.listFileSync(this.dir);
       for (let i = 0; i < names.length; i++) {
         const name = names[i];
+        // 规格 3.2/3.3：进程被杀等异常路径留下的 .part 一律清掉（不留残片、不续传）；
+        // 正在下载的那份跳过（rescan 可能在下载途中被调用）
+        if (name.endsWith('.part')) {
+          // 文件名形如 <id>.bin.part：剥掉两层后缀才是 trackId（downloading 存的是 trackId）
+          const base = name.endsWith('.bin.part')
+            ? name.substring(0, name.length - 9) : name.substring(0, name.length - 5);
+          if (!this.downloading.has(base)) {
+            try {
+              fileIo.unlinkSync(this.dir + '/' + name);
+              hilog.info(DOMAIN, TAG, '清理残留下载分片 %{public}s', name);
+            } catch (e) {
+              // 清不掉不影响索引重建
+            }
+          }
+          continue;
+        }
         if (!name.endsWith('.bin')) { continue; }
         const id = name.substring(0, name.length - 4);
         const p = this.dir + '/' + name;
         const stat = fileIo.statSync(p);
-        // 小于 32KB 的一律当残片（一首歌不可能这么小）
-        if (stat.size > 32 * 1024) {
+        // 小于 32KB 的一律当残片（一首歌不可能这么小，兜底口径，不是完整性判据）
+        if (stat.size > MIN_VALID_BYTES) {
           this.complete.set(id, p);
         }
       }
@@ -127,6 +162,49 @@ export class OfflineCache {
   /** 缓存的绝对路径（未命中返回空串） */
   cachedPath(trackId: string): string {
     return this.isCached(trackId) ? (this.complete.get(trackId) as string) : '';
+  }
+
+  /**
+   * 标记一次「缓存命中并交给播放器」的访问（规格 6.3：超配额按**最久未使用**优先淘汰）。
+   * 文件 mtime 只在写文件时才变，播放命中不会刷新它 —— 不在这里显式 touch，
+   * 淘汰顺序就退化成「最久未写入」：三个月前缓存、昨天刚播过 10 次的歌反而先被删，
+   * 而三个月没碰过的歌留着（与 iOS 端 lastAccessAt 口径不一致）。
+   * 命中路径可能被频繁调用，同一 trackId 在 TOUCH_THROTTLE_MS 内只 touch 一次。
+   */
+  touchAccess(trackId: string): void {
+    if (!this.ready) { return; }
+    const p = this.cachedPath(trackId);
+    if (p.length === 0) { return; }
+    const now = Date.now();
+    const prev = this.touchedAt.get(trackId);
+    if (prev !== undefined && now - prev < TOUCH_THROTTLE_MS) { return; }
+    try {
+      // 本机 API 26 声明（@ohos.file.fs，:3528；@kit.CoreFileKit 导出的 fileIo 即该命名空间，:99 export { utimes }）：
+      //   declare function utimes(path: string, mtime: number): void;
+      //   @param { number } mtime - New timestamp. The value is the number of MILLISECONDS elapsed
+      //            since the Epoch. Only the time when the file was last modified can be changed.
+      // ⚠️ 三点都与 POSIX / Node 的 fs.utimesSync(path, atime, mtime) 不同：
+      //   ① 名字没有 Sync 后缀；② 只有 (path, mtime) 两个参数，改不了 atime；③ 单位是**毫秒**不是秒。
+      //   传秒会把 mtime 打到 1970 附近，scan/enforceQuota 用 stat.mtime * 1000（:237、:556）
+      //   排序时它就变成「最旧」→ 刚播过的歌先被淘汰，规格 6.3 的语义被反向实现。
+      fileIo.utimes(p, now);
+      // 只有真的写成功才记节流：失败的那次不该把下一次重试也挡掉
+      this.touchedAt.set(trackId, now);
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, '刷新访问时间失败 %{public}s: %{public}s', trackId, JSON.stringify(e));
+    }
+  }
+
+  /**
+   * 取消某首正在进行的下载（规格 3.1 / 3.2 / 3.3）：销毁会话 + 丢弃 `.part`，
+   * 不留残片、不续传、不留残余状态；下次起播从头判断。
+   * 没有进行中的下载时是空操作。
+   */
+  cancelDownload(trackId: string): void {
+    const cancel = this.cancels.get(trackId);
+    if (cancel === undefined) { return; }
+    hilog.info(DOMAIN, TAG, '取消缓存下载 %{public}s', trackId);
+    cancel();
   }
 
   // ---------------- 缓存面板管理 API（S3 增量 3） ----------------
@@ -228,6 +306,7 @@ export class OfflineCache {
       return false;
     }
     this.complete.delete(trackId);
+    this.touchedAt.delete(trackId);
     this.deleteMeta(trackId);
     hilog.info(DOMAIN, TAG, '已删除缓存 %{public}s', trackId);
     return true;
@@ -300,12 +379,20 @@ export class OfflineCache {
   /**
    * 确保这首歌在缓存里。**不阻塞播放**：起个流式下载就返回，
    * 播放在线流的同时把字节落到 filesDir，下完登记为可离线。
-   * `name`/`artist` 供缓存页统计旁挂（下载完成时落 `.meta`）。
+   * `name`/`artist` 供缓存页统计旁挂（下载完成时落 `.meta`）。**不记音质**（规格 6.4/7.2）。
    *
    * `http.requestInStream` 通道（第 ⑩ 条）：无系统通知、后台静默；
-   * 分块写到 `<id>.bin.part`，流结束校验非残片后改名登记。
+   * 分块写到 `<id>.bin.part`，流结束按**字节完整性**判定（规格 5.1/5.2/5.3）后改名登记。
+   *
+   * `streamUrl` 由调用方决定，且**只能是本曲 CDN 直链**（规格 4.1/4.2：绝不用 /api/stream 代理地址）：
+   * 这里是**发起瞬间一次性发出**的请求，URL 内的短期令牌/签名只要此刻有效即可 —— 本方法不解析、
+   * 不保存、不缓存 URL，也不做任何「令牌是否过期」的假设，因此令牌过期不会让已落盘的缓存失效。
+   * `headers` 与直链配套（如 B 站需要 Referer/UA），空对象表示不加任何自定义头。
+   *
+   * 终止（规格 3.1/3.2/3.3）：调用方切歌/播完/停止时调 `cancelDownload`——销毁会话并删 `.part`。
    */
-  ensureDownload(trackId: string, streamUrl: string, name: string, artist: string): void {
+  ensureDownload(trackId: string, streamUrl: string, name: string, artist: string,
+    headers: Record<string, string>): void {
     if (!this.ready || this.isCached(trackId) || this.downloading.has(trackId)) { return; }
     this.downloading.add(trackId);
     const target = this.pathOf(trackId);
@@ -315,6 +402,10 @@ export class OfflineCache {
       const session = http.createHttp();
       let file: fileIo.File | null = null;
       let settled = false;
+      /** 已收字节数（规格 5.1：有 Content-Length 时必须与之逐字节相等） */
+      let received = 0;
+      /** 响应头里的 Content-Length；-1 = 没有（分块传输，规格 5.2 以 dataEnd 为准） */
+      let contentLength = -1;
       const cleanup = (): void => {
         try {
           session.destroy();
@@ -334,6 +425,7 @@ export class OfflineCache {
         if (settled) { return; }
         settled = true;
         this.downloading.delete(trackId);
+        this.cancels.delete(trackId);
         cleanup();
         if (!ok) {
           try {
@@ -364,6 +456,9 @@ export class OfflineCache {
         hilog.info(DOMAIN, TAG, '缓存完成 %{public}s', trackId);
         this.enforceQuota();
       };
+      // 终止语义入口（规格 3.1/3.2/3.3）：cancelDownload(trackId) 走 settle(false)，
+      // 销毁会话 + unlink `.part`，不留残片、不续传
+      this.cancels.set(trackId, (): void => { settle(false); });
       try {
         try {
           if (fileIo.accessSync(tmp)) {
@@ -377,24 +472,34 @@ export class OfflineCache {
         session.on('dataReceive', (chunk: ArrayBuffer) => {
           if (file !== null) {
             fileIo.writeSync(file.fd, chunk);
+            received += chunk.byteLength;
           }
         });
+        // Content-Length 只在响应头里出现；拿不到（分块传输 / 该事件不可用）就走规格 5.2 的
+        // dataEnd 判定 —— 注册失败绝不能连累下载本身，因此单独 try/catch
+        try {
+          session.on('headersReceive', (header: Object) => {
+            contentLength = this.pickContentLength(header);
+          });
+        } catch (e) {
+          hilog.warn(DOMAIN, TAG, 'headersReceive 注册失败，按「无 Content-Length」处理');
+        }
         session.on('dataEnd', () => {
-          // 流结束：小于 32KB 的一律当残片（一首歌不可能这么小，scan 同口径）
-          let sizeOk = false;
-          try {
-            sizeOk = fileIo.statSync(tmp).size > 32 * 1024;
-          } catch (e) {
-            sizeOk = false;
-          }
-          settle(sizeOk);
+          // 流正常结束 → 按**字节完整性**立判（规格 5.1/5.2/5.3）：不再拿「>32KB」当完整性
+          settle(this.isComplete(tmp, received, contentLength));
         });
         // requestInStream 的 Promise 解析值 = HTTP 状态码（number），不是 HttpResponse
-        const code: number = await session.requestInStream(streamUrl, {
+        const opts: http.HttpRequestOptions = {
           method: http.RequestMethod.GET,
           connectTimeout: 15000,
           readTimeout: 60000
-        });
+        };
+        // 直链要求鉴权头（B 站等）才肯放行；空对象时不加 header 键，
+        // 保证其它音源请求与原行为完全一致
+        if (Object.keys(headers).length > 0) {
+          opts.header = headers;
+        }
+        const code: number = await session.requestInStream(streamUrl, opts);
         if (code !== 200) {
           settle(false);
         }
@@ -404,7 +509,49 @@ export class OfflineCache {
     })();
   }
 
-  /** 统计 + 超配额按最久未访问淘汰（配额 2GB） */
+  /**
+   * 完整性判定（规格 5.1 / 5.2 / 5.3）：
+   *   · 有 Content-Length：落盘字节数必须**等于**它，差一个字节都不算完整；
+   *   · 没有 Content-Length：以 dataEnd（流正常结束）为完整；
+   *   · 额外保留「明显过小 = 残片」兜底（MIN_VALID_BYTES）——它只挡半截小文件，**不是**判据本身。
+   * 任一不满足 → 调用方 settle(false)：丢弃、不留残片、不写缓存索引（5.3）。
+   */
+  private isComplete(tmp: string, received: number, contentLength: number): boolean {
+    let size = -1;
+    try {
+      size = fileIo.statSync(tmp).size;
+    } catch (e) {
+      return false;
+    }
+    // 兜底：明显过小的一定是残片（scan 同口径）
+    if (size <= MIN_VALID_BYTES) { return false; }
+    // 写盘字节必须与收到的字节一致（写失败 = 残片）
+    if (size !== received) { return false; }
+    // 有 Content-Length 就逐字节比（5.1）；没有则以 dataEnd 正常结束为准（5.2）
+    if (contentLength > 0) { return size === contentLength; }
+    return true;
+  }
+
+  /**
+   * 从 `headersReceive` 给的响应头里取 Content-Length（键名大小写不定）；取不到返回 -1。
+   * 只服务规格 5.1 的字节比对：解析失败一律当「没有长度」→ 退回 5.2 的 dataEnd 判定。
+   */
+  private pickContentLength(header: Object): number {
+    try {
+      const text = JSON.stringify(header);
+      const m = /"content-length"\s*:\s*"?(\d+)/i.exec(text);
+      if (m === null) { return -1; }
+      const n: number = Number(m[1]);
+      return n > 0 ? n : -1;
+    } catch (e) {
+      return -1;
+    }
+  }
+
+  /**
+   * 统计 + 超配额按最久未访问淘汰（规格 6.2 配额 1GB / 6.3 最久未访问优先）。
+   * 受保护 trackId（正在 fd:// 播放）一律跳过；跳过后仍超额就保留超额并记 warn。
+   */
   private enforceQuota(): void {
     try {
       const names: string[] = fileIo.listFileSync(this.dir);
@@ -422,17 +569,31 @@ export class OfflineCache {
       }
       if (total <= QUOTA_BYTES) { return; }
       entries.sort((a: CacheEntry, b: CacheEntry) => a.mtimeMs - b.mtimeMs);
+      let skippedProtected = false;
       for (let i = 0; i < entries.length && total > QUOTA_BYTES; i++) {
         const e = entries[i];
+        // 正在 fd:// 播放的那份绝不淘汰：句柄占用中删掉 = 立刻断播。
+        // 与 remove() 同一口径，宁可留着超额也不冒断播风险（超额在下面记 warn）。
+        if (e.trackId === this.protectedId) {
+          skippedProtected = true;
+          continue;
+        }
         try {
           fileIo.unlinkSync(e.path);
           this.complete.delete(e.trackId);
+          this.touchedAt.delete(e.trackId);
           this.deleteMeta(e.trackId);
           total -= e.bytes;
           hilog.info(DOMAIN, TAG, '淘汰缓存 %{public}s', e.trackId);
         } catch (err) {
           hilog.warn(DOMAIN, TAG, '淘汰失败: %{public}s', JSON.stringify(err));
         }
+      }
+      if (total > QUOTA_BYTES) {
+        // 允许保留超额：只可能是「可淘汰的只剩在播那份」或删文件失败，
+        // 为满足配额强删在播文件是本末倒置
+        hilog.warn(DOMAIN, TAG, '配额未压回（跳过在播缓存=%{public}s），仍超额 %{public}d 字节',
+          skippedProtected ? '是' : '否', total - QUOTA_BYTES);
       }
     } catch (e) {
       hilog.error(DOMAIN, TAG, '配额检查失败: %{public}s', JSON.stringify(e));

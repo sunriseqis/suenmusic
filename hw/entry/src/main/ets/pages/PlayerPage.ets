@@ -22,10 +22,10 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import {
   MediaPlayerCore, K_TITLE, K_ARTIST, K_COVER, K_PLAYING, K_POS, K_DUR, K_INDEX,
   K_TRACKID, K_PLAY_MODE, K_ORIGIN, K_SOURCE,
-  K_PREFERRED_QUALITY, K_CURRENT_QUALITY, K_AVAILABLE_QUALITIES
+  K_PREFERRED_QUALITY, K_AVAILABLE_QUALITIES
 } from '../core/MediaPlayerCore';
 import { APIClient } from '../core/APIClient';
-import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse } from '../core/Models';
+import { Track, BiliCandidate, AnchorTrackMeta, TrackAnchorInfo, AvailabilityItem, AvailabilityResponse, PinSourceReply, ResolveResponse, normalizeQuality } from '../core/Models';
 import { OfflineCache } from '../core/OfflineCache';
 import { AppState, K_FAV_REV, K_PLAYER_SHEET } from '../viewmodel/AppState';
 import { openCollection } from '../common/CollectionNav';
@@ -68,15 +68,11 @@ export struct PlayerPage {
     }
   }
 
-  private qualityShortTag(q: string): string {
-    switch (q) {
-      case 'lossless': return 'SQ';
-      case 'exhigh': return 'HQ';
-      case 'high': return '高';
-      case 'standard': return '标';
-      default: return 'SQ';
-    }
+  /** 用户在音质面板里选择的档位（QUALITY_LEVELS 白名单归一）：按钮与面板「当前生效」都取它 */
+  private selectedQuality(): string {
+    return normalizeQuality(this.preferredQuality);
   }
+
   @StorageLink(K_TITLE) title: string = '';
   @StorageLink(K_ARTIST) artist: string = '';
   @StorageLink(K_COVER) cover: string = '';
@@ -91,7 +87,8 @@ export struct PlayerPage {
   /** 播放页内部浮层层级（唯一写入方；NativeRoot 返回手势读它逐层关） */
   @StorageLink(K_PLAYER_SHEET) sheet: string = 'none';
   @StorageLink(K_PREFERRED_QUALITY) preferredQuality: string = 'lossless';
-  @StorageLink(K_CURRENT_QUALITY) currentQuality: string = 'lossless';
+  // 音质显示口径（用户最终裁定）：七键音质按钮与音质 sheet 的「当前生效」都显示
+  // 用户自己选择的档位（本字段归一回白名单），不再有「设备上限」这套口径
   @StorageLink(K_AVAILABLE_QUALITIES) availableQualities: string[] = ['standard', 'high', 'exhigh', 'lossless'];
 
   // 窗口全屏布局下的系统避让区实时值（顶部收起钮与底部 peek 需避开刘海/手势条）
@@ -836,9 +833,9 @@ export struct PlayerPage {
 
         Blank()
 
-        // 2. 音质
+        // 2. 音质（显示用户选择的档位：改档立即跟随，与面板里带 ✓ 的偏好项同档）
         Row() {
-          Image(this.qualityIconResource(this.currentQuality))
+          Image(this.qualityIconResource(this.selectedQuality()))
             .width(36)
             .height(32)
             .objectFit(ImageFit.Contain)
@@ -850,7 +847,7 @@ export struct PlayerPage {
         .onClick(() => {
           this.sheet = 'quality';
         })
-        .accessibilityText(`音质：${MediaPlayerCore.shared().qualityLabel(this.currentQuality)}`)
+        .accessibilityText(`音质：${MediaPlayerCore.shared().qualityLabel(this.selectedQuality())}`)
 
         Blank()
 
@@ -1068,7 +1065,9 @@ export struct PlayerPage {
             .fontWeight(FontWeight.Bold)
             .fontColor(Tokens.text1)
           Blank()
-          Text(`当前生效：${MediaPlayerCore.shared().qualityLabel(this.currentQuality)}`)
+          // 用户裁定：这一行显示「用户锁定的偏好档位」，与下方带 ✓ 的偏好高亮一致；
+          // 七键的音质按钮取同一档位（见 bottomBar），两处同口径。
+          Text(`当前生效：${MediaPlayerCore.shared().qualityLabel(this.selectedQuality())}`)
             .fontSize(Dim.fsCaption)
             .fontColor(Tokens.text2)
         }

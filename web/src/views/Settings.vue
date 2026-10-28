@@ -13,7 +13,9 @@
  * 服务端只负责数据同步、AI、cookie 下发；业务功能一律在客户端。
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { renderMarkdown } from '@/utils/markdown.ts';
+import { kugouVerifyState, refreshKugouVerifyState } from '@/utils/kugouVerify.ts';
 import { fetchKugouStatus, startKugouQr, pollKugouQr, logoutKugou } from '@/api/kugou.ts';
 import NeuButton from '@/components/neu/NeuButton.vue';
 import NeuInput from '@/components/neu/NeuInput.vue';
@@ -65,6 +67,7 @@ const favorites = useFavoritesStore();
 const dislikes = useDislikesStore();
 const update = useUpdateStore();
 const player = usePlayerStore();
+const router = useRouter();
 
 type SheetName =
   | 'login'
@@ -390,6 +393,30 @@ const kugouVal = computed(() =>
 );
 const kugouInvalid = computed(() => kugouState.value === 'invalid');
 
+/** 服务端说「酷狗现在需要过人机验证」—— 只有它为真才显示提示与按钮 */
+const kugouVerifyNeeded = computed(() => kugouVerifyState.value?.needed === true);
+
+/**
+ * 打开验证流程。
+ *
+ * 用新标签页：验证过程会离开设置页（手机端还会跳系统浏览器），
+ * 留一个原页面回来更顺手；被弹窗拦截时退回同页跳转，保证手机也能用。
+ */
+function openKugouVerify(): void {
+  const url = (kugouVerifyState.value?.verifyUrl || '').trim() || '/verify/kugou';
+  const tab = window.open(url, '_blank');
+  if (tab) {
+    try {
+      tab.opener = null;
+    } catch {
+      /* 跨域时拿不到 opener，忽略 */
+    }
+    return;
+  }
+  if (url.startsWith('/')) void router.push(url);
+  else window.location.href = url;
+}
+
 // ---------------------------------------------------------------- 音源授权
 type SourceKind = 'bilibili' | 'netease' | 'kugou';
 const qrSource = ref<SourceKind>('bilibili');
@@ -516,6 +543,8 @@ async function loadSources(): Promise<void> {
     kugouState.value = 'logged_out';
     kugouLabel.value = '未登录';
   }
+  // 每次打开设置页（以及授权 / 退出后）都重新探测一次「酷狗是否需要人机验证」
+  void refreshKugouVerifyState(true);
 }
 
 async function loadServerData(): Promise<void> {
@@ -720,6 +749,10 @@ onBeforeUnmount(() => {
           <div class="row">
             <span class="row-name">酷狗</span>
             <span class="row-val">{{ kugouVal }}</span>
+            <span v-if="kugouVerifyNeeded" class="row-tag">需要验证</span>
+            <NeuButton v-if="kugouVerifyNeeded" size="sm" variant="ghost" @click="openKugouVerify">
+              解除验证
+            </NeuButton>
             <template v-if="isWebPanel && session.user?.role === 'admin'">
               <NeuButton v-if="!kugouOn || kugouInvalid" size="sm" @click="openQr('kugou')">授权</NeuButton>
               <NeuButton v-else size="sm" variant="ghost" @click="logoutSource('kugou')">退出</NeuButton>
@@ -1062,6 +1095,18 @@ onBeforeUnmount(() => {
 .row-val {
   font-size: var(--fs-xs);
   color: var(--t2);
+}
+
+/* 「需要验证」小标：只提示、不抢状态列的宽度（状态列自带省略号） */
+.row-tag {
+  flex: none;
+  padding: 1px 8px;
+  border: 1px solid rgba(232, 163, 61, 0.55);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #e8a33d;
+  white-space: nowrap;
 }
 .row-actions {
   display: flex;

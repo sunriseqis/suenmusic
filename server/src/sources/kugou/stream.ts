@@ -19,7 +19,8 @@ import { createLogger } from '../../logger.ts';
 import { getSetting } from '../../db/repo/settings.ts';
 import { getKugouDevice, ensureDfid, markKugouCredentialInvalid } from '../../services/kugou-login.ts';
 import { ensureKugouCheckin, isKugouCheckedInToday } from '../../services/kugou-checkin.ts';
-import { readKugouLoginState } from '../../services/kugou-status.ts';
+import { kugouUsable, readKugouLoginState } from '../../services/kugou-status.ts';
+import { noteKugouVerifyEvent } from '../../services/kugou-verify.ts';
 import {
   APPID_LITE,
   CLIENTVER_LITE,
@@ -277,7 +278,7 @@ async function fetchPlayUrlWithAuth(
   creds: KugouCreds,
   dfid: string,
   options?: { preferMp3?: boolean },
-): Promise<{ url: string | null; bitrate: number; timeLength: number }> {
+): Promise<{ url: string | null; bitrate: number; timeLength: number; verifyRequired: boolean }> {
   const { mid } = resolveIdentity(creds, dfid);
 
   // Step 2: 单曲授权 /v1/authorization
@@ -301,7 +302,7 @@ async function fetchPlayUrlWithAuth(
   const songAuth = String(authJson?.data?.auth ?? '');
   const openTime = authJson?.data?.open_time;
   if (authJson?.status !== 1 || !songAuth || openTime === undefined) {
-    return { url: null, bitrate: 0, timeLength: 0 };
+    return { url: null, bitrate: 0, timeLength: 0, verifyRequired: false };
   }
 
   // Step 3: 授权取流 /tracker/v5/url
@@ -343,11 +344,26 @@ async function fetchPlayUrlWithAuth(
     signal: AbortSignal.timeout(8_000),
   });
   const trackerJson: any = await trackerRes.json();
+  /**
+   * 20028「本次请求需要验证」：上游在响应头 `ssa-code` 里给出验证事件 id。
+   * 这里只**额外记录状态**，不改变取流失败语义 —— 下面照样返回 url:null，
+   * 音质降级与转 B 站兜底完全照旧。
+   */
+  const trackerErrcode = Number(
+    trackerJson?.errcode ?? trackerJson?.error_code ?? trackerJson?.data?.errcode ?? 0,
+  );
+  const verifyRequired = trackerErrcode === 20028;
+  if (verifyRequired) {
+    const ssaCode = trackerRes.headers.get('ssa-code') ?? trackerRes.headers.get('SSA-CODE') ?? '';
+    noteKugouVerifyEvent(ssaCode, 'tracker/v5/url');
+    log.warn(`酷狗取流需要验证（20028）：hash=${qualityHash} eventid=${ssaCode || '(缺失 ssa-code)'}`);
+  }
+
   const url = Array.isArray(trackerJson?.url) && trackerJson.url[0] ? String(trackerJson.url[0]) : null;
   const rawBr = Number(trackerJson?.bitRate ?? 0);
   const bitrate = rawBr > 1000 ? Math.round(rawBr / 1000) : rawBr || (quality === 'flac' ? 900 : quality === '320' ? 320 : 128);
   const timeLength = Number(trackerJson?.timeLength ?? 0);
-  return { url, bitrate, timeLength };
+  return { url, bitrate, timeLength, verifyRequired };
 }
 
 /**
@@ -384,7 +400,7 @@ export async function resolveKugouDirect(
   if (!meta.hash || !meta.albumAudioId) return fail('no_candidates', '缺少酷狗播放凭证');
 
   const kgStatus = await readKugouLoginState();
-  if (kgStatus.state !== 'ok') {
+  if (!kugouUsable(kgStatus.state)) {
     return fail('below_threshold', `酷狗无有效会员（state=${kgStatus.state}），跳过转 B 站`);
   }
 
@@ -414,8 +430,16 @@ export async function resolveKugouDirect(
     return fail('rejected', (err as Error).message);
   }
 
-  const hit = await streamFirstPlayable([cand], cand.durationSec, creds, dfid, userAuth, options, kgStatus.svipActive);
-  return hit ?? fail('below_threshold', '酷狗直取无可播音质');
+  const attempt = await streamFirstPlayable([cand], cand.durationSec, creds, dfid, userAuth, options, kgStatus.svipActive);
+  if (attempt.hit) return attempt.hit;
+  if (attempt.verifyRequired) {
+    // verifyRequired 一路带到 routes/resolve.ts：只有这一次解析才允许报 need_verification 并下发 verifyUrl
+    return {
+      ...fail('need_verification', '酷狗要求完成验证码（20028），请先在浏览器完成验证再重试'),
+      verifyRequired: true,
+    };
+  }
+  return fail('below_threshold', '酷狗直取无可播音质');
 }
 
 /**
@@ -432,8 +456,10 @@ async function streamFirstPlayable(
   userAuth: string,
   options?: { preferMp3?: boolean; quality?: string },
   svip = false,
-): Promise<ResolveResult | null> {
+): Promise<{ hit: ResolveResult | null; verifyRequired: boolean }> {
   let qualityOrder: readonly string[];
+  /** 本轮是否撞到 20028（上游要求验证）—— 决定调用方要不要回 need_verification */
+  let verifyRequired = false;
   const reqQ = options?.quality?.toLowerCase();
 
   // 若无概念 SVIP（仅普通畅听 VIP），上游无 320k/FLAC 权限，锁定仅尝试 128k 完整版
@@ -467,7 +493,7 @@ async function streamFirstPlayable(
       if (!goods || !goods.hash) continue;
 
       try {
-        const { url, bitrate, timeLength } = await fetchPlayUrlWithAuth(
+        const attempt = await fetchPlayUrlWithAuth(
           goods.hash,
           priv.albumId,
           priv.albumAudioId,
@@ -477,6 +503,8 @@ async function streamFirstPlayable(
           dfid,
           options,
         );
+        if (attempt.verifyRequired) verifyRequired = true;
+        const { url, bitrate, timeLength } = attempt;
         if (!url) continue;
 
         // 校验是否为试听片段：优先用 tracker 返回的 timeLength，缺失时用 HEAD Content-Length 兜底
@@ -505,25 +533,28 @@ async function streamFirstPlayable(
             `时长=${actualSec}s 时长差=${durTarget > 0 ? Math.abs(actualSec - durTarget) : 0}s`,
         );
         return {
-          ok: true,
-          bvid: null,
-          sourceUrl: url,
-          score: 100,
-          source: 'kugou',
-          matchedTitle: cand.name,
-          matchedAuthor: cand.singers.map(s => s.name).join('/'),
-          matchedDurationSec: actualSec,
-          durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
-          coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
-          currentQuality,
-          availableQualities,
+          hit: {
+            ok: true,
+            bvid: null,
+            sourceUrl: url,
+            score: 100,
+            source: 'kugou',
+            matchedTitle: cand.name,
+            matchedAuthor: cand.singers.map(s => s.name).join('/'),
+            matchedDurationSec: actualSec,
+            durationDiff: durTarget > 0 ? Math.abs(actualSec - durTarget) : 0,
+            coverUrl: cand.coverTemplate ? kugouCoverUrl(cand.coverTemplate) : undefined,
+            currentQuality,
+            availableQualities,
+          },
+          verifyRequired,
         };
       } catch (err) {
         log.warn(`取流失败 ${cand.id}/${quality}：${(err as Error).message}`);
       }
     }
   }
-  return null;
+  return { hit: null, verifyRequired };
 }
 
 export async function resolveKugouSource(
@@ -534,7 +565,7 @@ export async function resolveKugouSource(
   if (!creds) return fail('below_threshold', '未授权酷狗（需要概念版 VIP 授权）');
 
   const kgStatus = await readKugouLoginState();
-  if (kgStatus.state !== 'ok') {
+  if (!kugouUsable(kgStatus.state)) {
     return fail('below_threshold', `酷狗无有效会员（state=${kgStatus.state}），跳过转 B 站`);
   }
 
@@ -601,7 +632,7 @@ export async function resolveKugouSource(
     return fail('rejected', (err as Error).message);
   }
 
-  const hit = await streamFirstPlayable(
+  const attempt = await streamFirstPlayable(
     scored.slice(0, 6).map(e => e.r),
     durTarget,
     creds,
@@ -610,5 +641,13 @@ export async function resolveKugouSource(
     options,
     kgStatus.svipActive,
   );
-  return hit ?? fail('below_threshold', '候选均无可播音质');
+  if (attempt.hit) return attempt.hit;
+  if (attempt.verifyRequired) {
+    // 同直取路径：只有酷狗 20028 本身才置位 verifyRequired
+    return {
+      ...fail('need_verification', '酷狗要求完成验证码（20028），请先在浏览器完成验证再重试'),
+      verifyRequired: true,
+    };
+  }
+  return fail('below_threshold', '候选均无可播音质');
 }

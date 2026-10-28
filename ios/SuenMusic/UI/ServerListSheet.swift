@@ -715,7 +715,7 @@ private struct SheetGlyphStyle: ButtonStyle {
 
 extension View {
     /**
-     * 以 hw 的「底部浮层」形态呈现浮层页（CachePage / ServerListSheet 共用）。
+     * 以 hw 的「底部浮层」形态呈现浮层页（设置页的服务端管理浮层用这条）。
      *
      * `fullScreenCover` 自带的下滑转场就是 hw 的 `translate({ y: '100%' })`；
      * 但系统默认会铺一层不透明背板，把浮层自己的 scrim 与上两角圆角盖掉 —— 必须置空。

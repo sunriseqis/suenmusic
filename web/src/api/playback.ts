@@ -9,6 +9,7 @@
  */
 
 import { http, resolveUrl } from './client.ts';
+import { extractVerifyToken, saveVerifyToken } from './kugou-verify.ts';
 import type { ResolveResult, TrackProgress } from './types.ts';
 
 /**
@@ -29,11 +30,24 @@ export function resolveTrack(
   const query: Record<string, number> = {};
   if (force) query.force = 1;
   if (retry) query.retry = 1;
-  return http.get<ResolveResult>(`/api/resolve/${encodeURIComponent(trackId)}`, {
-    query: Object.keys(query).length > 0 ? query : undefined,
-    // 要等 B 站搜索，给足时间
-    timeoutMs: 30_000,
-  });
+  return http
+    .get<ResolveResult>(`/api/resolve/${encodeURIComponent(trackId)}`, {
+      query: Object.keys(query).length > 0 ? query : undefined,
+      // 要等 B 站搜索，给足时间
+      timeoutMs: 30_000,
+    })
+    /**
+     * 顺手记下酷狗的验证票据。
+     *
+     * 服务端三个验证接口都只认 URL 上的 t（匿名可用），设置页因此没有别的途径
+     * 拿到票据 —— 只能从 resolve 的 verifyUrl 里捡。这里只写缓存，
+     * **不改解析结果、不改播放行为**。
+     */
+    .then(result => {
+      const token = extractVerifyToken(result.verifyUrl || '');
+      if (token) saveVerifyToken(token);
+      return result;
+    });
 }
 
 /**

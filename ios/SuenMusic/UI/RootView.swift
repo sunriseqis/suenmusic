@@ -3,9 +3,6 @@ import SwiftUI
 struct RootView: View {
     @EnvironmentObject private var app: AppState
     @EnvironmentObject private var player: PlaybackService
-    /// 系统外观（「跟随系统」模式下它会变）：变化时要把 Live Activity 重推一次，
-    /// 否则锁屏卡/灵动岛会一直是旧深浅色（用户实测「不跟随主题」）。
-    @Environment(\.colorScheme) private var systemScheme
     @State private var showPlayer = false
     /// 当前 tab（0 首页 / 1 专属 / 2 收藏 / 3 搜索 / 4 我的）
     @State private var tab: Int = RootView.initialTab()

@@ -7,7 +7,7 @@ import SwiftUI
  *   标题「设置」18 Bold → NeuTabs(本机/智能/高级) → 分段内容；
  *   分区标签 = 11 Medium text2 + 右侧延伸发丝线，内容卡片 = panel 底 + 发丝描边 + radiusMd。
  *
- *   · 本机：播放（缓存用量行 + 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
+ *   · 本机：播放（缓存用量行 → 离线缓存页 / 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
  *   · 智能：画像折叠卡（summary → 分隔线 → profileLines → ledgerLines）/ 调优（guidance 输入 + 上一次回显）
  *   · 高级：检查更新（三形态）/ 多服务端 / 音源授权（只读）
  *
@@ -25,9 +25,9 @@ struct SettingsView: View {
     @State private var sheet: SettingsSheetKind?
     @State private var showServers = false
 
-    // 本机：缓存用量（行内直显 已用/上限）
+    // 本机：缓存用量（真实值，行内直显 已用/上限）
     @State private var cacheUsed: Int64 = 0
-    @State private var clearCacheAsk = false
+    @State private var showCache = false
 
     // 本机：开关（与 hw 同键）
     @AppStorage("lyric_translation") private var lyricTrans = true
@@ -89,6 +89,7 @@ struct SettingsView: View {
         .toolbar(.hidden, for: .navigationBar)
         .animation(Motion.curve, value: sheet)
         .animation(Motion.curve, value: showServers)
+        .animation(Motion.curve, value: showCache)
         .task {
             loadCacheUsage()
             await loadDislikes()
@@ -103,12 +104,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: Dim.s4) {
             secLabel("播放")
             card {
-                // 行内直接给用量（点击 = 清缓存确认）
-                rowButton("缓存", value: SettingsFmt.short(cacheUsed) + "/" + SettingsFmt.short(cacheQuota), first: true) {
+                // 真实用量（AudioCacheStore 完整文件缓存 + 1GB LRU，规格 6.2）；点击进缓存页做单条删除/清空
+                rowButton("缓存", value: SettingsFmt.short(cacheUsed) + "/" + SettingsFmt.short(cacheQuota),
+                          first: true) {
                     loadCacheUsage()
-                    clearCacheAsk = true
+                    showCache = true
                 }
-                .accessibilityLabel("清空离线缓存：已用 " + SettingsFmt.short(cacheUsed)
+                .accessibilityLabel("离线缓存：已用 " + SettingsFmt.short(cacheUsed)
                                     + "，上限 " + SettingsFmt.short(cacheQuota))
                 toggleRow("显示歌词翻译", "原文行下方同时显示翻译", isOn: $lyricTrans)
             }
@@ -416,7 +418,8 @@ struct SettingsView: View {
     }
 
     /// 开关行（标题 + 副行 + 右侧 Toggle）；hw 里这类行一律带顶线
-    private func toggleRow(_ title: String, _ subtitle: String, isOn: Binding<Bool>) -> some View {
+    private func toggleRow(_ title: String, _ subtitle: String, isOn: Binding<Bool>,
+                           first: Bool = false) -> some View {
         HStack(spacing: Dim.s2) {
             VStack(alignment: .leading, spacing: Dim.s0) {
                 Text(title)
@@ -435,7 +438,9 @@ struct SettingsView: View {
         .frame(minHeight: Dim.touchMin)
         .padding(.horizontal, Dim.s4)
         .overlay(alignment: .top) {
-            Rectangle().fill(p.line).frame(height: Dim.hairline)
+            if !first {
+                Rectangle().fill(p.line).frame(height: Dim.hairline)
+            }
         }
     }
 
@@ -461,27 +466,21 @@ struct SettingsView: View {
             ServerListSheet(onClose: { showServers = false })
                 .transition(.move(edge: .bottom))
         }
+        if showCache {
+            CachePage(onClose: {
+                showCache = false
+                loadCacheUsage()
+            })
+            .transition(.move(edge: .bottom))
+        }
     }
 
     @ViewBuilder
     private var dialogLayer: some View {
-        if clearCacheAsk {
-            ConfirmDialog(
-                title: "清空离线缓存",
-                message: "将删除全部 " + SettingsFmt.short(cacheUsed) + " 离线缓存（正在播放的除外），之后播放会重新联网下载。",
-                confirmTitle: "清空",
-                danger: true,
-                onCancel: { clearCacheAsk = false },
-                onConfirm: {
-                    clearCacheAsk = false
-                    clearCache()
-                }
-            )
-        }
         if signOutAsk {
             ConfirmDialog(
                 title: "退出登录",
-                message: "退出后本机缓存与离线快照保留，重新登录即可继续收听。",
+                message: "退出后本机偏好与离线快照保留，重新登录即可继续收听。",
                 confirmTitle: "退出",
                 danger: true,
                 onCancel: { signOutAsk = false },
@@ -512,13 +511,7 @@ struct SettingsView: View {
     }
 
     private func loadCacheUsage() {
-        cacheUsed = AudioCacheStore.shared.usedBytes()
-    }
-
-    private func clearCache() {
-        AudioCacheStore.shared.clear()
-        ToastCenter.shared.show("已清空离线缓存")
-        loadCacheUsage()
+        cacheUsed = AudioCacheStore.shared.usedBytes
     }
 
     private func dislikeCount(_ type: String) -> Int {

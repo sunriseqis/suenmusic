@@ -46,6 +46,18 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/Settings.vue'),
   },
   {
+    /**
+     * 酷狗验证页。
+     *
+     * 链接（/verify/kugou?t=…）由移动端通知带进**手机系统浏览器**直接打开，
+     * 那里没有登录态，所以：meta.public 让守卫放行，页面只认 URL 上的 t。
+     */
+    path: '/verify/kugou',
+    name: 'kugou-verify',
+    component: () => import('@/views/KugouVerify.vue'),
+    meta: { public: true },
+  },
+  {
     // 兜底：不认识的地址回首页，而不是白屏
     path: '/:pathMatch(.*)*',
     redirect: '/',
@@ -72,6 +84,13 @@ export const router = createRouter({
  * 3. 未登录一律拦截去 /login，带上 redirect 方便登录后回跳。
  */
 router.beforeEach(async to => {
+  /**
+   * 验证页放行，且**不等 bootstrap**：
+   * 它会被手机系统浏览器直接打开，那里的访客没有登录态可恢复，
+   * 等待 sessionMe 只会在弱网下白等几秒，甚至卡在加载态。
+   */
+  if (to.name === 'kugou-verify') return true;
+
   const session = useSessionStore();
 
   if (!session.bootstrapped) {

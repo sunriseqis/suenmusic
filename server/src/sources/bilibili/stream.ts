@@ -82,7 +82,9 @@ export type ResolveFailureReason =
   | 'no_candidates'
   | 'below_threshold'
   | 'no_stream'
-  | 'error';
+  | 'error'
+  /** 酷狗取流撞到 20028，需要人先在浏览器里完成验证码（见 services/kugou-verify.ts） */
+  | 'need_verification';
 
 export interface CandidateBrief {
   bvid: string;
@@ -117,6 +119,12 @@ export interface ResolveResult {
   currentQuality?: string;
   /** 本曲可用音质档位列表 */
   availableQualities?: string[];
+  /**
+   * 本次解析是「酷狗上游因为 20028 明确要求验证」失败的。
+   * 只由酷狗取流层置位，且**只描述这一次解析** —— 不能拿「有没有活跃验证事件」
+   * 反推（那会把 B 站失败、网络失败一律误标成需要验证）。
+   */
+  verifyRequired?: boolean;
 }
 
 export interface ResolveInput {
@@ -368,13 +376,15 @@ export async function getAudioStream(
 
     if (audios.length) {
       /**
-       * 当用户期望 standard 音质（或 iOS preferMp3 弱网场景）时，取最低码率档（~64k/132k）；
-       * 否则取最高码率档（~192k 30280）。
+       * 只有用户明确要 standard 时取最低码率档（~64k/132k），否则取最高码率档（~192k 30280）。
+       *
+       * ⚠️ preferMp3 不参与判定：它表达的是「要 mp3 容器」，不是「要最低码率」。
+       * 并进来会让 iOS 恒定拿最低档（B 站 DASH 都是 m4a，本来也没有 mp3 可选）。
        */
       const sorted = [...audios].sort(
         (a, b) => (b.bandwidth || 0) - (a.bandwidth || 0)
       );
-      const wantStandard = options.quality === 'standard' || Boolean(options.preferMp3);
+      const wantStandard = options.quality === 'standard';
       const chosen = wantStandard
         ? sorted[sorted.length - 1]
         : sorted[0];

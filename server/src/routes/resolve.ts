@@ -27,13 +27,18 @@ import {
 } from '../sources/bilibili/stream.ts';
 import type { ResolveResult } from '../sources/bilibili/stream.ts';
 import { scoreCandidate } from '../sources/bilibili/matcher.ts';
-import { invalidateTrack, resolveTrack } from '../services/resolver.ts';
+import { cacheKeyFor, invalidateTrack, resolveTrack } from '../services/resolver.ts';
 import { getPin, setPin, deletePin } from '../db/repo/pins.ts';
 import { resolveKugouSource } from '../sources/kugou/stream.ts';
+import {
+  buildKugouVerifyUrl,
+  isKugouVerifyPending,
+  signKugouVerifyToken,
+} from '../services/kugou-verify.ts';
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
-import { isIosClient } from '../http/platform.ts';
+import { isIosClient, wantsMp3 } from '../http/platform.ts';
 
 const log = createLogger('routes:resolve');
 
@@ -50,6 +55,19 @@ function directEnabled(): boolean {
 /** BVID 形如 BV + 10 位字母数字 */
 const BVID_RE = /^BV[0-9A-Za-z]{10}$/;
 
+/** 音质白名单。不在名单里的值一律忽略，绝不把原始串写进缓存键（每换一个串就是一次完整上游解析） */
+const QUALITY_WHITELIST = ['standard', 'high', 'exhigh', 'lossless'] as const;
+
+/**
+ * 归一化音质参数（doc2 §四.1）：白名单命中就用它（统一小写），否则按平台缺省 ——
+ * iOS 缺省 exhigh（避开 FLAC 的播放器兼容问题），其他端缺省 lossless。
+ */
+function normalizeQuality(raw: string, ios: boolean): string {
+  const q = raw.trim().toLowerCase();
+  if ((QUALITY_WHITELIST as readonly string[]).includes(q)) return q;
+  return ios ? 'exhigh' : 'lossless';
+}
+
 type TrackMeta = Awaited<ReturnType<typeof loadTrack>>;
 
 function shape(
@@ -58,9 +76,30 @@ function shape(
   preferMp3 = false,
   quality?: string,
 ): Record<string, unknown> {
-  const row = outcome.ok
-    ? (preferMp3 ? (getSource(`${outcome.trackId}:mp3`) ?? getSource(outcome.trackId)) : getSource(outcome.trackId))
-    : null;
+  // 读的键必须与 resolver 写的是同一个（cacheKeyFor）：否则带 quality 的请求永远读不到本次
+  // 解析写下的那一行，反而取到别的档位/别的音源的历史行（directUrl、directHeaders、source 一起错）。
+  const row = outcome.ok ? getSource(cacheKeyFor(outcome.trackId, preferMp3, quality)) : null;
+  /**
+   * 需要验证的判定**只看本次解析**：outcome.verifyRequired（酷狗 /tracker/v5/url 真撞到
+   * 20028 时由 sources/kugou/stream.ts 置位）。
+   *
+   * 旧写法是「有活跃验证事件（30 分钟）就算」—— 只要之前撞过一次，接下来 B 站失败、
+   * 上游超时、网络断开全被标成 need_verification，客户端弹验证页却没有任何可验的东西。
+   * 缓存行里残留的 reason=need_verification 仍然算数（负缓存 60s，验证通过后会被清掉）。
+   *
+   * verifyUrl 同理只在这种情况下下发：移动端拿到它就能直接丢给系统浏览器
+   * （token 是服务端签发的短期票据）。没有活跃事件时给空 —— 空票据的验证页没有意义，
+   * 客户端要入口请打 GET /api/kugou/verify/pending（登录态，每次签新票据）。
+   */
+  const verifyRequired =
+    !outcome.ok && (outcome.verifyRequired === true || outcome.reason === 'need_verification');
+  const verifyUrl = verifyRequired && isKugouVerifyPending() ? buildKugouVerifyUrl(signKugouVerifyToken()) : null;
+  // 音质只报实际值：拿不准一律 standard（宁可少报，绝不虚报）
+  const effectiveQuality = outcome.currentQuality || row?.currentQuality || 'standard';
+  const effectiveAvailable =
+    (outcome.availableQualities?.length ? outcome.availableQualities : undefined) ??
+    (row?.availableQualities.length ? row.availableQualities : undefined) ??
+    ['standard'];
 
   /**
    * 失败分两类（用户拍板）：
@@ -79,10 +118,16 @@ function shape(
   return {
     trackId: outcome.trackId,
     ok: outcome.ok,
-    reason: outcome.reason ?? null,
+    /**
+     * 酷狗因为 20028（需要验证码）拿不到流时，reason 单独标成 need_verification ——
+     * 客户端据此弹「去完成验证」，而不是按普通网络失败提示。
+     */
+    reason: verifyRequired ? 'need_verification' : (outcome.reason ?? null),
     rateLimited,
     retryAfterMs,
     message: outcome.message ?? null,
+    /** 需要验证时的验证页地址（带短期票据）；不需要时为 null */
+    verifyUrl,
     score: outcome.score,
     bvid: outcome.bvid,
     matchedTitle: outcome.matchedTitle ?? null,
@@ -141,15 +186,9 @@ function shape(
      */
     track: meta?.raw ?? null,
     /** 当前实际生效音质：lossless / exhigh / high / standard */
-    currentQuality:
-      (outcome as any).currentQuality ??
-      (quality === 'standard' ? 'standard' : ((row?.source ?? outcome.source) === 'bilibili' ? 'high' : 'lossless')),
-    /** 本曲可用音质档位列表 */
-    availableQualities:
-      ((outcome as any).availableQualities ??
-      ((row?.source ?? outcome.source) === 'bilibili'
-        ? ['standard', 'high']
-        : ['standard', 'high', 'exhigh', 'lossless'])),
+    currentQuality: effectiveQuality,
+    /** 本曲可用音质档位列表（音源层真实产出，未知时只报 standard） */
+    availableQualities: effectiveAvailable,
   };
 }
 
@@ -236,8 +275,10 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     const trackId = parsed.raw;
     const force = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.force).toLowerCase());
     const retry = ['1', 'true', 'yes'].includes(strParam((req.query as any)?.retry).toLowerCase());
-    const quality = strParam((req.query as any)?.quality);
-    const preferMp3 = isIosClient(req);
+    // 平台身份与「要 mp3 容器」是两件事：iOS 身份决定缺省音质，mp3 偏好决定容器
+    const ios = isIosClient(req);
+    const preferMp3 = wantsMp3(req);
+    const quality = normalizeQuality(strParam((req.query as any)?.quality), ios);
 
     const meta = await loadTrack(trackId);
     if (!meta) throw notFound('曲目不存在');
@@ -270,8 +311,11 @@ export function registerResolveRoutes(app: FastifyInstance): void {
   app.post('/api/resolve/batch', async req => {
     requireUser(req);
 
-    const preferMp3 = isIosClient(req);
-    const body = (req.body ?? {}) as { trackIds?: unknown };
+    const ios = isIosClient(req);
+    const preferMp3 = wantsMp3(req);
+    const body = (req.body ?? {}) as { trackIds?: unknown; quality?: unknown };
+    // 与单曲接口同规则：归一化后再进缓存键与 shape()，否则批量预取会写出一批平行键
+    const quality = normalizeQuality(strParam(body.quality), ios);
     const ids = Array.isArray(body.trackIds)
       ? body.trackIds.filter((x): x is string => typeof x === 'string').slice(0, 10)
       : [];
@@ -296,8 +340,8 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         name: meta.name,
         artists: meta.artists,
         durationMs: meta.durationMs,
-      }, { preferMp3 });
-      results.push(shape(outcome, meta, preferMp3));
+      }, { preferMp3, quality });
+      results.push(shape(outcome, meta, preferMp3, quality));
     }
 
     return { results };

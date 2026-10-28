@@ -120,7 +120,7 @@ final class AnchorPreview: ObservableObject {
  * 修正音源 / 手动锚定（hw PlayerPage `anchorSheet` + `candidateRow`，web AnchorDialog 同款）。
  *
  * 候选搜索（默认词 = 歌名 + 主歌手，打开即搜）→ 点行试听（先暂停主播放，结束/失败恢复）
- * → 行内图钉键锚定（成功后清该曲离线缓存 → 强制重装当前曲并起播 → toast「已锚定，开始播放」）。
+ * → 行内图钉键锚定（成功后强制重装当前曲并起播 → toast「已锚定，开始播放」）。
  * 已有锚点可解除（toast「已解除锚定，该曲目回到自动匹配」）。
  */
 struct AnchorSheet: View {
@@ -499,7 +499,7 @@ struct AnchorSheet: View {
         }
     }
 
-    /// 锚定落地：入库 → 停试听 → 清旧音源缓存 → 重装当前曲走新锚点 → toast
+    /// 锚定落地：入库 → 停试听 → 重装当前曲走新锚点 → toast
     private func anchor(_ candidate: AnchorCandidate) async {
         guard let track = player.currentTrack, anchoringBvid.isEmpty else { return }
         anchoringBvid = candidate.bvid
@@ -515,7 +515,7 @@ struct AnchorSheet: View {
         anchorInfo = nil
         close()
         ToastCenter.shared.show("已锚定，开始播放")
-        // 旧音源字节按曲目 id 缓存（含离线缓存）：不清会直接盖住新锚点
+        // 服务端已清该曲解析缓存：必须重装条目才会走新锚点（旧的 AVPlayerItem 还指着旧音源）
         await player.reloadCurrentTrack(autoplay: true)
         anchorInfo = try? await APIClient.shared.trackAnchor(track.id)
     }

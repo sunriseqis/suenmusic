@@ -88,40 +88,61 @@ interface PlayableUrlResult {
   bitrate?: number;
 }
 
-/** 根据用户期望音质与 VIP 能力决定尝试档位列表，非 VIP 绝不请求 lossless */
-function computeNeteaseLevels(vip: boolean, quality?: string): string[] {
-  const q = String(quality ?? '').trim().toLowerCase();
-  if (q === 'standard') {
-    return ['standard'];
-  }
-  if (q === 'high') {
-    return ['standard', 'exhigh'];
-  }
-  if (q === 'exhigh') {
-    return ['exhigh', 'standard'];
-  }
-  if (q === 'lossless') {
-    return vip ? ['lossless', 'exhigh', 'standard'] : ['exhigh', 'standard'];
-  }
-  return vip ? ['lossless', 'exhigh', 'standard'] : ['exhigh', 'standard'];
+/** 网易 level → 本项目通用音质档位名（认不出返回 null） */
+function levelToQuality(level: string | undefined): string | null {
+  const l = String(level ?? '').trim().toLowerCase();
+  if (l === 'lossless' || l === 'hires' || l === 'jymaster') return 'lossless';
+  if (l === 'exhigh') return 'exhigh';
+  // 网易的 higher 就是 192k 的「高」，不是 320k 的 exhigh
+  if (l === 'higher') return 'high';
+  if (l === 'standard') return 'standard';
+  return null;
 }
 
-/** 映射网易 level 到本项目通用音质档位 */
+/** 声明档位的顺序（低 → 高），客户端按它决定置灰/可点 */
+const QUALITY_ORDER = ['standard', 'high', 'exhigh', 'lossless'];
+
+/**
+ * 根据用户期望音质与 VIP 能力决定尝试档位列表，非 VIP 绝不请求 lossless。
+ *
+ * preferMp3（要 mp3 容器，iOS）：网易的无损是 FLAC，AVPlayer 流播不了，
+ * 所以必须从候选里**真剔除** lossless/hires/jymaster，而不只是不声明。
+ */
+function computeNeteaseLevels(vip: boolean, quality?: string, preferMp3 = false): string[] {
+  const q = String(quality ?? '').trim().toLowerCase();
+  let levels: string[];
+  if (q === 'standard') {
+    levels = ['standard'];
+  } else if (q === 'high') {
+    // 网易 192k 的 level 名是 higher；以前第一档给 standard，「高」永远只拿到 128k
+    levels = ['higher', 'standard'];
+  } else if (q === 'exhigh') {
+    levels = ['exhigh', 'higher', 'standard'];
+  } else if (q === 'lossless') {
+    levels = vip ? ['lossless', 'exhigh', 'higher', 'standard'] : ['exhigh', 'higher', 'standard'];
+  } else {
+    levels = vip ? ['lossless', 'exhigh', 'higher', 'standard'] : ['exhigh', 'higher', 'standard'];
+  }
+  if (!preferMp3) return levels;
+  return levels.filter(l => l !== 'lossless' && l !== 'hires' && l !== 'jymaster');
+}
+
+/**
+ * 本账号**真的取得到**的档位 —— 与 computeNeteaseLevels 同源（取最宽请求序列映射），
+ * 不会出现「一边放行请求、一边对外声明没有」的自相矛盾响应。
+ */
+function neteaseAvailableQualities(vip: boolean, preferMp3: boolean): string[] {
+  const caps = new Set(
+    computeNeteaseLevels(vip, 'lossless', preferMp3)
+      .map(levelToQuality)
+      .filter((q): q is string => Boolean(q)),
+  );
+  return QUALITY_ORDER.filter(q => caps.has(q));
+}
+
+/** 映射网易 level 到本项目通用音质档位：认不出就退回本次请求的档，再不行 standard（绝不往上猜） */
 function mapNeteaseQuality(rawLevel?: string, reqLevel?: string): string {
-  const norm = String(rawLevel ?? reqLevel ?? '').toLowerCase();
-  if (norm === 'lossless' || norm === 'hires' || norm === 'jymaster') {
-    return 'lossless';
-  }
-  if (norm === 'exhigh' || norm === 'higher') {
-    return 'exhigh';
-  }
-  if (norm === 'high') {
-    return 'high';
-  }
-  if (norm === 'standard') {
-    return 'standard';
-  }
-  return reqLevel === 'lossless' ? 'lossless' : reqLevel === 'exhigh' ? 'exhigh' : 'standard';
+  return levelToQuality(rawLevel) ?? levelToQuality(reqLevel) ?? 'standard';
 }
 
 /** 失败结果。reason 归入 B 站同款枚举，客户端无需感知来源差异 */
@@ -143,7 +164,7 @@ async function fetchPlayableUrl(
   vip: boolean,
   options?: { preferMp3?: boolean; quality?: string },
 ): Promise<PlayableUrlResult | null> {
-  const levels = computeNeteaseLevels(vip, options?.quality);
+  const levels = computeNeteaseLevels(vip, options?.quality, Boolean(options?.preferMp3));
 
   for (const level of levels) {
     try {
@@ -188,10 +209,8 @@ export async function resolveNeteaseSource(
 ): Promise<ResolveResult> {
   const vip = (getNeteaseStatus().account?.vipType ?? 0) >= 10;
   const rawId = String(track.id ?? '').trim();
-  const availableQualities: string[] = ['standard', 'high', 'exhigh'];
-  if (vip && !options?.preferMp3) {
-    availableQualities.push('lossless');
-  }
+  // 与 computeNeteaseLevels 同源：能请求到的档才声明；preferMp3 下连无损都不声明
+  const availableQualities = neteaseAvailableQualities(vip, Boolean(options?.preferMp3));
 
   // ---- 直取快径：`ne_<songId>` 自带网易云 songId，直接调 songUrlV1（0 次搜索） ----
   if (rawId.startsWith('ne_')) {

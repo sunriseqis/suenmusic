@@ -18,6 +18,7 @@ import { useUiStore } from '@/stores/ui.ts';
 import { useUpdateStore } from '@/stores/update.ts';
 import { useLyricsStore } from '@/stores/lyrics.ts';
 import { useFavoritesStore } from '@/stores/favorites.ts';
+import { refreshKugouVerifyState } from '@/utils/kugouVerify.ts';
 
 const route = useRoute();
 const ui = useUiStore();
@@ -131,6 +132,25 @@ watch(
     void favorites.ensureLoaded();
   },
   { immediate: true }
+);
+
+/**
+ * 启动后探一次「酷狗是否需要人机验证」。
+ *
+ * 设置页靠它决定要不要在酷狗那一行挂「需要验证 / 解除验证」。
+ * 公开页（验证页、登录页）不探测：那两个入口的目的与「待验证提示」无关。
+ * 探测失败一律静默 —— 它是辅助信息，不该打扰用户（见 utils/kugouVerify.ts）。
+ */
+let kugouVerifyChecked = false;
+watch(
+  () => session.isLoggedIn,
+  loggedIn => {
+    if (!loggedIn || kugouVerifyChecked) return;
+    kugouVerifyChecked = true;
+    if (route.meta.public) return;
+    void refreshKugouVerifyState(true);
+  },
+  { immediate: true },
 );
 </script>
 

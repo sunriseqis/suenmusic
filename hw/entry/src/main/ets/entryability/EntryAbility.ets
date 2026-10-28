@@ -6,6 +6,7 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { formBindingData, formProvider, formInfo } from '@kit.FormKit';
 import { dispatchCardControl, CardControlRequest } from '../common/PlayerControlHub';
 import { Notifier } from '../common/Notifier';
+import { KugouVerify } from '../core/KugouVerify';
 import { Theme, ThemeMode } from '../common/Theme';
 import {
   NowPlayingSnapshot,
@@ -111,6 +112,30 @@ export default class EntryAbility extends UIAbility {
     this.registerCardCallee();
     // router 事件（或未来的其他前台拉起）可以带 control 参数进来
     this.dispatchControlFromWant(want);
+    // 「酷狗需要验证」通知的点击：冷启动走这里
+    this.openVerifyFromWant(want);
+  }
+
+  /**
+   * 「酷狗需要验证」通知的点击落点（冷启动 onNewWant/onCreate 都可能走到）。
+   *
+   * WantAgent 把本 Ability 拉到前台，待打开的验证页地址放在 want.uri；
+   * 这里转手交给系统浏览器。只认 http(s)：别让任意 uri 借这条通道拉起应用。
+   */
+  private openVerifyFromWant(want: Want): void {
+    try {
+      const uri = want.uri;
+      if (typeof uri !== 'string' || uri.length === 0) {
+        return;
+      }
+      if (!uri.startsWith('http://') && !uri.startsWith('https://')) {
+        return;
+      }
+      hilog.info(DOMAIN, TAG, '通知点击要求在浏览器打开验证页');
+      KugouVerify.openInBrowser(this.context, uri);
+    } catch (err) {
+      hilog.error(DOMAIN, TAG, '解析通知 uri 失败：%{public}s', JSON.stringify(err));
+    }
   }
 
   /**
@@ -284,5 +309,7 @@ export default class EntryAbility extends UIAbility {
   onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     hilog.info(DOMAIN, TAG, '%{public}s', 'Ability onNewWant');
     this.dispatchControlFromWant(want);
+    // 热启动时 App 已在后台，通知点击走这里
+    this.openVerifyFromWant(want);
   }
 }
