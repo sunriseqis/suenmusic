@@ -247,6 +247,26 @@ struct ResolveResponse: Codable {
     let availableQualities: [String]?
 }
 
+// MARK: - 音源可用性（GET /api/resolve/:id/availability，与 hw core/Models.ets 同结构）
+
+/// 单个音源（酷狗 / 网易云 / B 站）的可用性。
+/// 字段全可选：不可用时服务端只保证 ok == false（可能带 message），
+/// 用非可选字段会让整条响应解码失败（B 站那一项还多给 count / top，这里不需要，直接忽略）。
+struct AvailabilityItem: Decodable {
+    let ok: Bool?
+    let title: String?
+    let author: String?
+    let message: String?
+}
+
+/// 各源可用性（锚定弹窗「音源检查」区）。
+/// 三个键都可缺省 —— 缺省 / 请求失败一律按「查询中」展示，不报错。
+struct AvailabilityResponse: Decodable {
+    let kugou: AvailabilityItem?
+    let netease: AvailabilityItem?
+    let bilibili: AvailabilityItem?
+}
+
 // MARK: - 分页
 
 struct FavoriteItem: Codable, Identifiable {

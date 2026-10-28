@@ -126,7 +126,6 @@ export struct SettingsPage {
   @State kugouLabel: string = '未登录';
 
   onOpenServers: () => void = () => {};
-  onOpenCache: () => void = () => {};
 
   aboutToAppear(): void {
     this.loadCacheUsage();
@@ -158,19 +157,28 @@ export struct SettingsPage {
     }
   }
 
-  /** 紧凑容量文案：100M / 2G（web 缓存面板同口径，整数展示） */
-  private fmtShort(b: number): string {
+  /**
+   * 缓存行容量文案（只服务「缓存」这一行，不外供）：
+   *   ① 0 → `0M`
+   *   ② < 1G → 整数 M（如 `100M`）
+   *   ③ ≥ 1G → 整 G 只给整数（上限 QUOTA_BYTES 显示 `1G`），非整 G 保留一位小数（`1.2G`）
+   * 单位只有大写 M / G：不带 B，也不带一位小数的 G + B 旧写法。
+   */
+  private fmtCacheSize(b: number): string {
     const gb = 1024 * 1024 * 1024;
     const mb = 1024 * 1024;
     if (b <= 0) {
       return '0M';
     }
     if (b >= gb) {
-      const v = b / gb;
-      const s = (v >= 10 || Math.round(v * 10) % 10 === 0) ? Math.round(v).toString() : v.toFixed(1);
-      return s + 'G';
+      const g = b / gb;
+      if (g === Math.floor(g)) {
+        return g.toString() + 'G';
+      }
+      return g.toFixed(1) + 'G';
     }
-    return Math.round(b / mb).toString() + 'M';
+    const m = Math.round(b / mb);
+    return (m > 0 ? m : 0).toString() + 'M';
   }
 
   // ---------------- 检查更新（T7，按用户指示「交给系统浏览器下载」） ----------------
@@ -1379,16 +1387,16 @@ export struct SettingsPage {
                   .fontSize(Dim.fsBody)
                   .fontColor(Tokens.text1)
                   .layoutWeight(1)
-                // 行内直接给用量（用户 2026-10-23 裁定：不再「管理」弹层看，改成 100M/2G 直显）
-                Text(this.fmtShort(this.cacheUsed) + '/' + this.fmtShort(this.cacheQuota))
+                // 行内直接给用量「已用 / 上限」（用户 2026-10-23 裁定：不列曲目、不做单条删除）
+                Text(this.fmtCacheSize(this.cacheUsed) + ' / ' + this.fmtCacheSize(this.cacheQuota))
                   .fontSize(Dim.fsMinor)
                   .fontColor(Tokens.text2)
               }
               .width('100%')
               .height(Dim.touchMin)
               .padding({ left: Dim.s4, right: Dim.s4 })
-              .accessibilityText('清空离线缓存：已用 ' + this.fmtShort(this.cacheUsed)
-                + '，上限 ' + this.fmtShort(this.cacheQuota))
+              .accessibilityText('清空缓存：已用 ' + this.fmtCacheSize(this.cacheUsed)
+                + '，上限 ' + this.fmtCacheSize(this.cacheQuota))
               .onClick(() => {
                 this.loadCacheUsage();
                 this.clearCacheAsk = true;
@@ -1695,9 +1703,8 @@ export struct SettingsPage {
       // 清空缓存二次确认（自绘哑光弹窗，不用系统 AlertDialog）
       if (this.clearCacheAsk) {
         ConfirmDialog({
-          titleStr: '清空离线缓存',
-          messageStr: '将删除全部 ' + this.fmtShort(this.cacheUsed) + ' 离线缓存（正在播放的除外），'
-            + '之后播放会重新联网下载。',
+          titleStr: '清空缓存',
+          messageStr: '将删除全部已缓存的歌曲，确定清空？',
           confirmLabel: '清空',
           dangerFlag: true,
           onConfirm: (): void => {

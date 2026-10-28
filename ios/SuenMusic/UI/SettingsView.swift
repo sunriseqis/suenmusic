@@ -7,7 +7,7 @@ import SwiftUI
  *   标题「设置」18 Bold → NeuTabs(本机/智能/高级) → 分段内容；
  *   分区标签 = 11 Medium text2 + 右侧延伸发丝线，内容卡片 = panel 底 + 发丝描边 + radiusMd。
  *
- *   · 本机：播放（缓存用量行 → 离线缓存页 / 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
+ *   · 本机：播放（缓存行：已用 / 上限，点击二次确认清空 / 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
  *   · 智能：画像折叠卡（summary → 分隔线 → profileLines → ledgerLines）/ 调优（guidance 输入 + 上一次回显）
  *   · 高级：检查更新（三形态）/ 多服务端 / 音源授权（只读）
  *
@@ -25,9 +25,9 @@ struct SettingsView: View {
     @State private var sheet: SettingsSheetKind?
     @State private var showServers = false
 
-    // 本机：缓存用量（真实值，行内直显 已用/上限）
+    // 本机：缓存用量（真实值，行内直显 已用 / 上限）+ 清空二次确认
     @State private var cacheUsed: Int64 = 0
-    @State private var showCache = false
+    @State private var cacheClearAsk = false
 
     // 本机：开关（与 hw 同键）
     @AppStorage("lyric_translation") private var lyricTrans = true
@@ -89,7 +89,6 @@ struct SettingsView: View {
         .toolbar(.hidden, for: .navigationBar)
         .animation(Motion.curve, value: sheet)
         .animation(Motion.curve, value: showServers)
-        .animation(Motion.curve, value: showCache)
         .task {
             loadCacheUsage()
             await loadDislikes()
@@ -104,14 +103,13 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: Dim.s4) {
             secLabel("播放")
             card {
-                // 真实用量（AudioCacheStore 完整文件缓存 + 1GB LRU，规格 6.2）；点击进缓存页做单条删除/清空
-                rowButton("缓存", value: SettingsFmt.short(cacheUsed) + "/" + SettingsFmt.short(cacheQuota),
-                          first: true) {
+                // 真实用量（AudioCacheStore 完整文件缓存 + 1GB LRU，规格 6.2）；行即入口，点击只做二次确认清空
+                rowButton("缓存", value: cacheUsageText, first: true) {
                     loadCacheUsage()
-                    showCache = true
+                    cacheClearAsk = true
                 }
-                .accessibilityLabel("离线缓存：已用 " + SettingsFmt.short(cacheUsed)
-                                    + "，上限 " + SettingsFmt.short(cacheQuota))
+                .accessibilityLabel("缓存：已用 " + SettingsFmt.cacheUsed(cacheUsed)
+                                    + "，上限 " + SettingsFmt.cacheLimit(cacheQuota))
                 toggleRow("显示歌词翻译", "原文行下方同时显示翻译", isOn: $lyricTrans)
             }
 
@@ -466,17 +464,25 @@ struct SettingsView: View {
             ServerListSheet(onClose: { showServers = false })
                 .transition(.move(edge: .bottom))
         }
-        if showCache {
-            CachePage(onClose: {
-                showCache = false
-                loadCacheUsage()
-            })
-            .transition(.move(edge: .bottom))
-        }
     }
 
     @ViewBuilder
     private var dialogLayer: some View {
+        if cacheClearAsk {
+            ConfirmDialog(
+                title: "清空缓存",
+                message: "将删除全部已缓存的歌曲，确定清空？",
+                confirmTitle: "清空",
+                danger: true,
+                onCancel: { cacheClearAsk = false },
+                onConfirm: {
+                    AudioCacheStore.shared.clearAll()
+                    cacheClearAsk = false
+                    loadCacheUsage()
+                    ToastCenter.shared.show("缓存已清空")
+                }
+            )
+        }
         if signOutAsk {
             ConfirmDialog(
                 title: "退出登录",
@@ -508,6 +514,11 @@ struct SettingsView: View {
 
     private var cacheQuota: Int64 {
         AudioCacheStore.maxBytes
+    }
+
+    /// 行右侧文案：已用 / 上限 → 形如 "100M / 1G"（右值专用格式，不走通用字节文案）
+    private var cacheUsageText: String {
+        SettingsFmt.cacheUsed(cacheUsed) + " / " + SettingsFmt.cacheLimit(cacheQuota)
     }
 
     private func loadCacheUsage() {

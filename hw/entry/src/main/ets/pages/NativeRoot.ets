@@ -14,7 +14,6 @@ import { DailyPage } from './DailyPage';
 import { SettingsPage } from './SettingsPage';
 import { PlayerPage } from './PlayerPage';
 import { ServerListPage } from './ServerListPage';
-import { CachePage } from './CachePage';
 import { CollectionPage } from './CollectionPage';
 import {
   K_COLLECTION_REQ, K_COLLECTION_DEPTH, K_COLLECTION_BACK
@@ -64,7 +63,6 @@ struct NativeRoot {
   @State barFav: boolean = false;
   @State showPlayer: boolean = false;
   @State showServers: boolean = false;
-  @State showCache: boolean = false;
   // 集合详情浮层（T10 批次 D）：任意页 openCollection() 写信号，这里监听拉起
   @State showCollection: boolean = false;
   @State collKind: string = 'album';
@@ -257,10 +255,6 @@ struct NativeRoot {
       this.showServers = false;
       return true;
     }
-    if (this.showCache) {
-      this.showCache = false;
-      return true;
-    }
     // 收藏 Tab：先退出收藏内搜索的筛选态，而不是退出应用（web Favorites.vue
     // registerBackHandler：页面内临时状态没有自己的路由，返回第一下天然应该清掉）
     if (this.currentTab === 2) {
@@ -298,7 +292,6 @@ struct NativeRoot {
       // 滑块平移 + 文字变色都收进 animateTo（第 ⑭ 条：原先是硬切，零过渡）
       this.showCollection = false;
       this.showServers = false;
-      this.showCache = false;
       this.getUIContext().animateTo({ duration: Motion.fast, curve: Motion.curve }, () => {
         this.currentTab = idx;
       });
@@ -510,8 +503,7 @@ struct NativeRoot {
               TabContent() { SearchPage() }
               TabContent() {
                 SettingsPage({
-                  onOpenServers: (): void => { this.showServers = true; },
-                  onOpenCache: (): void => { this.showCache = true; }
+                  onOpenServers: (): void => { this.showServers = true; }
                 })
               }
             }
@@ -526,29 +518,20 @@ struct NativeRoot {
             .height('100%')
 
             // 浮层背板：点背板关浮层（对齐底部 tab 页，零动效直接切换）
-            if (this.showServers || this.showCache || this.showCollection) {
+            if (this.showServers || this.showCollection) {
               Column()
                 .width('100%')
                 .height('100%')
                 .backgroundColor(Tokens.scrim)
                 .onClick(() => {
                   if (this.showServers) { this.showServers = false; }
-                  if (this.showCache) { this.showCache = false; }
                 })
             }
 
-            // 服务端管理 / 缓存面板 / 集合详情：对齐底部 tab 页动画（零动效直接切换）
+            // 服务端管理 / 集合详情：对齐底部 tab 页动画（零动效直接切换）
             if (this.showServers) {
               Column() {
                 ServerListPage({ onClose: () => { this.showServers = false; } })
-              }
-              .width('100%')
-              .height('100%')
-            }
-
-            if (this.showCache) {
-              Column() {
-                CachePage({ onClose: () => { this.showCache = false; } })
               }
               .width('100%')
               .height('100%')

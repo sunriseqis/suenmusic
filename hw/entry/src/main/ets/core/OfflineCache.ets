@@ -8,7 +8,8 @@
  * 下载通道（2026-10-23 验收第 10 条裁定）：**后台静默下载、用户无需管理、零系统通知**。
  * 原 `request.agent` 通道会强制弹系统下载通知、且无法关闭 —— 改 `http.requestInStream`
  * 流式分块写盘：`dataReceive` 边收边写 `.part` 临时文件，`dataEnd` 后校验、改名、登记。
- * 缓存页只留用量 + 清空，不做逐条管理（设计意图见 CachePage）。
+ * 缓存对外只暴露「用量 + 清空」（设置页一行、点行弹确认清空）：没有缓存列表页，
+ * 不列曲目、不做单条删除 —— 逐条管理的 UI 现已全部下线。
  */
 
 import { http } from '@kit.NetworkKit';
@@ -39,20 +40,6 @@ interface CacheEntry {
   path: string;
   bytes: number;
   mtimeMs: number;
-}
-
-/**
- * 缓存面板展示用的单条信息（S3 增量 3）。
- * `name`/`artist` 来自下载时落盘的旁挂 `.meta` 文件；旧缓存没有则由 UI 回退显示 trackId。
- */
-export interface CacheEntryInfo {
-  trackId: string;
-  path: string;
-  bytes: number;
-  /** 毫秒时间戳（文件 mtime；命中播放时会刷新，语义是「最后一次使用」，规格 6.3） */
-  savedAt: number;
-  name?: string;
-  artist?: string;
 }
 
 /**
@@ -232,43 +219,6 @@ export class OfflineCache {
     this.scan();
   }
 
-  /** 已完整缓存的单条信息（含旁挂曲名）。未命中返回 null */
-  private entryOf(trackId: string): CacheEntryInfo | null {
-    const p = this.cachedPath(trackId);
-    if (p.length === 0) { return null; }
-    try {
-      const stat = fileIo.statSync(p);
-      const meta = this.readMeta(trackId);
-      const info: CacheEntryInfo = {
-        trackId: trackId,
-        path: p,
-        bytes: stat.size,
-        savedAt: stat.mtime * 1000
-      };
-      if (meta !== null) {
-        info.name = meta.name;
-        info.artist = meta.artist;
-      }
-      return info;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  /** 列出全部已完整缓存的曲目（按 savedAt 倒序，最新的在前） */
-  listEntries(): CacheEntryInfo[] {
-    const out: CacheEntryInfo[] = [];
-    if (!this.ready) { return out; }
-    const ids: string[] = [];
-    this.complete.forEach((path: string, id: string) => { ids.push(id); });
-    for (let i = 0; i < ids.length; i++) {
-      const info = this.entryOf(ids[i]);
-      if (info !== null) { out.push(info); }
-    }
-    out.sort((a: CacheEntryInfo, b: CacheEntryInfo) => b.savedAt - a.savedAt);
-    return out;
-  }
-
   /** 已用字节数（只统计 `.bin` 音频文件，不含旁挂 meta） */
   usedBytes(): number {
     if (!this.ready) { return 0; }
@@ -353,18 +303,6 @@ export class OfflineCache {
           // ignore
         }
       }
-    }
-  }
-
-  private readMeta(trackId: string): CacheMeta | null {
-    try {
-      const p = this.metaPathOf(trackId);
-      if (!fileIo.accessSync(p)) { return null; }
-      const text = fileIo.readTextSync(p);
-      if (text.length === 0) { return null; }
-      return JSON.parse(text) as CacheMeta;
-    } catch (e) {
-      return null;
     }
   }
 

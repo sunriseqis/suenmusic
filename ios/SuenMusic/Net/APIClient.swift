@@ -353,6 +353,12 @@ final class APIClient {
         return try await get("/api/resolve/\(trackId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? trackId)", query: query)
     }
 
+    /// 各音源可用性（锚定弹窗「音源检查」区）。路径与 hw sourceAvailability 完全一致，同样带登录态。
+    /// 服务端会并发查三源（B 站要搜一轮），可能较慢 —— 调用方失败要静默（区块降级为「查询中」）。
+    func sourceAvailability(trackId: String) async throws -> AvailabilityResponse {
+        try await get("/api/resolve/\(seg(trackId))/availability")
+    }
+
     // MARK: 集合页
 
     func albumDetail(id: String, limit: Int = 100) async throws -> AlbumDetailReply {

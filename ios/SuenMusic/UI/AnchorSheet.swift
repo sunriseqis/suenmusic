@@ -144,6 +144,12 @@ struct AnchorSheet: View {
     @State private var pinnedSource = ""
     @State private var pinBusy = false
 
+    /// 各源可用性（nil = 查询中；请求失败也保持 nil → 显示「查询中」而不是报错）。与 hw availKugou / availNetease 同口径。
+    @State private var availKugou: AvailabilityItem?
+    @State private var availNetease: AvailabilityItem?
+    /// 可用性是否在查（hw 同名字段，只做内部状态；三态文案只看 avail* 是否为 nil）
+    @State private var availLoading = false
+
     /// 卡片宽 / 最大高占屏幕比例（hw `width('92%')` + `maxHeight('80%')`）
     private static let cardRatio: CGFloat = 0.92
     private static let cardMaxRatio: CGFloat = 0.80
@@ -218,8 +224,8 @@ struct AnchorSheet: View {
                     .disabled(pinBusy)
                 }
             }
-            pinRow("酷狗", source: "kugou")
-            pinRow("网易云", source: "netease")
+            pinRow("酷狗", source: "kugou", item: availKugou)
+            pinRow("网易云", source: "netease", item: availNetease)
         }
         .padding(Dim.s2)
         .background(
@@ -227,13 +233,20 @@ struct AnchorSheet: View {
         )
     }
 
-    private func pinRow(_ name: String, source: String) -> some View {
-        HStack(spacing: Dim.s2) {
+    /// 单源行：源名 + 可用性文案 + 锚定键（hw PlayerPage 音源检查行同构）。
+    /// 不可用 / 查询中都**只禁用按钮**，整行照常显示 —— 用户要能看到「无音源」这个信息。
+    private func pinRow(_ name: String, source: String, item: AvailabilityItem?) -> some View {
+        let ok = availOk(item)
+        return HStack(spacing: Dim.s2) {
             Text(name)
                 .font(.system(size: Dim.fsBody))
                 .foregroundStyle(p.text1)
                 .frame(width: 72, alignment: .leading)
-            Spacer(minLength: 0)
+            Text(availText(item))
+                .font(.system(size: Dim.fsMinor))
+                .foregroundStyle(ok ? p.accent : p.text2)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 Task { await setPin(source) }
             } label: {
@@ -247,8 +260,38 @@ struct AnchorSheet: View {
                             .fill(pinnedSource == source ? p.text1 : p.panel2)
                     )
             }
-            .disabled(pinBusy)
+            // 与 hw 同口径：pinBusy 或「该源不可用」都禁用（hw WebButton 禁用时 0.55 透明度，这里对齐）
+            .disabled(pinBusy || !ok)
+            .opacity(pinBusy || !ok ? 0.55 : 1)
         }
+    }
+
+    // MARK: - 可用性（hw availText / availOk 同口径）
+
+    /// 可用性文案：nil = 查询中，ok = 音源可用，否则 无音源（文案与 hw 逐字一致）
+    private func availText(_ item: AvailabilityItem?) -> String {
+        guard let item else { return "查询中" }
+        return (item.ok == true) ? "音源可用" : "无音源"
+    }
+
+    /// 该源是否可用（决定锚定键能否点；nil / ok 缺失一律按不可用）
+    private func availOk(_ item: AvailabilityItem?) -> Bool {
+        item?.ok == true
+    }
+
+    /// 拉各源可用性（弹窗打开时与锚点/搜索并行；**失败静默** —— 保持 nil 即显示「查询中」，不弹错）。
+    /// 显式 @MainActor：并行跑在主执行器上，@State 的写入不会落到后台线程。
+    @MainActor
+    private func loadAvailability(_ trackId: String) async {
+        availKugou = nil
+        availNetease = nil
+        availLoading = true
+        defer { availLoading = false }
+        guard let reply = try? await APIClient.shared.sourceAvailability(trackId: trackId) else { return }
+        // 查的过程中切了歌：丢弃这批结果
+        guard player.currentTrack?.id == trackId else { return }
+        availKugou = reply.kugou
+        availNetease = reply.netease
     }
 
     /// 钉 / 解钉（最近一次用户选择生效：钉了酷狗就压过历史 B 站锚点）
@@ -471,9 +514,12 @@ struct AnchorSheet: View {
         note = ""
         anchoringBvid = ""
         preview.stop(resumeMain: true, main: player)
+        // 可用性、锚点、源钉、候选搜索四路并行（可用性最慢：服务端要并发查三源）
+        let availability = Task { await self.loadAvailability(track.id) }
         anchorInfo = try? await APIClient.shared.trackAnchor(track.id)
         pinnedSource = (try? await APIClient.shared.pinSourceState(track.id)) ?? ""
         await search()
+        await availability.value
     }
 
     private func search() async {

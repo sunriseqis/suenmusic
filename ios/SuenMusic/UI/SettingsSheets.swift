@@ -12,25 +12,26 @@ import UniformTypeIdentifiers
  * 弹层一律自绘（系统 .sheet 的卡片形态与哑光体系不一致，且 scrim 不能点空白关）。
  */
 
-// MARK: - 数值 / 文案（hw 同名工具函数）
+// MARK: - 数值 / 文案
 
-/// 紧凑容量文案：100M / 2G（与 hw SettingsPage.fmtShort 逐值同源，整数展示）
+/// 缓存行「已用 / 上限」专用格式化 —— 只服务 SettingsView 的缓存行右值，勿复用到其它行。
 enum SettingsFmt {
-    static func short(_ bytes: Int64) -> String {
-        let gb: Int64 = 1024 * 1024 * 1024
-        let mb: Int64 = 1024 * 1024
-        if bytes <= 0 { return "0M" }
-        if bytes >= gb {
-            let v = Double(bytes) / Double(gb)
-            let s: String
-            if v >= 10 || (v * 10).rounded().truncatingRemainder(dividingBy: 10) == 0 {
-                s = String(Int(v.rounded()))
-            } else {
-                s = String(format: "%.1f", v)
-            }
-            return s + "G"
-        }
-        return String(Int((Double(bytes) / Double(mb)).rounded())) + "M"
+    /// 已用：0 → "0M"；<1G → 整数 M（如 "100M"）；≥1G → 一位小数（如 "1.2G"）；单位不带 B。
+    static func cacheUsed(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0M" }
+        let gb = Double(1024 * 1024 * 1024)
+        let mb = Double(1024 * 1024)
+        let value = Double(bytes)
+        if value >= gb { return String(format: "%.1f", value / gb) + "G" }
+        return String(max(1, Int((value / mb).rounded()))) + "M"
+    }
+
+    /// 上限：由 AudioCacheStore.maxBytes 换算，整 G → "1G"（不写 "1.00 GB"）；非整 G 保留一位小数。
+    static func cacheLimit(_ bytes: Int64) -> String {
+        let value = Double(bytes) / Double(1024 * 1024 * 1024)
+        let whole = value.rounded()
+        if abs(value - whole) < 0.0001 { return String(Int(whole)) + "G" }
+        return String(format: "%.1f", value) + "G"
     }
 }
 

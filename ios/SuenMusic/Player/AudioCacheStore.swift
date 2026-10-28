@@ -30,18 +30,6 @@ final class AudioCacheStore: @unchecked Sendable {
     /// 旧版把缓存落在 caches 下，那份文件在新目录里永远是孤儿 → 一次性整目录清掉
     private static let legacyPurgeKey = "suenmusic.audioCache.legacyCachesPurged.v1"
 
-    /// 缓存条目（对外快照；UI 只读这一份，不碰文件系统）
-    struct Entry: Identifiable {
-        let trackId: String
-        let name: String
-        let artist: String
-        let bytes: Int64
-        let createdAt: Date
-        let lastAccessAt: Date
-
-        var id: String { trackId }
-    }
-
     /// 落盘 meta（`.json`，与 `.bin` 同名）
     private struct Meta: Codable {
         let trackId: String
@@ -94,67 +82,6 @@ final class AudioCacheStore: @unchecked Sendable {
             return sum
         }
         return total
-    }
-
-    var entryCount: Int {
-        let count: Int = locked {
-            loadIndexLocked()
-            var n = 0
-            for id in index.keys where fileSize(binURL(id)) != nil { n += 1 }
-            return n
-        }
-        return count
-    }
-
-    /// 一次遍历同时给出「列表 + 总占用 + 条数」（N-6）。
-    ///
-    /// 缓存页刷新原来要 `usedBytes` + `entries()` 各 stat 一遍全部 `.bin`（条目上百时
-    /// 一次 onAppear 就是两百多次同步 stat，而且还在主线程）；这里只 stat 一遍，
-    /// 调用方把整个调用挪到后台即可。
-    struct Snapshot {
-        let entries: [Entry]
-        let usedBytes: Int64
-        var count: Int { entries.count }
-    }
-
-    /// 一次遍历产出快照（磁盘 stat 都发生在这里，调用方负责别在主线程调）
-    func snapshot() -> Snapshot {
-        let snap: Snapshot = locked {
-            loadIndexLocked()
-            var out: [Entry] = []
-            var total: Int64 = 0
-            for meta in index.values {
-                guard let size = fileSize(binURL(meta.trackId)), size > 0 else { continue }
-                total += size
-                out.append(Entry(trackId: meta.trackId,
-                                 name: meta.name,
-                                 artist: meta.artist,
-                                 bytes: size,
-                                 createdAt: Date(timeIntervalSince1970: meta.createdAt),
-                                 lastAccessAt: Date(timeIntervalSince1970: meta.lastAccessAt)))
-            }
-            return Snapshot(entries: out.sorted { $0.lastAccessAt > $1.lastAccessAt }, usedBytes: total)
-        }
-        return snap
-    }
-
-    /// 列表（最近听过的在前）—— 缓存页逐条删除用
-    func entries() -> [Entry] {
-        let list: [Entry] = locked {
-            loadIndexLocked()
-            var out: [Entry] = []
-            for meta in index.values {
-                guard let size = fileSize(binURL(meta.trackId)), size > 0 else { continue }
-                out.append(Entry(trackId: meta.trackId,
-                                 name: meta.name,
-                                 artist: meta.artist,
-                                 bytes: size,
-                                 createdAt: Date(timeIntervalSince1970: meta.createdAt),
-                                 lastAccessAt: Date(timeIntervalSince1970: meta.lastAccessAt)))
-            }
-            return out.sorted { $0.lastAccessAt > $1.lastAccessAt }
-        }
-        return list
     }
 
     // MARK: - 维护
