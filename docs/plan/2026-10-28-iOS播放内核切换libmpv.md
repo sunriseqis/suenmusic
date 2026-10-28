@@ -152,8 +152,8 @@ Live Activity 与 Widget Extension 已在 `60ecdcd` 彻底移除，**灵动岛�
 | # | 待验项 | 为什么模拟器验不了 |
 | :-- | :-- | :-- |
 | 1 | 锁屏显示元数据 + 进度推进 | 模拟器不渲染锁屏媒体控件 |
-| 2 | 灵动岛媒体卡片与按钮 | 同上 |
-| 3 | `playbackState` 图标翻转（播放/暂停/缓冲） | 同上；且 buffering 用 `playbackState=.playing + rate=0` 是权宜，真机可能画成播放态 |
+| 2 | ~~灵动岛媒体卡片与按钮~~ | **已结论（2026-10-28）**：Live Activity / Widget Extension 已在 `60ecdcd` 移除，系统原生媒体卡片在 App 前台不显示；两个参照项目（`AprDeci/bili-music`、`NaivG/bilimusic`，均 `audio_service` + mpv）行为一致。**不作为缺陷，不纳入验收。** |
+| 3 | 锁屏/控制中心的播放暂停按钮行为 | 系统面板不出现时无需验；若后续恢复面板再验（buffering 用 `playbackState=.playing + rate=0` 是权宜） |
 | 4 | seek 后进度不漂 | 需要真实拖动 + 锁屏对照 |
 | 5 | 10s 停滞自愈 | 要造断流（切飞行模式 / 换劣质 CDN） |
 | 6 | 媒体服务重置后重建 MpvPlayer | 模拟器难稳定触发 Reset Media Services |
@@ -161,6 +161,16 @@ Live Activity 与 Widget Extension 已在 `60ecdcd` 彻底移除，**灵动岛�
 | 8 | 耳机线控 / AirPods 双击 | 模拟器无实体键 |
 | 9 | 拔耳机自动暂停、来电打断恢复策略 | 同上 |
 | 10 | 后台播放（锁屏后继续出声） | 需要真机后台调度 |
+
+### P7 追加：版本号与更新链路反馈（2026-10-28 打包实测）
+
+| # | 现象 | 状态 |
+| :-- | :-- | :-- |
+| P7-a | **鸿蒙端版本已是 2.1，但飞牛（fn）打包安装出来仍是 2.0** | 待查：fn 的版本号来源是否与根 `VERSION` 脱钩（`fn/app/server` 有自己的 package.json / 打包脚本） |
+| P7-b | **鸿蒙端点「检查更新」显示出错** | 待查：是接口报错还是产物缺失（`server/data/updates/harmony/` 目前只有 2.0.0 的 32 字节测试文件；2.1.0 HAP 尚未产出） |
+| P7-c | iOS 端更新检查**尚未实测** | 服务端接口已验（2.0.0→available=true，2.1.0→false，下载 14,804,054 字节一致），但客户端内点检查更新未验 |
+
+> iOS 侧已备好产物：`suenmusic-2.1.0.ipa`（14.8MB 未签名）在 `server/data/updates/ios/`，`latest.json` 已指向它。
 
 ## 九、MVP 内核精简（P6，独立阶段）
 

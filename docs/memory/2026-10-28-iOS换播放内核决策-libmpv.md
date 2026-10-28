@@ -85,6 +85,46 @@ iOS 与鸿蒙的音质标识原来用 SVG 图标（`quality_{lossless,exhigh,hig
 **教训**：服务端能力变更后，客户端可能长期持旧状态；排查时要先分清「数据对不对」和「客户端拿的是哪一次的数据」。
 后续值得加「解析结果变更后主动刷新面板」的机制，而不是等下一次解析。
 
+## 三·补五：灵动岛 / Live 卡「没有」是预期行为，不是缺陷（2026-10-28 结案）
+
+真机反馈「没有灵动岛、没有 Live 卡」。核查结论：
+
+1. Live Activity 与 Widget Extension 在 `60ecdcd` 已**主动移除**（回归系统原生），所以不存在我们自己的卡片。
+2. 系统原生媒体卡片在 App 前台不显示；且需要会话活跃 + Now Playing 已发布。
+3. **两个参照项目行为一致** —— `AprDeci/bili-music` 与 `NaivG/bilimusic` 都用 `audio_service`（`AudioServicePlugin.m`），
+   其实现与本项目几乎逐项相同：`center.playbackState`、`center.nowPlayingInfo`、`MPRemoteCommandCenter`、`AVAudioSession`；
+   而且它们**连 `beginReceivingRemoteControlEvents` 都没调**（我们反而多调了）。
+
+**⚠️ 这条结论后来被推翻了，见下一节。**
+
+## 三·补六：真正的根因 —— mpv 把音频会话改成了 mixWithOthers
+
+把诊断日志从 `print` 改成 `NSLog`、补上 `opts` / `mode` 之后，模拟器上抓到第一条硬证据：
+
+```
+[NowPlaying/progress] isActive(self)=true cat=AVAudioSessionCategoryPlayback
+  mode=AVAudioSessionModeMoviePlayback opts=1 playbackState=1 ...
+  title=Y dur=Y(193.6) elapsed=Y(13.3) artwork=Y cmd.play=true cmd.pause=true cmd.next=true app=2
+```
+
+**`opts=1` 就是 `AVAudioSessionCategoryOptionMixWithOthers`。**
+
+- 我们初始化时设的是 `.playback` / `.default` / `options: []`
+- 但播放中它变成了 `MoviePlayback` + `mixWithOthers`
+- **这两个都不是我们设的，是 mpv 的 `ao=audiounit` 自己改的**——它为了不打断其它 App
+- 而 `mixWithOthers` 会让 iOS 把本 App 判为**次要音频**，次要音频不参与 Now Playing
+- 于是：**锁屏 / 控制中心 / 灵动岛全都不出媒体面板**，元数据再全也没用
+
+这完美解释了「只有换内核后才出现」：AVPlayer 不会改会话选项，mpv 会。
+
+**修法**：每次进入播放态（以及 loadfile / seek 之后）把会话**完整改回来**——
+只调 `setActive(true)` 不够，必须先 `setCategory(.playback, mode: .default, options: [])` 再 `setActive(true)`，然后重新发布 Now Playing。
+
+**教训**：诊断日志里如果只打 `cat` 不打 `opts`/`mode`，这个 bug 永远查不出来——
+会话的四个维度（category / mode / options / active）**任何一个被第三方库改掉都会让面板消失**，记录时必须四个一起打。
+排查过程中还发现一个观测缺口：`logNowPlayingDiagnostics` 用 `print` 而非 `NSLog`，
+`log show` 抓不到（真机排查时会误以为没跑）—— 将来真要查这块，先把它改成 NSLog。
+
 ## 四、教训
 
 - **「解析成功」不等于「能播放」**：`AVURLAsset.load(.duration)` 通过只说明容器被识别。判断可播性只认实听或 `readyToPlay` + `currentTime` 推进。
