@@ -1038,7 +1038,7 @@ onBeforeUnmount(() => {
 
       <!-- 系统运维：合并管理员管理项为统一面板，收缩为弹层 -->
       <section v-if="isWebPanel && session.user?.role === 'admin'" class="sec">
-        <h2 class="label">系统运维</h2>
+        <h2 class="label">运维日志</h2>
         <div class="panel">
           <button type="button" class="row row-btn" @click="sheet = 'admin-users'">
             <span class="row-name">账号管理</span>
@@ -1053,8 +1053,8 @@ onBeforeUnmount(() => {
             <span class="row-val">自动 {{ anchorStats.auto }} · 手动 {{ anchorStats.manual }}</span>
           </button>
           <button type="button" class="row row-btn" @click="sheet = 'admin-maint'">
-            <span class="row-name">数据维护</span>
-            <span class="row-val">备份与完整性</span>
+            <span class="row-name">运维日志</span>
+            <span class="row-val">服务器 · Cookie · AI</span>
           </button>
         </div>
       </section>
@@ -1445,7 +1445,7 @@ onBeforeUnmount(() => {
     </Sheet>
 
     <!-- 数据维护弹层 -->
-    <Sheet :open="sheet === 'admin-maint'" title="数据维护" @close="sheet = null">
+    <Sheet :open="sheet === 'admin-maint'" title="运维日志" @close="sheet = null">
       <div class="sheet-pad">
         <AdminMaintenance />
       </div>
