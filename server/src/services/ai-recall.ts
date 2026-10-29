@@ -30,7 +30,7 @@ import {
   type FamiliarityTier,
 } from './artist-stats.ts';
 import { getSimilarArtists } from './similar-artists.ts';
-import { buildStyleProfile, topStyles } from './playlist-pool.ts';
+import { buildStyleProfile, refillPlaylistPool, topStyles } from './playlist-pool.ts';
 import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track, Album } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
@@ -1290,22 +1290,54 @@ export async function buildCandidatePool(
     const deficit = TARGET_MIN_POOL - candidates.length;
     log.info(`候选池当前 ${candidates.length} 首，触发流水补位（目标 ≥ ${TARGET_MIN_POOL}，需补 ${deficit} 首）`);
 
-    // ① 优先用未消耗的网友歌单曲目流水补位
+    /**
+     * ① 网友歌单流水补位（用户 2026-10-29 裁定：simi 欠额给**网友歌单**，不给榜单）。
+     *
+     * 三段递进，**绝不因为「歌单被消耗过」就放弃它里面的曲目** ——
+     * `consumed_at` 只表示「这份歌单不再当新鲜歌单用」，里面的歌仍是有效曲目。
+     * 实测线上 playlist_pool 40 份**全部已消耗**，只查 consumed_at IS NULL 会拿到 0 行，
+     * 补位于是全部落到榜单（chart 30→36）—— 这正是用户要避免的。
+     */
     const db = getDatabase();
-    const extraPlaylistRows = db
-      .prepare(
-        `SELECT pi.payload_json AS payload
-           FROM playlist_pool pp JOIN playlist_pool_items pi ON pi.dissid = pp.dissid
-          WHERE pp.consumed_at IS NULL
-          ORDER BY pp.added_at DESC LIMIT ?`
-      )
-      .all(POOL_MAX * 3) as unknown as Array<{ payload: string }>;
-    for (const r of extraPlaylistRows) {
-      if (candidates.length >= TARGET_MIN_POOL || candidates.length >= POOL_MAX) break;
+    const fillFromPlaylist = (onlyFresh: boolean): number => {
+      const rows = db
+        .prepare(
+          `SELECT pi.payload_json AS payload
+             FROM playlist_pool pp JOIN playlist_pool_items pi ON pi.dissid = pp.dissid
+            ${onlyFresh ? 'WHERE pp.consumed_at IS NULL' : ''}
+            ORDER BY pp.added_at DESC LIMIT ?`
+        )
+        .all(POOL_MAX * 3) as unknown as Array<{ payload: string }>;
+      let added = 0;
+      for (const r of rows) {
+        if (candidates.length >= TARGET_MIN_POOL || candidates.length >= POOL_MAX) break;
+        try {
+          if (push(JSON.parse(r.payload) as Track, 'playlist')) added += 1;
+        } catch {
+          /* 坏数据跳过 */
+        }
+      }
+      return added;
+    };
+
+    // ①-a 先用未消耗的歌单（新鲜优先）
+    fillFromPlaylist(true);
+    // ①-b 仍有缺口 → 用已消耗歌单里的曲目（曲目本身仍然有效）
+    if (candidates.length < TARGET_MIN_POOL) {
+      const n = fillFromPlaylist(false);
+      if (n > 0) log.info(`流水补位：从已消耗歌单再补 ${n} 首`);
+    }
+    // ①-c 仍有缺口 → 主动补池（拉新歌单），补完再取一次
+    if (candidates.length < TARGET_MIN_POOL) {
       try {
-        push(JSON.parse(r.payload) as Track, 'playlist');
-      } catch {
-        /* 坏数据跳过 */
+        const refreshed = await refillPlaylistPool(userId);
+        if (refreshed > 0) {
+          log.info(`流水补位：网友歌单池已补充 ${refreshed} 份，重新取用`);
+          fillFromPlaylist(true);
+          if (candidates.length < TARGET_MIN_POOL) fillFromPlaylist(false);
+        }
+      } catch (err) {
+        log.warn(`流水补位：补池失败 ${(err as Error).message}`);
       }
     }
 
