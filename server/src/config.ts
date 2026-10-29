@@ -6,8 +6,9 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { resolve } from 'node:path';
-import type { LogLevel } from './logger.ts';
+import { mkdirSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { createLogger, type LogLevel } from './logger.ts';
 
 /** server/ 根目录（本文件位于 server/src/） */
 export const SERVER_ROOT = resolve(import.meta.dirname, '..');
@@ -16,6 +17,13 @@ export interface Config {
   host: string;
   port: number;
   dbPath: string;
+  /**
+   * 整库备份归档（`.sm`）的输出目录。
+   *
+   * 来自 `SUENMUSIC_BACKUP_DIR`，缺省 `<数据库文件所在目录>/backups`。
+   * fnOS 的启动脚本（fn/cmd/main）已经 export 它指向共享目录；启动时 mkdir。
+   */
+  backupDir: string;
   /**
    * 前端构建产物目录，存在则由本服务直接伺服（单端口部署）。
    *
@@ -231,11 +239,34 @@ function assertJwtSecretUsable(secret: string): void {
 const explicitSecret = envStr('SUENMUSIC_JWT_SECRET', '');
 assertJwtSecretUsable(explicitSecret);
 
+/** 数据库文件路径（模块求值一次，backupDir 的缺省值要跟着它算） */
+const dbPath = resolve(SERVER_ROOT, envStr('SUENMUSIC_DB', './data/suenmusic.db'));
+
+/**
+ * 解析并**在启动时创建**备份目录。
+ *
+ * 为什么不等第一次备份再建：备份是"出事时才用"的功能，等到用户点备份才发现
+ * 目录不可写（权限、共享目录没挂上、只读卷）就太晚了 —— 那时现场已经在收拾了。
+ * 创建失败只记一行 WARN，不阻塞启动（服务本身还能跑，备份接口会如实报错）。
+ */
+function resolveBackupDir(dbFile: string): string {
+  const raw = envStr('SUENMUSIC_BACKUP_DIR', '').trim();
+  const dir = raw === '' ? join(dirname(dbFile), 'backups') : resolve(SERVER_ROOT, raw);
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    createLogger('config').warn(
+      `备份目录创建失败（${dir}）：${(err as Error)?.message ?? String(err)}`
+    );
+  }
+  return dir;
+}
 
 export const config: Config = {
   host: envStr('SUENMUSIC_HOST', '127.0.0.1'),
   port: envNum('SUENMUSIC_PORT', 3210),
-  dbPath: resolve(SERVER_ROOT, envStr('SUENMUSIC_DB', './data/suenmusic.db')),
+  dbPath,
+  backupDir: resolveBackupDir(dbPath),
   webRoot: resolve(SERVER_ROOT, envStr('SUENMUSIC_WEB_ROOT', '../web/dist')),
   bilibiliCookie: envStr('SUENMUSIC_BILIBILI_COOKIE', ''),
   neteaseCookie: envStr('SUENMUSIC_NETEASE_COOKIE', ''),

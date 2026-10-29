@@ -17,6 +17,7 @@ import { AppError } from './http/errors.ts';
 import { DatabaseRestoringError } from './db/index.ts';
 import { registerAuthRoutes } from './routes/auth.ts';
 import { registerAdminRoutes } from './routes/admin.ts';
+import { registerBackupRoutes } from './routes/backup.ts';
 import { registerAiSettingsRoutes } from './routes/ai-settings.ts';
 import { registerBilibiliRoutes } from './routes/bilibili.ts';
 import { registerNeteaseRoutes } from './routes/netease.ts';
@@ -237,6 +238,7 @@ export function buildApp(): FastifyInstance {
   registerHealthRoutes(app, SERVER_VERSION);
   registerAuthRoutes(app);
   registerAdminRoutes(app);
+  registerBackupRoutes(app);
   registerBilibiliRoutes(app);
   registerNeteaseRoutes(app);
   registerDailyRoutes(app);

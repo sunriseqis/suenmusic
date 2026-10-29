@@ -83,3 +83,41 @@ export function applyPersistedJwtSecret(): JwtSecretOrigin {
     return 'unavailable';
   }
 }
+
+/**
+ * 库里**持久化**的那把密钥（没有则 null）。
+ *
+ * 供 `services/backup.ts` 派生"加密备份口令 / WebDAV 口令"的主密钥用。
+ * 为什么要用这一把而不是 `config.jwtSecret`：显式配置了 SUENMUSIC_JWT_SECRET 时，
+ * 恢复流程会在内存里轮换密钥并落库，但**重启后 env 值重新优先** —— 若拿
+ * `config.jwtSecret` 派生，轮换期间写入的密文在下次重启后就再也解不开了
+ * （实测过：重启后"已存的备份口令无法解密"）。库里有值就以库为准。
+ */
+export function persistedJwtSecret(): string | null {
+  const v = (getSetting(SETTING_KEY) ?? '').trim();
+  return v.length >= MIN_SECRET_LENGTH ? v : null;
+}
+
+/**
+ * **轮换**持久化的 JWT 密钥 —— 整库恢复后强制"所有人重新登录"用。
+ *
+ * 为什么恢复要换密钥：备份里带着**备份那一刻**的账号与刷新令牌，恢复后那些
+ * 令牌行又"活"了过来；而访问令牌是无状态 JWT，换库不会让它失效。不换密钥 =
+ * 恢复前签发的访问令牌继续有效，恢复这件事在鉴权层面等于没发生。
+ *
+ * 与 `applyPersistedJwtSecret()` 共用同一个 app_settings 键，语义保持一致：
+ *   · 未配 env（常态）→ 新密钥落库，之后每次重启都复用它；
+ *   · 配了 env → 内存里立刻生效，但**重启后 env 值重新优先**，届时恢复后签发的
+ *     令牌也会失效（代价是再登录一次，方向仍然是"更严格"，可接受）。
+ *
+ * 调用方（services/backup.ts 的恢复流程）还会同时吊销刷新令牌、抬高 token_epoch，
+ * 因为 Web 面板的会话走 cookie 里的刷新令牌，光换密钥堵不住。
+ */
+export function rotatePersistedJwtSecret(): string {
+  const secret = randomBytes(32).toString('hex');
+  config.jwtSecret = secret;
+  config.jwtSecretIsEphemeral = false;
+  setSetting(SETTING_KEY, secret);
+  log.warn('JWT 密钥已轮换：此前签发的所有访问令牌立即失效，需要重新登录');
+  return secret;
+}

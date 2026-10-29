@@ -29,6 +29,7 @@ import { autoTagUntagged } from './services/ai-tags.ts';
 import { pruneAllStaleParts, refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
 import { runDailyMaintenance } from './services/daily-recommend.ts';
 import { ensureKugouCheckin, runKugouCheckin } from './services/kugou-checkin.ts';
+import { runScheduledBackup } from './services/backup.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
 
 /** 曲目缓存保留 30 天。QQ 侧元数据变动很少，30 天足够且能显著减少上游请求 */
@@ -281,6 +282,27 @@ async function main(): Promise<void> {
   }, 90_000).unref();
 
   /**
+   * 自动备份：**服务器本地时间每天 00:00** 跑一次（生成 → 上传 WebDAV → 轮转）。
+   *
+   * 与上面两个定时任务同款「算到下一个整点 → setTimeout → 触发后重算」自排程：
+   * 没有 setInterval 的累加漂移，也不怕跨天/跨月。
+   * 条件是 WebDAV 已配置 + enabled + 已存口令，任一不满足则跳过并记录原因；
+   * 并发保护（上一轮没跑完就不重入）也在 runScheduledBackup 里 ——
+   * 路由层的"立即上传"与定时器共用同一份实现。
+   */
+  let autoBackupTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleAutoBackup = (): void => {
+    autoBackupTimer = setTimeout(() => {
+      void runScheduledBackup()
+        .then(outcome => logger.info(`自动备份：${outcome.result}`))
+        .catch(err => logger.warn(`自动备份调度失败：${(err as Error)?.message ?? String(err)}`))
+        .finally(scheduleAutoBackup);
+    }, msUntilNextLocal(0, 0));
+    autoBackupTimer.unref();
+  };
+  scheduleAutoBackup();
+
+  /**
    * 更新产物轮询（`SUENMUSIC_UPDATE_SOURCE=github` 时才生效）。
    *
    * 为什么由**服务端**去拉 GitHub 而不是让客户端直连：
@@ -326,6 +348,7 @@ async function main(): Promise<void> {
     clearInterval(timer);
     if (kugouCheckinTimer) clearTimeout(kugouCheckinTimer);
     if (dailyTimer) clearTimeout(dailyTimer);
+    if (autoBackupTimer) clearTimeout(autoBackupTimer);
     try {
       await app.close();
     } catch (err) {
