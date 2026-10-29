@@ -44,7 +44,22 @@ import { useDislikesStore } from '@/stores/dislikes.ts';
 import { useUpdateStore } from '@/stores/update.ts';
 import { applyDedupe, previewDedupe, type DupGroup } from '@/offline/dedupe.ts';
 import { applyBackup, buildBackup, downloadBackup } from '@/offline/backup.ts';
-import { loadWebdav, saveWebdav, webdavGet, webdavPut } from '@/offline/webdav.ts';
+import {
+  createLocalBackup,
+  downloadLocalBackup,
+  fetchBackupStatus,
+  fetchWebdavFiles,
+  pullWebdavBackup,
+  restoreFromBase64,
+  rotateLocalBackups,
+  saveWebdavConfig,
+  setBackupPassword,
+  uploadWebdavBackup,
+  type BackupStatus,
+  type RestoreResponse,
+  type WebdavRemoteFile,
+} from '@/api/backup.ts';
+import { downloadBlob } from '@/utils/download.ts';
 import { importQQPlaylist } from '@/api/library.ts';
 import { fetchPersona, tunePersona } from '@/api/ai.ts';
 import {
@@ -183,69 +198,323 @@ async function runDedup(): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------- 备份
+// ---------------------------------------------------------------- 数据备份（管理员）
+/**
+ * 四块：备份口令 / 本地 / WebDAV / 恢复（外加收藏导出导入）。
+ *
+ * 全部走服务端 `server/src/routes/backup.ts`（requireWebAdmin）——浏览器不再直连
+ * WebDAV：那条路撞 CORS，浏览器端的 WebDAV 模块已整体删除。口令只上行，
+ * 界面只读 `hasPassword`，**任何地方都不回显口令本身**。
+ */
 const backupBusy = ref(false);
 const backupMsg = ref('');
-const fileInput = ref<HTMLInputElement | null>(null);
-const webdav = ref(loadWebdav());
-async function exportBackup(): Promise<void> {
+const backupErr = ref(false);
+const backupStatus = ref<BackupStatus | null>(null);
+
+const passwordDraft = ref('');
+const passwordEditing = ref(false);
+
+const davUrl = ref('');
+const davUser = ref('');
+const davPass = ref('');
+const davAuto = ref(false);
+
+/** 远端文件列表（服务端 PROPFIND 的结果）与当前选中项 */
+const davFiles = ref<WebdavRemoteFile[]>([]);
+const davSelected = ref('');
+const davListBusy = ref(false);
+const davListMsg = ref('');
+
+const restoreFileInput = ref<HTMLInputElement | null>(null);
+const restoreFileName = ref('');
+const restoreFileBase64 = ref('');
+const restorePassword = ref('');
+
+const favoritesFileInput = ref<HTMLInputElement | null>(null);
+
+function say(text: string, err = false): void {
+  backupMsg.value = text;
+  backupErr.value = err;
+}
+
+function formatBytes(n: number): string {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} B`;
+}
+
+function formatTime(ms: number | null): string {
+  if (!ms) return '从未运行';
+  const d = new Date(ms);
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function loadBackupStatus(): Promise<void> {
+  try {
+    const st = await fetchBackupStatus();
+    backupStatus.value = st;
+    davUrl.value = st.webdav.url;
+    davUser.value = st.webdav.username;
+    davAuto.value = st.webdav.enabled;
+    davPass.value = '';
+    passwordEditing.value = !st.hasPassword;
+  } catch (e) {
+    say(e instanceof Error ? e.message : '读取备份状态失败', true);
+  }
+}
+
+/**
+ * 拉一次远端文件列表（打开弹层 / 点「刷新远端列表」/ 刚保存完配置时）。
+ *
+ * 未配置或拉取失败都只落在 `davListMsg`（可读提示），不塞进顶部的 `say`：
+ * 列表本身有独立的空态行，顶部那条留给"保存/备份/恢复"这类主动操作。
+ */
+async function loadDavFiles(): Promise<void> {
+  if (!backupStatus.value?.webdav.configured) {
+    davFiles.value = [];
+    davSelected.value = '';
+    davListMsg.value = '';
+    return;
+  }
+  if (davListBusy.value) return;
+  davListBusy.value = true;
+  davListMsg.value = '';
+  try {
+    const res = await fetchWebdavFiles();
+    davFiles.value = res.files;
+    // 刷新后旧选中项可能已不在列表里（被远端轮转删掉）
+    if (!res.files.some(f => f.name === davSelected.value)) davSelected.value = '';
+  } catch (e) {
+    davFiles.value = [];
+    davSelected.value = '';
+    davListMsg.value = e instanceof Error ? e.message : '读取远端列表失败';
+  } finally {
+    davListBusy.value = false;
+  }
+}
+
+/** 列表空态/失败态的提示文案：任何时候都不留一块空白控件 */
+const davEmptyHint = computed(() => {
+  if (davListBusy.value) return '读取远端列表…';
+  if (!backupStatus.value?.webdav.configured) return '未配置 WebDAV：填好地址/账号/口令并保存后可读取远端列表';
+  if (davListMsg.value) return davListMsg.value;
+  return '远端目录里没有 .sm 备份';
+});
+
+function openBackup(): void {
+  sheet.value = 'backup';
+  backupMsg.value = '';
+  backupErr.value = false;
+  void loadBackupStatus().then(loadDavFiles);
+}
+
+async function savePassword(): Promise<void> {
   if (backupBusy.value) return;
+  const pwd = passwordDraft.value;
+  if (pwd.length < 4) {
+    say('备份口令至少 4 个字符', true);
+    return;
+  }
   backupBusy.value = true;
   try {
-    const via = await downloadBackup(await buildBackup());
-    backupMsg.value = via === 'native' ? '已导出到系统下载目录' : '已交给浏览器下载';
+    await setBackupPassword(pwd);
+    passwordDraft.value = '';
+    await loadBackupStatus();
+    say('备份口令已保存');
   } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '导出失败';
+    say(e instanceof Error ? e.message : '保存口令失败', true);
   } finally {
     backupBusy.value = false;
   }
 }
-function pickBackup(): void {
-  fileInput.value?.click();
+
+async function runLocalBackup(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const res = await createLocalBackup();
+    say(`已生成 ${res.fileName}（${formatBytes(res.size)}），本地保留 ${res.kept} 份`);
+    await loadBackupStatus();
+  } catch (e) {
+    say(e instanceof Error ? e.message : '备份失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
 }
-async function onBackupFile(ev: Event): Promise<void> {
+
+async function rotateLocal(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const res = await rotateLocalBackups();
+    say(`已清理 ${res.removed.length} 份，保留 ${res.kept.length} 份`);
+    await loadBackupStatus();
+  } catch (e) {
+    say(e instanceof Error ? e.message : '清理失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function downloadArchive(name: string): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const via = await downloadBlob(await downloadLocalBackup(name), name);
+    if (via === 'failed') throw new Error('下载失败：系统没有保存文件');
+    say(`已下载 ${name}`);
+  } catch (e) {
+    say(e instanceof Error ? e.message : '下载失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function saveDav(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const res = await saveWebdavConfig({
+      url: davUrl.value,
+      username: davUser.value,
+      password: davPass.value || undefined,
+      enabled: davAuto.value,
+    });
+    davPass.value = '';
+    say(res.webdav.enabled ? 'WebDAV 已保存，自动备份每天 00:00 执行' : 'WebDAV 已保存（自动备份关闭）');
+    await loadBackupStatus();
+    await loadDavFiles();
+  } catch (e) {
+    say(e instanceof Error ? e.message : '保存 WebDAV 配置失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function uploadDav(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const res = await uploadWebdavBackup();
+    say(`已上传 ${res.fileName}（${formatBytes(res.size)}）`);
+    await loadBackupStatus();
+  } catch (e) {
+    say(e instanceof Error ? e.message : '上传失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+/** 整库恢复成功后服务端已吊销全部登录态：本地清 token / cookie，回登录页 */
+async function finishRestore(res: RestoreResponse): Promise<void> {
+  restoreFileName.value = '';
+  restoreFileBase64.value = '';
+  restorePassword.value = '';
+  sheet.value = null;
+  ui.toast(res.message || '恢复成功，请用备份里的管理员账号登录', 'ok', 6000);
+  await session.logout();
+  await router.replace('/login');
+}
+
+async function pullDav(): Promise<void> {
+  const name = davSelected.value;
+  if (!name) {
+    say('请先选择要恢复的远端备份文件', true);
+    return;
+  }
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    await finishRestore(await pullWebdavBackup(name, restorePassword.value.trim() || undefined));
+  } catch (e) {
+    say(e instanceof Error ? e.message : '远端恢复失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+function readAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('读取备份文件失败'));
+    reader.onload = () => {
+      const text = typeof reader.result === 'string' ? reader.result : '';
+      const comma = text.indexOf(',');
+      resolve(comma >= 0 ? text.slice(comma + 1) : '');
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function pickRestoreFile(): void {
+  restoreFileInput.value?.click();
+}
+
+async function onRestoreFile(ev: Event): Promise<void> {
   const input = ev.target as HTMLInputElement;
   const file = input.files?.[0];
   input.value = '';
   if (!file) return;
+  try {
+    restoreFileBase64.value = await readAsBase64(file);
+    restoreFileName.value = file.name;
+    say(`已选择 ${file.name}（${formatBytes(file.size)}）`);
+  } catch (e) {
+    say(e instanceof Error ? e.message : '读取备份文件失败', true);
+  }
+}
+
+async function submitRestore(): Promise<void> {
+  if (!restoreFileBase64.value) {
+    say('请先选择 .sm 备份文件', true);
+    return;
+  }
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    await finishRestore(
+      await restoreFromBase64(restoreFileBase64.value, restorePassword.value.trim() || undefined)
+    );
+  } catch (e) {
+    say(e instanceof Error ? e.message : '恢复失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+// ---------------------------------------------------------------- 收藏导出 / 导入
+async function exportFavorites(): Promise<void> {
+  if (backupBusy.value) return;
+  backupBusy.value = true;
+  try {
+    const via = await downloadBackup(await buildBackup());
+    say(via === 'native' ? '已导出到系统下载目录' : '已交给浏览器下载');
+  } catch (e) {
+    say(e instanceof Error ? e.message : '导出失败', true);
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+function pickFavoritesFile(): void {
+  favoritesFileInput.value?.click();
+}
+
+async function onFavoritesFile(ev: Event): Promise<void> {
+  const input = ev.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = '';
+  if (!file) return;
+  if (backupBusy.value) return;
   backupBusy.value = true;
   try {
     const res = await applyBackup(await file.text());
-    backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
-    webdav.value = loadWebdav();
+    say(`收藏已合并：新增 ${res.added} 首 · 跳过 ${res.skipped} 首`);
     await favorites.reload();
-    await dislikes.reload();
   } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '导入失败';
-  } finally {
-    backupBusy.value = false;
-  }
-}
-async function uploadWebdav(): Promise<void> {
-  if (backupBusy.value) return;
-  backupBusy.value = true;
-  try {
-    saveWebdav(webdav.value);
-    await webdavPut(webdav.value, JSON.stringify(await buildBackup()));
-    backupMsg.value = '已上传';
-  } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '上传失败';
-  } finally {
-    backupBusy.value = false;
-  }
-}
-async function downloadWebdav(): Promise<void> {
-  if (backupBusy.value) return;
-  backupBusy.value = true;
-  try {
-    saveWebdav(webdav.value);
-    const res = await applyBackup(await webdavGet(webdav.value));
-    backupMsg.value = `新增 ${res.added} 首 · 跳过 ${res.skipped}`;
-    webdav.value = loadWebdav();
-    await favorites.reload();
-    await dislikes.reload();
-  } catch (e) {
-    backupMsg.value = e instanceof Error ? e.message : '下载失败';
+    say(e instanceof Error ? e.message : '导入失败', true);
   } finally {
     backupBusy.value = false;
   }
@@ -618,9 +887,15 @@ onBeforeUnmount(() => {
             <span class="row-name">去重</span>
             <span class="row-val">本机收藏</span>
           </button>
-          <button type="button" class="row row-btn" @click="sheet = 'backup'">
+          <!-- 备份/恢复全是 requireWebAdmin 的同源 cookie 接口：非管理员连入口都不显示 -->
+          <button
+            v-if="isWebPanel && session.user?.role === 'admin'"
+            type="button"
+            class="row row-btn"
+            @click="openBackup"
+          >
             <span class="row-name">数据备份</span>
-            <span class="row-val">文件 · WebDAV</span>
+            <span class="row-val">口令 · 本地 · WebDAV</span>
           </button>
         </div>
       </section>
@@ -846,30 +1121,222 @@ onBeforeUnmount(() => {
       </template>
     </Sheet>
 
+    <!-- 数据备份：口令 / 本地 / WebDAV / 恢复 + 收藏导出导入 -->
     <Sheet :open="sheet === 'backup'" title="数据备份" @close="sheet = null">
-      <input ref="fileInput" type="file" accept=".sm,.json" hidden @change="onBackupFile" />
-      <div class="actions">
-        <NeuButton :loading="backupBusy" @click="exportBackup">导出文件</NeuButton>
-        <NeuButton variant="ghost" :loading="backupBusy" @click="pickBackup">导入文件</NeuButton>
-      </div>
-      <p v-if="backupMsg" class="hint">{{ backupMsg }}</p>
-      <div class="divider" />
+      <input ref="restoreFileInput" type="file" accept=".sm" hidden @change="onRestoreFile" />
+      <input
+        ref="favoritesFileInput"
+        type="file"
+        accept=".json,application/json"
+        hidden
+        @change="onFavoritesFile"
+      />
+
+      <p v-if="!backupStatus && !backupMsg" class="hint">读取备份状态…</p>
+      <p v-if="backupMsg" class="hint" :class="{ err: backupErr }">{{ backupMsg }}</p>
+
+      <!-- a) 备份口令：只显示"是否已设置"，口令本身从不回显 -->
+      <h3 class="persona-subhead">备份口令</h3>
       <div class="field">
-        <span class="field-name">WebDAV</span>
-        <NeuInput v-model="webdav.url" placeholder="https://dav.example.com/music" />
+        <span class="field-name">状态</span>
+        <div class="row-actions">
+          <span class="row-val">
+            {{ backupStatus?.hasPassword ? '已设置' : '首次使用需设定备份口令' }}
+          </span>
+          <NeuButton
+            v-if="backupStatus?.hasPassword && !passwordEditing"
+            size="sm"
+            variant="ghost"
+            @click="passwordEditing = true"
+          >
+            更换
+          </NeuButton>
+        </div>
+      </div>
+      <template v-if="passwordEditing || !backupStatus?.hasPassword">
+        <div class="field">
+          <span class="field-name">口令</span>
+          <NeuInput
+            v-model="passwordDraft"
+            type="password"
+            placeholder="至少 4 个字符"
+            autocomplete="new-password"
+          />
+        </div>
+        <div class="actions">
+          <NeuButton
+            variant="primary"
+            :loading="backupBusy"
+            :disabled="passwordDraft.length < 4"
+            @click="savePassword"
+          >
+            保存口令
+          </NeuButton>
+        </div>
+      </template>
+
+      <!-- b) 本地备份 -->
+      <div class="divider" />
+      <h3 class="persona-subhead">本地备份</h3>
+      <div class="field">
+        <span class="field-name">目录</span>
+        <span class="row-val ellipsis">{{ backupStatus?.localDir || '—' }}</span>
+      </div>
+      <div class="actions">
+        <NeuButton
+          variant="primary"
+          :loading="backupBusy"
+          :disabled="!backupStatus?.hasPassword"
+          @click="runLocalBackup"
+        >
+          立即备份
+        </NeuButton>
+        <NeuButton variant="ghost" :loading="backupBusy" @click="rotateLocal">清理旧备份</NeuButton>
+      </div>
+      <p class="hint">整库加密归档（.sm），服务端自动只保留最新 2 份。</p>
+      <div class="sheet-list">
+        <div v-for="f in backupStatus?.localFiles ?? []" :key="f.name" class="row">
+          <span class="row-name ellipsis">{{ f.name }}</span>
+          <span class="row-val">{{ formatBytes(f.size) }} · {{ formatTime(f.mtimeMs) }}</span>
+          <NeuButton size="sm" variant="ghost" @click="downloadArchive(f.name)">下载</NeuButton>
+        </div>
+        <div v-if="(backupStatus?.localFiles.length ?? 0) === 0" class="row empty">
+          还没有本地备份
+        </div>
+      </div>
+
+      <!-- c) WebDAV -->
+      <div class="divider" />
+      <h3 class="persona-subhead">WebDAV</h3>
+      <div class="field">
+        <span class="field-name">地址</span>
+        <NeuInput v-model="davUrl" placeholder="https://dav.example.com/music" />
       </div>
       <div class="field">
         <span class="field-name">账号</span>
-        <NeuInput v-model="webdav.user" autocomplete="username" />
+        <NeuInput v-model="davUser" autocomplete="username" />
       </div>
       <div class="field">
         <span class="field-name">口令</span>
-        <NeuInput v-model="webdav.pass" type="password" autocomplete="current-password" />
+        <NeuInput
+          v-model="davPass"
+          type="password"
+          autocomplete="current-password"
+          :placeholder="backupStatus?.webdav.hasPassword ? '已保存，留空表示不修改' : 'WebDAV 口令'"
+        />
+      </div>
+      <div class="field">
+        <span class="field-name">自动</span>
+        <div class="row-actions">
+          <span class="row-val">自动备份（每天 00:00）</span>
+          <NeuSwitch v-model="davAuto" aria-label="自动备份（每天 00:00）" />
+        </div>
       </div>
       <div class="actions">
-        <NeuButton :loading="backupBusy" @click="uploadWebdav">上传</NeuButton>
-        <NeuButton variant="primary" :loading="backupBusy" @click="downloadWebdav">下载</NeuButton>
+        <NeuButton :loading="backupBusy" @click="saveDav">保存配置</NeuButton>
+        <NeuButton
+          variant="primary"
+          :loading="backupBusy"
+          :disabled="!backupStatus?.webdav.configured"
+          @click="uploadDav"
+        >
+          立即上传
+        </NeuButton>
       </div>
+      <p class="hint">
+        上次运行：{{ formatTime(backupStatus?.webdav.lastRunAt ?? null) }}
+        <template v-if="backupStatus?.webdav.lastResult">
+          · {{ backupStatus.webdav.lastResult }}
+        </template>
+      </p>
+      <div class="field">
+        <span class="field-name">远端文件</span>
+        <div class="row-actions">
+          <span class="row-val ellipsis">
+            {{ davSelected || (backupStatus?.webdav.configured ? '未选择' : '—') }}
+          </span>
+          <NeuButton
+            size="sm"
+            variant="ghost"
+            :loading="davListBusy"
+            :disabled="!backupStatus?.webdav.configured"
+            @click="loadDavFiles"
+          >
+            刷新远端列表
+          </NeuButton>
+        </div>
+      </div>
+      <!-- 落成"可选列表"而不是手输文件名：条目直接来自服务端 PROPFIND（只有 name/时间，
+           没有 size），点一行即选中，选中的行带 .dot 标记（与主题弹层同一套样式） -->
+      <div class="sheet-list" role="radiogroup" aria-label="远端备份文件">
+        <button
+          v-for="f in davFiles"
+          :key="f.name"
+          type="button"
+          class="row row-btn"
+          role="radio"
+          :aria-checked="davSelected === f.name"
+          @click="davSelected = f.name"
+        >
+          <span class="row-name ellipsis">{{ f.name }}</span>
+          <span class="row-val">{{ formatTime(f.lastModified) }}</span>
+          <span v-if="davSelected === f.name" class="dot" />
+        </button>
+        <div v-if="davFiles.length === 0" class="row empty">{{ davEmptyHint }}</div>
+      </div>
+      <div class="actions">
+        <NeuButton
+          variant="ghost"
+          :loading="backupBusy"
+          :disabled="!davSelected"
+          @click="pullDav"
+        >
+          从远端恢复
+        </NeuButton>
+      </div>
+      <p class="hint">远端恢复用下方「恢复」块的口令；留空则用服务端已保存的备份口令。</p>
+
+      <!-- d) 恢复：成功后强制登出 -->
+      <div class="divider" />
+      <h3 class="persona-subhead">恢复</h3>
+      <div class="field">
+        <span class="field-name">文件</span>
+        <div class="row-actions">
+          <span class="row-val ellipsis">{{ restoreFileName || '未选择 .sm 文件' }}</span>
+          <NeuButton size="sm" variant="ghost" @click="pickRestoreFile">选择</NeuButton>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-name">口令</span>
+        <NeuInput
+          v-model="restorePassword"
+          type="password"
+          placeholder="备份口令（留空用已保存的）"
+          autocomplete="off"
+        />
+      </div>
+      <div class="actions">
+        <NeuButton
+          variant="danger"
+          :loading="backupBusy"
+          :disabled="!restoreFileBase64"
+          @click="submitRestore"
+        >
+          恢复并重新登录
+        </NeuButton>
+      </div>
+      <p class="hint">整库覆盖：恢复成功后所有登录态失效，请用备份里的管理员账号重新登录。</p>
+
+      <!-- 收藏导出 / 导入（纯收藏，不含账号、凭据、锚点、主题） -->
+      <div class="divider" />
+      <h3 class="persona-subhead">收藏</h3>
+      <div class="actions">
+        <NeuButton :loading="backupBusy" @click="exportFavorites">导出收藏</NeuButton>
+        <NeuButton variant="ghost" :loading="backupBusy" @click="pickFavoritesFile">
+          导入收藏
+        </NeuButton>
+      </div>
+      <p class="hint">导出体只含收藏曲目；导入为增量合并，重复的跳过。</p>
     </Sheet>
 
     <Sheet :open="sheet === 'auth'" title="音源授权" @close="closeQr">
@@ -1154,6 +1621,10 @@ onBeforeUnmount(() => {
 }
 .sheet-list .row {
   padding: 0;
+}
+/* 可点选的列表行（远端备份文件）：.row 的 padding 被清成 0，按钮行补回竖向热区 */
+.sheet-list .row-btn {
+  padding: 6px 0;
 }
 
 .actions {

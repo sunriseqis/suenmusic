@@ -2,13 +2,11 @@
  * 备份 / 恢复 / 收藏导入导出（管理员）。
  *
  * 全部走 `requireWebAdmin`：服务器配置类操作只允许 Web 面板的同源 cookie 会话
- * （与既有 `/api/admin/backup`、`/api/admin/db/restore` 同口径，见
- * http/require-auth.ts 的产品约定）。
+ * （与其他管理接口同口径，见 http/require-auth.ts 的产品约定）。
  *
- * 与老路由的分工：
- *   · `GET  /api/admin/backup`        —— 保留：裸 .db 下载（兼容旧前端/脚本）
- *   · `POST /api/admin/db/restore`    —— 保留：裸 .db 恢复
- *   · 本文件                           —— 新形态 `.sm`：口令加密归档 + WebDAV + 定时
+ * 本文件只注册 `/api/admin/backup/*` 一族子路径，新形态 `.sm`：
+ *   口令加密归档 + WebDAV + 定时自动备份 + 整库覆盖恢复。
+ * 旧的裸 .db 下载、裸 .db 恢复两个路由已下线，不留兼容入口。
  *
  * 口令处理原则：**任何响应都不回传明文或密文**，只给 `hasPassword` 布尔。
  */
@@ -37,6 +35,7 @@ import {
   saveWebdavSettings,
   setBackupPassword,
   webdavDownload,
+  webdavList,
 } from '../services/backup.ts';
 
 const log = createLogger('backup-api');
@@ -144,6 +143,24 @@ export function registerBackupRoutes(app: FastifyInstance): void {
     const body = asRecord(req.body);
     const result = await createAndUpload(resolvePassword(body));
     return { ok: true, ...result };
+  });
+
+  /**
+   * 列出远端 WebDAV 上的 `*.sm` 备份（PROPFIND Depth:1，服务端出网）。
+   *
+   * 字段直接沿用 `webdavList()` 的返回 —— 那里只请求了 `getlastmodified`，
+   * **没有 getcontentlength**，所以没有 size：不在这里臆造一个恒为 0 的字段。
+   * 错误映射全部由 service 层给出：未配置 → 400 `webdav_not_configured`，
+   * 连不上 → 502 `webdav_unreachable`，PROPFIND 非 2xx → 502 `webdav_list_failed`。
+   * 最新在前（与本地列表同口径），排序只在路由层做，不动 service 的返回顺序。
+   */
+  app.get('/api/admin/backup/webdav/list', async req => {
+    requireWebAdmin(req);
+    const files = await webdavList();
+    files.sort(
+      (a, b) => (b.lastModified ?? 0) - (a.lastModified ?? 0) || a.name.localeCompare(b.name)
+    );
+    return { files };
   });
 
   /** 从 WebDAV 拉取指定文件并**整库恢复** */
