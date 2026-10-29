@@ -323,6 +323,12 @@ final class ServerStore: ObservableObject {
         }
         struct MeReply: Decodable { let user: PublicUser }
         let payload = try JSONEncoder().encode(Body(refreshToken: refresh))
+        // 诊断（2026-10-29）：切服报「服务端返回 HTTP 400」时，服务端日志只说是「缺少 refreshToken」，
+        // 但本函数上一行已守卫空串 —— 必须确认「守卫通过之后实际发出的 body 到底是什么」。
+        // 只打长度与前后各 4 位，不泄露令牌本体。
+        NSLog("[Switch] verifyAccount base=%@ tokenLen=%d bodyLen=%d tokenHead=%@ tokenTail=%@",
+              base, refresh.count, payload.count,
+              String(refresh.prefix(4)), String(refresh.suffix(4)))
         let session: Session = try await send(base + "/api/auth/refresh", method: "POST",
                                               body: payload, token: nil)
         let me: MeReply = try await send(base + "/api/auth/me", method: "GET",
@@ -365,6 +371,13 @@ final class ServerStore: ObservableObject {
         }
         guard let http = resp as? HTTPURLResponse else {
             throw ApiError(status: 0, code: "bad_response", message: "切换失败：服务端返回异常")
+        }
+        // 诊断：把「哪个 URL 返回了什么码 + 响应体前 200 字」打出来，
+        // 400 这类契约级失败靠状态码本身定位不了。
+        if !(200..<300).contains(http.statusCode) {
+            NSLog("[Switch] %@ %@ → HTTP %d body=%@",
+                  method, urlString, http.statusCode,
+                  String(data: data.prefix(200), encoding: .utf8) ?? "(binary)")
         }
         if http.statusCode == 401 || http.statusCode == 403 {
             throw ApiError(status: 401, code: "unauthorized", message: unauthorizedMessage)
