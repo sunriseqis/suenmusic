@@ -24,7 +24,7 @@ import {
   coolingArtists,
   familiarityTier,
   favoriteRateByArtist,
-  referTierArtistNames,
+  referTierArtists,
   pickTopArtistForToday,
   topArtists,
   type FamiliarityTier,
@@ -213,16 +213,26 @@ export interface SeedArtist {
  * 2026-10-29 熟悉度阈值（用户拍板，阈值 5）：每位种子按收藏数分档。
  * `refer`（1-2 首）**只作曲风参考、不进 TOP 池**；`top`/`huge`（≥5 首）进 TOP 池。
  * 规则写在建池层（`buildCandidatePool` 的 `push`），不是提示词。
+ *
+ * ★ P1-A（修复批 3-A）：口径必须是**首歌手** `artists_json[0]`，与 `topArtists` /
+ * `referTierArtistNames` / `favoriteRateByArtist` 完全一致。
+ * 原来这里用 `json_each` 对每位歌手计 hits（合唱双计），于是同一歌手在两个函数里
+ * 得出两个 hits —— 实测「言承旭」「王力宏」在 seedArtists 里 hits=3（liked，进 poolSeeds），
+ * 在 referTierArtistNames 里却只有 2 首（判 refer）→ **同一歌手双重身份**：
+ * seedOld 的深挖专辑曲能进池，而库内兜底与 seedNew 却被拦。
  */
-function seedArtists(userId: number): SeedArtist[] {
+/** 收藏歌手种子（按收藏数降序，首歌手口径）。导出供实测脚本核对分档口径（verify-batch3a）。 */
+export function seedArtists(userId: number): SeedArtist[] {
   const rows = getDatabase()
     .prepare(
-      `SELECT json_extract(je.value, '$.name') AS artist_name,
-              MAX(json_extract(je.value, '$.mid')) AS mid,
+      `SELECT json_extract(t.artists_json, '$[0].name') AS artist_name,
+              json_extract(t.artists_json, '$[0].mid') AS mid,
               COUNT(DISTINCT f.track_id) AS hits
-         FROM favorites f JOIN tracks t ON t.id = f.track_id, json_each(t.artists_json) je
-        WHERE f.user_id = ? AND json_extract(je.value, '$.name') != ''
-          AND json_extract(je.value, '$.mid') NOT IN (
+         FROM favorites f JOIN tracks t ON t.id = f.track_id
+        WHERE f.user_id = ?
+          AND json_extract(t.artists_json, '$[0].name') IS NOT NULL
+          AND json_extract(t.artists_json, '$[0].name') != ''
+          AND COALESCE(json_extract(t.artists_json, '$[0].mid'), '') NOT IN (
             SELECT target_id FROM user_dislikes WHERE user_id = ? AND type = 'artist'
           )
         GROUP BY artist_name ORDER BY hits DESC LIMIT 20`
@@ -287,7 +297,17 @@ function styleProfileOf(userId: number): Array<{ keyword: string; weight: number
  * 曲风匹配分：候选曲目的受控标签与用户曲风画像的加权重叠（越高 = 越符合用户口味）。
  * 用于 simi 来源**加权**（不是过滤）：标签相近的排前面优先占名额，不取消资格。
  */
-function styleScore(
+/**
+ * 无标签歌的基础分系数（P1-K）：画像**平均权重 × 0.3**。
+ *
+ * 为什么需要它：`track_tags` 里没打标的曲目（新歌、冷门歌、刚入库还没打标的）
+ * 原来一律 `score = 0`，在 simi 排序里被彻底埋到最末尾 —— 而「没打标」只代表
+ * **没有证据**，不代表「不合口味」。给一个中段的基础分，让它们有机会被排到中间，
+ * 与画像平均权重对齐（实测画像权重 226/173/53/…/1，平均 ≈ 43，基础分 ≈ 13）。
+ */
+const UNTAGGED_BASE_FACTOR = 0.3;
+
+export function styleScore(
   trackTags: { styles: string[]; language: string },
   profile: Array<{ keyword: string; weight: number }>
 ): number {
@@ -298,7 +318,39 @@ function styleScore(
     score += weightBy.get(s) ?? 0;
   }
   if (trackTags.language) score += (weightBy.get(trackTags.language) ?? 0) * 0.5;
-  return score;
+  if (score > 0) return score;
+  // ★ P1-K：无标签 / 标签与画像零重叠 = 没有曲风证据 → 给基础分，不钉死在 0 分末尾
+  const avg = profile.reduce((sum, p) => sum + p.weight, 0) / profile.length;
+  return avg * UNTAGGED_BASE_FACTOR;
+}
+
+/**
+ * 曲风分桶名（P1-H）：取该曲**在用户画像里权重最高**的那个命中标签当桶名。
+ *
+ * 为什么必须分桶：`user_style_profile` 权重严重偏斜（实测 华语流行 226 / 情歌 173 /
+ * 摇滚 53 / 尾部 4），纯按 styleScore 加权排序时，simi 的 60 个名额几乎必然被
+ * 「华语流行 + 情歌」高分曲占满（实测 simi 22/22 全带这两个标签），多样性崩塌。
+ * 分桶后每个风格最多占 K 个名额（K 见 `pool.simi_per_style`），尾部风格也留得住位置。
+ *
+ * 无任何命中标签（含无标签）→ 归入 `__untagged` 桶，它也有自己的名额，不会被挤掉。
+ */
+export function styleBucket(
+  trackTags: { styles: string[]; language: string },
+  profile: Array<{ keyword: string; weight: number }>
+): string {
+  const weightBy = new Map(profile.map(p => [p.keyword, p.weight]));
+  let best = '';
+  let bestWeight = -1;
+  for (const s of trackTags.styles) {
+    const w = weightBy.get(s);
+    if (w !== undefined && w > bestWeight) {
+      best = s;
+      bestWeight = w;
+    }
+  }
+  if (best) return best;
+  if (trackTags.language && weightBy.has(trackTags.language)) return trackTags.language;
+  return '__untagged';
 }
 
 /** 冻结窗口：推荐历史只冻结这么久（用户拍板 7 天） */
@@ -570,15 +622,39 @@ function enqueueLatestAlbumRefresh(userId: number, artistMid: string, name: stri
   }
 }
 
-/** 专辑列表（复用 deepCutsOf 的 7 天缓存 + 上游纪律） */
+/**
+ * ★ 新发现 A：歌手专辑列表的取数口径 —— **扩大上限 + 本地按发行时间降序**。
+ *
+ * 原来三处（`albumsOf` / `latestAlbumsOf` / `deepCutsOf`）都写死 `limit = 10, page = 1`，
+ * 而上游搜索 album 分片返回的是**热度序**，不是时间序 —— 实测五月天最新录音室专辑
+ * 根本不在前 10 张里（前 10 张全是 Live/精选），于是「最新专辑」永远选到《自传》2016，
+ * **新歌识别因此漏检**。
+ *
+ * 改法：上限提到 `pool.album_fetch_limit`（默认 50，运行时可调），拿到之后**本地按
+ * `publishTime` 归一时间戳降序排序**（复用 P0-E 的 `publishTimeMs` / `comparePublishTimeDesc`）。
+ * 这样不依赖上游返回顺序：即便上游只给热度序，扩大上限后最新专辑也能进候选集。
+ */
+const ALBUM_FETCH_LIMIT_DEFAULT = 50;
+async function fetchAlbumsByPublishTime(seed: { name: string; mid: string }): Promise<Album[]> {
+  const res = await getArtistAlbums(
+    seed.mid,
+    seed.name,
+    numSetting('pool.album_fetch_limit', ALBUM_FETCH_LIMIT_DEFAULT),
+    1
+  );
+  // NaN（无日期）排最后，两个都 NaN 时保持上游原序
+  return [...res.albums].sort(comparePublishTimeDesc);
+}
+
+/** 专辑列表（复用 deepCutsOf 的 7 天缓存 + 上游纪律；按发行时间降序，见上） */
 async function albumsOf(seed: { name: string; mid: string }): Promise<Album[]> {
   const cached = artistAlbumsCache.get(seed.mid);
   if (cached && Date.now() - cached.ts < ALBUM_CACHE_TTL_MS) return cached.albums;
   if (!(await qqGate())) return cached?.albums ?? [];
-  const res = await getArtistAlbums(seed.mid, seed.name, 10, 1);
-  if (res.albums.length > 0) {
-    artistAlbumsCache.set(seed.mid, { albums: res.albums, ts: Date.now() });
-    return res.albums;
+  const albums = await fetchAlbumsByPublishTime(seed);
+  if (albums.length > 0) {
+    artistAlbumsCache.set(seed.mid, { albums, ts: Date.now() });
+    return albums;
   }
   return [];
 }
@@ -591,27 +667,19 @@ async function latestAlbumsOf(seed: { name: string; mid: string }): Promise<Albu
   const cached = latestAlbumListCache.get(seed.mid);
   if (cached && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS) return cached.albums;
   if (!(await qqGate())) return cached?.albums ?? [];
-  const res = await getArtistAlbums(seed.mid, seed.name, 10, 1);
-  if (res.albums.length > 0) {
-    latestAlbumListCache.set(seed.mid, { albums: res.albums, ts: Date.now() });
-    return res.albums;
+  // ★ 新发现 A：扩大上限 + 按发行时间降序（否则最新录音室专辑可能不在前 10 张热度序里）
+  const albums = await fetchAlbumsByPublishTime(seed);
+  if (albums.length > 0) {
+    latestAlbumListCache.set(seed.mid, { albums, ts: Date.now() });
+    return albums;
   }
   return [];
 }
 
 async function deepCutsOf(seed: { name: string; mid: string }, cap: number): Promise<Track[]> {
   try {
-    let albums: Album[] = [];
-    const cached = artistAlbumsCache.get(seed.mid);
-    if (cached && Date.now() - cached.ts < ALBUM_CACHE_TTL_MS) {
-      albums = cached.albums;
-    } else if (await qqGate()) {
-      const res = await getArtistAlbums(seed.mid, seed.name, 10, 1);
-      if (res.albums.length > 0) {
-        artistAlbumsCache.set(seed.mid, { albums: res.albums, ts: Date.now() });
-        albums = res.albums;
-      }
-    }
+    // ★ 新发现 A：与 albumsOf 同口径（扩大上限 + 发行时间降序），不再各写一份取数逻辑
+    const albums: Album[] = await albumsOf(seed);
     const clean = albums.filter(
       a =>
         !/(live|演唱会|现场|原声|ost|伴奏|精选|remix|混音)/i.test(a.name) &&
@@ -812,17 +880,31 @@ export async function buildCandidatePool(
    * 规则写在建池层（`push`），不是提示词 —— 模型看不见就不会违反。
    * `refer` 名单按**歌手名**（首歌手口径）判定，push 里把这些歌手的本尊歌直接拦掉。
    */
-  // 全量 refer 档（1-2 首收藏）歌手名：不只 top-20 种子，覆盖所有 1-2 首歌手（熟悉度阈值要求）
-  const referArtistNames = referTierArtistNames(userId);
+  // 全量 refer 档（1-2 首收藏）歌手：不只 top-20 种子，覆盖所有 1-2 首歌手（熟悉度阈值要求）
+  // ★ P1-A：**同时拿 mid** —— push 的拦截必须能按 mid 匹配（名字写法会飘）
+  const referArtistRows = referTierArtists(userId);
+  const referArtistNames = new Set(referArtistRows.map(a => a.name));
+  const referArtistMids = new Set(
+    referArtistRows.map(a => a.mid).filter((m): m is string => Boolean(m))
+  );
   /** 可进 TOP 池的种子（tier != refer，即收藏 >=3 首）：seedOld/seedNew 只从这些人里取 */
   const poolSeeds = seeds.filter(s => s.tier !== 'refer');
-  const topArtistNames = topArtists(userId).map(a => a.name);
+  const topArtistRows = topArtists(userId);
+  const topArtistNames = topArtistRows.map(a => a.name);
   const topArtistSet = new Set(topArtistNames);
+  /** ★ P1-A：TOP 歌手的 mid 集合（与名字集合并用，任一命中即视为同一位歌手） */
+  const topArtistMids = new Set(
+    topArtistRows.map(a => a.mid).filter((m): m is string => Boolean(m))
+  );
   const cooling = coolingArtists(userId);
   const allowedTopToday = pickTopArtistForToday(
     userId,
     topArtistNames.filter(name => !cooling.has(name))
   );
+  /** 今天被放行的那位 TOP 歌手的 mid（用于 mid 口径的豁免判定） */
+  const allowedTopMid = allowedTopToday
+    ? (topArtistRows.find(a => a.name === allowedTopToday)?.mid ?? '')
+    : '';
 
   const push = (track: Track, source: CandidateSource): boolean => {
     if (isJunk(track)) {
@@ -866,12 +948,16 @@ export async function buildCandidatePool(
      * 已实测 157/157 精确一致），不要用 norm 后的值，否则两边口径会飘。
      * 本尊新歌豁免。
      */
-    const rawFirstArtist = (track.ar ?? [])[0]?.name ?? '';
-    if (
-      source !== 'seedNew' &&
-      topArtistSet.has(rawFirstArtist) &&
-      rawFirstArtist !== allowedTopToday
-    ) {
+    const firstArtist = (track.ar ?? [])[0];
+    const rawFirstArtist = firstArtist?.name ?? '';
+    /** ★ P1-A：首位歌手的 mid（名字 + mid 双口径，任一命中即算同一位歌手） */
+    const rawFirstMid = String(firstArtist?.mid ?? '');
+    const firstIsTopArtist =
+      topArtistSet.has(rawFirstArtist) || (rawFirstMid !== '' && topArtistMids.has(rawFirstMid));
+    /** 今天被放行的那位 TOP 歌手：名字或 mid 命中都算 */
+    const isAllowedTopToday =
+      rawFirstArtist === allowedTopToday || (allowedTopMid !== '' && rawFirstMid === allowedTopMid);
+    if (source !== 'seedNew' && firstIsTopArtist && !isAllowedTopToday) {
       droppedRef.n += 1;
       return false;
     }
@@ -881,7 +967,9 @@ export async function buildCandidatePool(
      * simi/playlist/chart 是发散来源，不受此限（它们按曲风/相似度进入）。
      * 规则写在建池层，模型看不见就不会违反。
      */
-    if ((source === 'seedOld' || source === 'seedNew') && referArtistNames.has(rawFirstArtist)) {
+    const firstIsReferArtist =
+      referArtistNames.has(rawFirstArtist) || (rawFirstMid !== '' && referArtistMids.has(rawFirstMid));
+    if ((source === 'seedOld' || source === 'seedNew') && firstIsReferArtist) {
       droppedRef.n += 1;
       return false;
     }
@@ -893,8 +981,15 @@ export async function buildCandidatePool(
   };
 
   // ---- 1) 本尊新歌：无条件全进（只受去重限制）----
-  // 本尊新歌必进：只认可进 TOP 池的种子（refer 档 1-2 首不进 TOP 池，其新歌也不作必进项）
-  const seedMids = new Set(poolSeeds.map(s => s.mid));
+  /**
+   * ★ P1-J：本尊新歌的**范围口径必须只有一条：tier `top`/`huge`（收藏 ≥5）**。
+   *
+   * 原来两条通道口径不同：全站新歌榜（getHomeData）用 `poolSeeds`（tier != refer，即 ≥3 首），
+   * 而专辑级新作检测用 `tier top/huge`（≥5 首）—— 于是 3-4 首的「算喜欢」歌手
+   * 经 getHomeData 也进了 seedNew。统一到 ≥5（目标模型 A.4：新歌必推只给深度喜欢）。
+   */
+  const newSongSeeds = seeds.filter(s => s.tier === 'top' || s.tier === 'huge');
+  const seedMids = new Set(newSongSeeds.map(s => s.mid));
   // (a) 全站新歌榜（getHomeData）：失败/冷却时**入队补拉**而非跳过（用户 2026-10-29）
   let home: Awaited<ReturnType<typeof getHomeData>> | null = null;
   if (await qqGate()) {
@@ -911,8 +1006,8 @@ export async function buildCandidatePool(
   // (b) 专辑级新作检测（用户 2026-10-29：新歌识别不及时）：
   //     为收藏 ≥5 的种子（top/huge 档）检测**最新一张专辑**，其歌作本尊新歌候选。
   //     最新专辑缓存 TTL = 24h，新专辑 24h 内必被识别。
-  const newAlbumSeeds = poolSeeds.filter(s => s.tier === 'top' || s.tier === 'huge');
-  for (const s of newAlbumSeeds.slice(0, 10)) {
+  //     与 (a) 共用 `newSongSeeds`（P1-J：两条通道口径统一为 ≥5 首）。
+  for (const s of newSongSeeds.slice(0, 10)) {
     for (const t of await latestAlbumSongsOf(userId, s, 8)) {
       push(t, 'seedNew');
     }
@@ -936,8 +1031,24 @@ export async function buildCandidatePool(
     const simiTracks = libraryTracksOf(mids);
     const simiTags = tagsOf(simiTracks.map(t => t.id));
     const ranks = hotRankOf(simiTracks.map(t => t.id));
-    const scoreOf = (t: Track): number =>
-      styleScore(simiTags.get(t.id) ?? { styles: [], language: '' }, styleProfile);
+    /**
+     * simi 取歌时的标签：**与第 6 步给模型看的标签同口径**。
+     *
+     * 原来这里只读 `track_tags`，而第 6 步在没打标时会用 `heuristicTag` 兜底 ——
+     * 于是「分桶/加权用的标签」与「模型看到的标签」不是同一份：
+     * 实测 3 首在取歌阶段算「无标签桶」的歌，最后带上了启发式的情歌标签，
+     * 分桶统计与真实分布对不上。这里同步兜底，两边口径一致。
+     */
+    const tagsOfTrack = (t: Track): { styles: string[]; language: string } => {
+      const hit = simiTags.get(t.id);
+      if (hit && (hit.styles.length > 0 || hit.language)) return hit;
+      return heuristicTag({
+        name: t.name,
+        artist: (t.ar ?? [])[0]?.name ?? '',
+        album: t.al?.name ?? t.album?.name ?? '',
+      });
+    };
+    const scoreOf = (t: Track): number => styleScore(tagsOfTrack(t), styleProfile);
     const ordered = simiTracks.sort((a, b) => {
       const sa = scoreOf(a);
       const sb = scoreOf(b);
@@ -945,10 +1056,42 @@ export async function buildCandidatePool(
       // 匹配度相同：深挖优先，同一歌手内先给冷门（hot_rank 大）的，金曲占比自然被压低
       return (ranks.get(b.id) ?? 0) - (ranks.get(a.id) ?? 0);
     });
-    for (const t of ordered) {
+    /**
+     * ★ P1-H：**按 topStyle 分桶**占名额（每风格 ≤ K 首，K = `pool.simi_per_style`，默认 4）。
+     *
+     * 原来只按 styleScore 加权排序取前 simiCap 首 → 画像权重偏斜（华语流行 226 /
+     * 情歌 173）时，名额几乎全被这两个风格吃掉（实测 simi 22/22 全带标签且集中在头部风格），
+     * 尾部风格（独立/古风/古典…）与无标签新歌一首进不来 → 多样性崩塌。
+     * 分桶是**加权不是过滤**：桶满只是让位给别的风格，二轮补位会把名额吃满。
+     */
+    const perStyleCap = numSetting('pool.simi_per_style', 4);
+    const bucketGot = new Map<string, number>();
+    const taken = new Set<string>();
+    /**
+     * 两轮取歌：
+     *   一轮 —— 每风格 ≤ K（默认 4），保证尾部风格与无标签歌有位置；
+     *   二轮 —— 名额没吃满时放宽到 ≤ 2K 补位（**不无限放宽**：无限放宽等于取消分桶，
+     *            实测就是这样把 15 首情歌又全放回来、分桶白做）。
+     * 仍未吃满就让它欠着：多样性优先于数量，池子缺口由流水补位（网友歌单/榜单）补。
+     */
+    for (const cap of [perStyleCap, perStyleCap * 2]) {
+      for (const t of ordered) {
+        if (added >= simiCap) break;
+        if (taken.has(t.id)) continue;
+        const bucket = styleBucket(tagsOfTrack(t), styleProfile);
+        if ((bucketGot.get(bucket) ?? 0) >= cap) continue;
+        if (push(t, 'simi')) {
+          added += 1;
+          taken.add(t.id);
+          bucketGot.set(bucket, (bucketGot.get(bucket) ?? 0) + 1);
+        }
+      }
       if (added >= simiCap) break;
-      if (push(t, 'simi')) added += 1;
     }
+    log.info(
+      `相似歌手分桶取歌：每风格上限 ${perStyleCap}（补位 ${perStyleCap * 2}）→ 取 ${added}/${simiCap} 首，` +
+        `风格分布 ${JSON.stringify(Object.fromEntries(bucketGot))}`
+    );
   }
 
   // ---- 3) 网友歌单（未消耗的池子，以歌带单优先反查匹配）----

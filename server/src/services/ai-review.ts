@@ -428,9 +428,7 @@ import { clampDisplay } from '../utils/reason-text.ts';
 export async function reviewReasons(
   items: ReasonReviewItem[]
 ): Promise<Map<string, ReasonVerdict>> {
-  const out = new Map<string, ReasonVerdict>();
-  if (items.length === 0) return out;
-  const valid = new Set(items.map(i => i.id));
+  if (items.length === 0) return new Map<string, ReasonVerdict>();
 
   const system = `你是歌单推荐语审核员。选歌 AI 给每首歌写了一句**长听感理由**（reason_for_review，给审核看）。
 你的双重任务（每首歌判一次）：
@@ -473,40 +471,133 @@ ${listText}
   }
 
   const raw = callFailed ? { reviews: [] } : parseReasonReview(rawText);
-  for (const r of raw.reviews) {
+  const { map, stats } = finalizeReasonVerdicts(items, raw.reviews);
+
+  const approvedCount = [...map.values()].filter(v => v.verdict === 'approved').length;
+  const withDisplay = [...map.values()].filter(v => v.verdict === 'approved' && v.reasonForDisplay).length;
+  log.info(
+    `理由精炼完成：approved ${approvedCount}/${items.length} 首 · 有展示短句 ${withDisplay} 首` +
+      `（长理由截断兜底 ${stats.fallbackCount} 首` +
+      (stats.unknownVerdictCount > 0 ? ` · verdict 未识别 ${stats.unknownVerdictCount} 首` : '') +
+      (stats.downgradedCount > 0 ? ` · approved 空短句降级 ${stats.downgradedCount} 首` : '') +
+      '）'
+  );
+  return map;
+}
+
+/** 审核模型能回传的合法 verdict。其余一律视为模型跑偏（P1-E） */
+const KNOWN_VERDICTS: ReadonlySet<string> = new Set(['approved', 'rejected']);
+
+/**
+ * 长理由兜底时跳过的占位短语：seedNew（本尊新歌必进）没有真听感，
+ * 拿它截出来的"推荐语"是骗人的。
+ */
+const PLACEHOLDER_REASON = /本尊新歌（必进项）/;
+
+export interface ReasonFinalizeStats {
+  /** 用长理由截断兜底的数量（P0-A） */
+  fallbackCount: number;
+  /** 模型回了非法 verdict 的条数（P1-E） */
+  unknownVerdictCount: number;
+  /** approved 但最终无展示短句、被降级为 rejected 的条数（P1-D） */
+  downgradedCount: number;
+}
+
+/**
+ * 把审核模型的原始回传落成最终结论（reviewReasons 的纯逻辑部分，导出便于定点复验）。
+ *
+ * 三步，顺序不能换：
+ * 1. **落原始结论**：approved 收下短句，其余（含未识别 verdict）归 rejected。
+ * 2. **长理由兜底（P0-A）**：没拿到合格短句的，从 reason_for_review 截 25 字顶上 ——
+ *    空推荐语比截短的推荐语更伤体验（实测 40 首里 12~30 首无推荐语）。
+ *    两种长理由兜不动：① 不足 12 字；② 占位短语「本尊新歌（必进项）」。
+ * 3. **矛盾态降级（P1-D）**：兜底后仍出现 approved 却无短句，说明短句与长理由都不合格，
+ *    这不是"approved"该有的样子 —— 降级为 rejected 并 log.warn，别让前端拿到空推荐语。
+ */
+export function finalizeReasonVerdicts(
+  items: ReasonReviewItem[],
+  reviews: RawReasonReview['reviews']
+): { map: Map<string, ReasonVerdict>; stats: ReasonFinalizeStats } {
+  const map = new Map<string, ReasonVerdict>();
+  const valid = new Set(items.map(i => i.id));
+
+  // ① 落模型原始结论
+  const unknown: string[] = [];
+  /**
+   * **审核明确否决**的 id（verdict 是已知值且非 approved）。
+   *
+   * 2026-10-29 用户裁定（方案 A）：审核说「完全在水」的歌**不给前端看**。
+   * ② 的长理由兜底只救「审核没工作」（整体失败 / 漏回 / verdict 未识别），
+   * **绝不能把审核明确否决的翻回 approved** —— 否则「审核当筛子」这条设计就失效了。
+   */
+  const explicitRejected = new Set<string>();
+  for (const r of reviews) {
     if (!valid.has(r.id)) continue;
+    const known = KNOWN_VERDICTS.has(r.verdict);
+    if (!known) unknown.push(`${r.id}=${r.verdict || '(空)'}`);
     const approved = r.verdict === 'approved';
     const display = clampDisplay(r.reason_for_display);
-    out.set(r.id, {
+    if (known && !approved) explicitRejected.add(r.id);
+    map.set(r.id, {
       verdict: approved ? 'approved' : 'rejected',
       reasonForDisplay: approved ? display : '',
     });
   }
 
   /**
-   * 兜底（P0-A）：没拿到**合格**短句的（调用失败 / 解析失败 / 漏回 / verdict 未给 /
-   * rejected / approved 但短句不合格）→ 从**长理由**（reason_for_review）截 25 字顶上，
-   * 不留空 —— 空推荐语比截短的推荐语更伤体验（实测 40 首里 12~30 首无推荐语）。
-   * 两种长理由兜不动：① 不足 12 字；② 占位短语「本尊新歌（必进项）」（seedNew 没有真听感）。
+   * P1-E：未识别 verdict（`maybe` / 拼错 `apporved` / 空串）原先静默归 rejected ——
+   * 会把一句本可展示的推荐语无声杀掉，且从日志里完全看不出模型跑偏。现在带原值告警。
    */
-  const PLACEHOLDER = /本尊新歌（必进项）/;
+  if (unknown.length > 0) {
+    const shown = unknown.slice(0, 5).join('、');
+    log.warn(
+      `理由审核：${unknown.length} 首 verdict 未识别（既非 approved 也非 rejected），按 rejected 处理` +
+        ` —— 疑似模型跑偏，原值：${shown}` +
+        (unknown.length > 5 ? ` …（共 ${unknown.length} 条）` : '')
+    );
+  }
+
+  // ② 长理由兜底（P0-A）—— 只救「审核没工作」，不覆盖「审核明确否决」
   let fallbackCount = 0;
   for (const item of items) {
-    const v = out.get(item.id);
+    // 审核明确说 rejected → 尊重结论，不兜底（2026-10-29 用户裁定方案 A）
+    if (explicitRejected.has(item.id)) continue;
+    const v = map.get(item.id);
     const ok = v && v.verdict === 'approved' && !!v.reasonForDisplay;
     if (ok) continue;
     const long = String(item.reasonForReview ?? '');
-    if (PLACEHOLDER.test(long)) continue;
+    if (PLACEHOLDER_REASON.test(long)) continue;
     const display = clampDisplay(long);
     if (!display) continue;
-    out.set(item.id, { verdict: 'approved', reasonForDisplay: display });
+    map.set(item.id, { verdict: 'approved', reasonForDisplay: display });
     fallbackCount += 1;
   }
 
-  const approvedCount = [...out.values()].filter(v => v.verdict === 'approved').length;
-  const withDisplay = [...out.values()].filter(v => v.verdict === 'approved' && v.reasonForDisplay).length;
-  log.info(
-    `理由精炼完成：approved ${approvedCount}/${items.length} 首 · 有展示短句 ${withDisplay} 首（长理由截断兜底 ${fallbackCount} 首）`
-  );
-  return out;
+  // ③ 矛盾态降级（P1-D）：approved 必须有展示短句，否则降级 rejected
+  const contradictions: string[] = [];
+  let downgradedCount = 0;
+  for (const item of items) {
+    const v = map.get(item.id);
+    if (!v) {
+      // 模型漏回 + 长理由也兜不动（<12 字 / 占位短语）→ 明确记 rejected。
+      // 保证「每首都有结论」，调用侧不用再区分「没结论」和「没推荐语」。
+      map.set(item.id, { verdict: 'rejected', reasonForDisplay: '' });
+      continue;
+    }
+    if (v.verdict === 'approved' && !v.reasonForDisplay) {
+      map.set(item.id, { verdict: 'rejected', reasonForDisplay: '' });
+      contradictions.push(item.id);
+      downgradedCount += 1;
+    }
+  }
+  if (downgradedCount > 0) {
+    const shown = contradictions.slice(0, 5).join('、');
+    log.warn(
+      `理由审核：${downgradedCount} 首 approved 却无展示短句（短句不合格且长理由也兜不动），已降级为 rejected` +
+        ` —— 疑似模型跑偏，id：${shown}` +
+        (contradictions.length > 5 ? ` …（共 ${contradictions.length} 条）` : '')
+    );
+  }
+
+  return { map, stats: { fallbackCount, unknownVerdictCount: unknown.length, downgradedCount } };
 }

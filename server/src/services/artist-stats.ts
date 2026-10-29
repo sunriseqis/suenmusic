@@ -11,6 +11,14 @@ import { getDatabase } from '../db/index.ts';
 export interface ArtistFavoriteCount {
   name: string;
   count: number;
+  /**
+   * 该歌手的 **mid**（`artists_json[0].mid`，与 count 同口径）。
+   *
+   * 为什么要把 mid 一并带出来：候选池 `push` 的 TOP / refer 拦截如果只比名字，
+   * 上游同一歌手的写法不一致（「五月天」/「五月天 阿信」）就拦不住（P1-A）。
+   * 名字做兜底（歌单/榜单来源可能缺 mid），mid 做精确匹配。
+   */
+  mid?: string;
 }
 
 /**
@@ -82,6 +90,7 @@ export function topArtists(userId: number): ArtistFavoriteCount[] {
   const rows = getDatabase()
     .prepare(
       `SELECT json_extract(t.artists_json, '$[0].name') AS artist_name,
+              MAX(json_extract(t.artists_json, '$[0].mid')) AS mid,
               COUNT(DISTINCT f.track_id) AS n
          FROM favorites f JOIN tracks t ON t.id = f.track_id
         WHERE f.user_id = ?
@@ -93,9 +102,14 @@ export function topArtists(userId: number): ArtistFavoriteCount[] {
     )
     .all(userId, TOP_ARTIST_MIN_FAVORITES) as unknown as Array<{
     artist_name: string;
+    mid: string | null;
     n: number;
   }>;
-  return rows.map(r => ({ name: r.artist_name, count: Number(r.n) }));
+  return rows.map(r => ({
+    name: r.artist_name,
+    count: Number(r.n),
+    mid: r.mid ? String(r.mid) : undefined,
+  }));
 }
 
 /**
@@ -192,12 +206,14 @@ export function favoriteRateByArtist(userId: number, artistNames: string[]): Map
  * 熟悉度阈值要求「1-2 首歌手的歌根本不进 TOP 池」，必须覆盖所有 refer 档歌手，
  * 不能只看 top-20（top-20 基本都是 >=3 首，refer 档都在后面）。
  *
- * @returns 歌手名集合（第一歌手口径，与 topArtists/seedArtists 一致）
+ * @returns 歌手名集合（**第一歌手口径**，与 topArtists/seedArtists 一致 —— 2026-10-29 修复批 3-A 起
+ * `seedArtists` 也改用 `artists_json[0]`，不再对合唱双计，两边分档不会再打架）
  */
-export function referTierArtistNames(userId: number): Set<string> {
+export function referTierArtists(userId: number): ArtistFavoriteCount[] {
   const rows = getDatabase()
     .prepare(
       `SELECT json_extract(t.artists_json, '$[0].name') AS an,
+              MAX(json_extract(t.artists_json, '$[0].mid')) AS mid,
               COUNT(DISTINCT f.track_id) AS n
          FROM favorites f JOIN tracks t ON t.id = f.track_id
         WHERE f.user_id = ?
@@ -206,6 +222,20 @@ export function referTierArtistNames(userId: number): Set<string> {
         GROUP BY an
        HAVING n BETWEEN 1 AND 2`
     )
-    .all(userId) as unknown as Array<{ an: string }>;
-  return new Set(rows.map(r => r.an));
+    .all(userId) as unknown as Array<{ an: string; mid: string | null; n: number }>;
+  return rows.map(r => ({
+    name: r.an,
+    count: Number(r.n),
+    mid: r.mid ? String(r.mid) : undefined,
+  }));
+}
+
+/**
+ * refer 档歌手名集合（名字口径）。
+ *
+ * ⚠️ 只是 `referTierArtists` 的便利封装 —— 候选池的拦截请优先用带 mid 的版本：
+ * 上游同一歌手的名字写法会飘（「五月天」/「五月天 阿信」），只比名字会漏拦（P1-A）。
+ */
+export function referTierArtistNames(userId: number): Set<string> {
+  return new Set(referTierArtists(userId).map(a => a.name));
 }

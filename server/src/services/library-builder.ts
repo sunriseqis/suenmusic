@@ -27,6 +27,7 @@ import {
   type BuildJob,
 } from '../db/repo/library.ts';
 import { getDislikeSets } from '../db/repo/library.ts';
+import { deleteSetting, getSetting, setSetting } from '../db/repo/settings.ts';
 import { getArtistSongs } from '../sources/qq/artist.ts';
 import { fetchArtistSongsMulti } from './artist-songs-multi.ts';
 import { fetchSearchSlice, qqCooldown } from '../sources/qq/search.ts';
@@ -65,6 +66,128 @@ const norm = (s: string): string => String(s ?? '').toLowerCase().replace(/\s+/g
  * `hot_fetched_at` 早于它 → 强制走多源重拉，把 kg_/ne_ 补进来。
  */
 const MULTI_SOURCE_LAUNCH_TS = Date.parse('2026-10-27T00:00:00+08:00');
+
+// ---------------------------------------------------------------------------
+// 重试上限（P1-C）：暂时性失败不许无限重入队
+// ---------------------------------------------------------------------------
+
+/**
+ * 同一个建库任务允许的**重试次数**上限（= 最多 4 次尝试）。
+ *
+ * 为什么必须有：`hasBuildJob` 只查「在队否」，而 runLoop 是「先 pop 再处理」——
+ * 弹出后队列里就没有这条了，catch 到暂时性失败时 `hasBuildJob` 恒为 false，
+ * 于是每次都重入队 → 下一轮 kick 又弹出同一条 → 又失败 → 再重入队。
+ * QQ 长期 2001 时这就是一台**空转机**：队列永远只有一条、永远失败、永远重入队。
+ */
+export const MAX_BUILD_RETRY = 3;
+
+/**
+ * 重试计数存在 `app_settings`（现有键值表）里，而不是给 `library_build_queue`
+ * 加 `retry_count` 列 —— 加列要跑迁移，复用键值表零迁移、且重启后不丢。
+ */
+const BUILD_RETRY_KEY_PREFIX = 'library_build_retry:';
+
+/**
+ * 失败记录的保鲜期：超过这个时长的计数视为过期、重新给机会。
+ *
+ * QQ 2001 是**时段性**故障（某个时段被限流/风控），不是永久坏歌。
+ * 不留过期，一次长时间故障会把这批任务永久钉死；留了过期，下个闲时窗口
+ * 会重新试 —— 但仍受 `MAX_BUILD_RETRY` 约束，不会再空转。
+ */
+const BUILD_RETRY_TTL_MS = 6 * 60 * 60 * 1000;
+
+interface BuildRetryState {
+  /** 已连续失败次数 */
+  count: number;
+  /** 最后一次失败时间（毫秒），用于保鲜期判定 */
+  at: number;
+}
+
+const buildRetryKey = (kind: string, payload: string): string =>
+  `${BUILD_RETRY_KEY_PREFIX}${kind}:${payload}`;
+
+function readBuildRetry(kind: string, payload: string): BuildRetryState | null {
+  const key = buildRetryKey(kind, payload);
+  let raw: string | null = null;
+  try {
+    raw = getSetting(key);
+  } catch {
+    return null; // DB 恢复窗口等：读不到就当作没失败过，绝不因为护栏本身阻断建库
+  }
+  if (!raw) return null;
+  try {
+    const obj = JSON.parse(raw) as Record<string, unknown>;
+    const count = Number(obj?.count ?? 0);
+    const at = Number(obj?.at ?? 0);
+    if (!Number.isFinite(count) || count <= 0) return null;
+    if (!at || Date.now() - at > BUILD_RETRY_TTL_MS) {
+      clearBuildRetry(kind, payload); // 过期：清掉，重新给机会
+      return null;
+    }
+    return { count, at };
+  } catch {
+    return null;
+  }
+}
+
+function writeBuildRetry(kind: string, payload: string, state: BuildRetryState): void {
+  try {
+    setSetting(buildRetryKey(kind, payload), JSON.stringify(state));
+  } catch {
+    /* 记不上就算了：上限是防空转的护栏，不该因为护栏写不进去而中断建库 */
+  }
+}
+
+/** 任务成功（或判永久失败）时清掉失败计数 */
+export function clearBuildRetry(kind: string, payload: string): void {
+  try {
+    deleteSetting(buildRetryKey(kind, payload));
+  } catch {
+    /* 同上 */
+  }
+}
+
+export type BuildFailureAction = 'requeued' | 'dropped';
+
+/**
+ * 建库任务失败后的处置（P1-C）：判定暂时性/永久性，并给暂时性失败加**重试上限**。
+ *
+ * 超过 `MAX_BUILD_RETRY` 次重试就**不再重入队** —— pop 已经把它移出队列，
+ * 所以「不再入队」= 标记失败并移出队列，队列得以排空，空转停止。
+ *
+ * @returns 'requeued' 已重新入队（调用侧本轮应收工）；'dropped' 不再入队
+ */
+export function handleBuildJobFailure(job: BuildJob, err: unknown): BuildFailureAction {
+  const msg = (err as Error)?.message ?? String(err);
+  const transient =
+    qqCooldown.active() || /2001|限流|风控|timeout|aborted|ECONN|fetch failed|network/i.test(msg);
+
+  if (!transient) {
+    clearBuildRetry(job.kind, job.payload);
+    log.warn(`建库任务失败 kind=${job.kind} payload=${job.payload}: ${msg} → 判定永久失败，丢弃`);
+    return 'dropped';
+  }
+
+  const count = (readBuildRetry(job.kind, job.payload)?.count ?? 0) + 1;
+  writeBuildRetry(job.kind, job.payload, { count, at: Date.now() });
+
+  if (count > MAX_BUILD_RETRY) {
+    log.warn(
+      `建库任务失败 kind=${job.kind} payload=${job.payload}: ${msg} → ` +
+        `已连续失败 ${count} 次（重试上限 ${MAX_BUILD_RETRY} 次），标记失败并移出队列，不再重入队`
+    );
+    return 'dropped';
+  }
+
+  if (!hasBuildJob(job.kind, job.payload)) {
+    enqueueBuildJob(job.userId, job.kind, job.payload, job.origin);
+  }
+  log.warn(
+    `建库任务失败 kind=${job.kind} payload=${job.payload}: ${msg} → ` +
+      `判定暂时性失败，任务重新入队（第 ${count}/${MAX_BUILD_RETRY} 次重试，本轮收工）`
+  );
+  return 'requeued';
+}
 
 let building = false;
 
@@ -141,6 +264,7 @@ async function runLoop(triggerUserId: number): Promise<void> {
 
     try {
       const { resolvedLocally } = await processJob(job);
+      clearBuildRetry(job.kind, job.payload); // 成功：失败计数归零
       if (resolvedLocally) {
         localProcessed += 1;
         consecutiveExternalSkips = 0;
@@ -151,19 +275,9 @@ async function runLoop(triggerUserId: number): Promise<void> {
         await sleep(EXTERNAL_TICK_DELAY_MS);
       }
     } catch (err) {
-      const msg = (err as Error)?.message ?? String(err);
-      const transient =
-        qqCooldown.active() || /2001|限流|风控|timeout|aborted|ECONN|fetch failed|network/i.test(msg);
-      log.warn(
-        `建库任务失败 kind=${job.kind} payload=${job.payload}: ${msg}` +
-          (transient ? ' → 判定暂时性失败，任务重新入队（本轮收工）' : ' → 判定永久失败，丢弃')
-      );
-      if (transient) {
-        if (!hasBuildJob(job.kind, job.payload)) {
-          enqueueBuildJob(job.userId, job.kind, job.payload, job.origin);
-        }
-        break;
-      }
+      // P1-C：暂时性失败带重试上限（超过就标记失败并移出队列），
+      // 永久失败直接丢弃 —— 两条路都不会无限重入队。
+      if (handleBuildJobFailure(job, err) === 'requeued') break; // 本轮收工，下一轮 kick 再来
     }
   }
 
