@@ -32,6 +32,13 @@ async function main() {
     console.error('✗ 场景 B 失败，总和不等于 30！');
   }
 
+  if (process.argv.includes('--no-pool')) {
+    // 纯配额测试：不触发真实建池（耗时几分钟且写库）
+    console.log('\n=== 4. 跳过候选池构建（--no-pool） ===');
+    closeDatabase();
+    return;
+  }
+
   console.log('\n=== 4. 测试候选池构建与流水补位 (Build Candidate Pool) ===');
   // 测试账号 8 (uicheck_tmp)
   const testUserId = userIds.includes(8) ? 8 : userIds[0];

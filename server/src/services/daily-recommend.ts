@@ -27,6 +27,7 @@ import {
   type AiFailureKind,
 } from './ai-health.ts';
 import { isJunk } from './ai-recall.ts';
+import { clampDisplay } from '../utils/reason-text.ts';
 import { isCoverOrInstrumental } from './content-filter.ts';
 import { getActiveUserIds } from './library-topup.ts';
 import { cleanAiText } from '../utils/text.ts';
@@ -316,7 +317,9 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
           scheduleStaleRegenerate(userId, tracks.length - filteredTracks.length);
         }
 
-        const reasonMap = new Map(parsed.picks.map(p => [p.trackId, cleanAiText(p.reason_for_display || '')]));
+        // 读取路径**重放 clampDisplay**（P0-A 兜底）：任何历史路径漏 clamp 的 reason_for_display
+        // 在这里统一收到 12-25 字口径；不合格（空/太短）直接不展示推荐语（歌还在）。
+        const reasonMap = new Map(parsed.picks.map(p => [p.trackId, clampDisplay(cleanAiText(p.reason_for_display || ''))]));
         const tracksWithReason = filteredTracks.map(t => ({
           ...t,
           recommendReason: reasonMap.get(t.id) || undefined,

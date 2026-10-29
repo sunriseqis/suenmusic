@@ -922,38 +922,74 @@ export async function buildCandidatePool(
   // ---- 4) 本尊老歌（反向权重：收藏少的歌手优先）+ **专辑非主打深挖** ----
   {
     // 本尊老歌只从可进 TOP 池的种子取（refer 档 1-2 首不进 TOP 池）
-    // 未收藏 = 弱负信号（T2）：同歌手按**收藏率**降权（收藏率低 = 听过但未收藏多 = 排后面、更难占名额）
-    // —— 降权不取消资格，给「没想起来」留口子。收藏率相同时按收藏数少优先（沿用反向权重）。
+    /**
+     * 软排序（P0-C）：收藏率只做 **tie-breaker**，不做主排序键 ——
+     * 原来按收藏率降序 + seedOldCap 截断 = 收藏率低的歌手被双重降权直接消失
+     * （实测 seedOld 仅 5 首可选、SHARE 18 首配额永远吃不满）。
+     * 主排序仍是反向权重（收藏数少的歌手优先，沿用原设计）；收藏率只在
+     * 收藏数打平时把「听过但未收藏多」的排后面。降权 ≠ 取消资格。
+     */
     const seedRates = favoriteRateByArtist(
       userId,
       poolSeeds.map(s => s.name)
     );
     const ordered = [...poolSeeds].sort((a, b) => {
-      const ra = seedRates.get(a.name) ?? 0;
-      const rb = seedRates.get(b.name) ?? 0;
-      if (ra !== rb) return rb - ra; // 收藏率高的先占名额；收藏率低（听过但未收藏多）= 弱正 = 排后面被降权
-      return a.hits - b.hits;
+      if (a.hits !== b.hits) return a.hits - b.hits; // 主排序：收藏数少优先（反向权重）
+      const ra = seedRates.get(a.name) ?? 1;
+      const rb = seedRates.get(b.name) ?? 1;
+      return ra - rb; // tie-breaker：收藏率低（听过但未收藏多）= 弱正 = 排后面
     });
     const seedOldCap = ratios ? Math.floor(POOL_MAX * SHARE.seedOld) : POOL_MAX;
+    /**
+     * 保底名额（P0-C「保留最低保底名额」）：取歌循环按 round-robin 轮转，
+     * 第一轮每位种子先各拿 1 个名额机会 —— 低收藏率歌手不再被彻底挤出。
+     */
+    const perSeedGot = new Map<string, number>();
+    const countOf = (s: { mid: string }): number => perSeedGot.get(s.mid) ?? 0;
     let added = 0;
+    const deepCutCache = new Map<string, Track[]>();
+    const deepCutsFor = async (s: { name: string; mid: string }): Promise<Track[]> => {
+      const hit = deepCutCache.get(s.mid);
+      if (hit) return hit;
+      const out = await deepCutsOf(s, 10);
+      deepCutCache.set(s.mid, out);
+      return out;
+    };
 
-    // 4a) 先挖专辑非主打（这些才是"他很可能没听过"的）
-    for (const s of ordered.slice(0, 10)) {
-      if (added >= seedOldCap) break;
-      for (const t of await deepCutsOf(s, 10)) {
+    // 4a) 专辑非主打（这些才是"他很可能没听过"的）：**轮转取歌** ——
+    // round-robin 第 round 顺位，天然每人先各 1 首（保底名额），低收藏率歌手不被挤出。
+    for (let round = 0; round < 10 && added < seedOldCap; round += 1) {
+      for (const s of ordered) {
         if (added >= seedOldCap) break;
-        if (push(t, 'seedOld')) added += 1;
+        const cuts = await deepCutsFor(s);
+        const t = cuts[round];
+        if (!t) continue;
+        if (push(t, 'seedOld')) {
+          added += 1;
+          perSeedGot.set(s.mid, countOf(s) + 1);
+        }
       }
     }
-    // 4b) 剩余名额用库内曲目兜底
+    // 4b) 剩余名额用库内曲目兜底（同样轮转保底）
     //     ⚠️ 只认**首位歌手就是这位种子**的曲目：合辑里"某某参与合唱"的条目
     //     首位歌手是别人（实测混进来过《我的未来不是梦》挂在胡德夫名下却算本尊）
-    for (const s of ordered) {
-      if (added >= seedOldCap) break;
-      for (const t of libraryTracksOf([s.mid])) {
+    const libCache = new Map<string, Track[]>();
+    const libFor = (s: { mid: string }): Track[] => {
+      const hit = libCache.get(s.mid);
+      if (hit) return hit;
+      const out = libraryTracksOf([s.mid]).filter(t => norm((t.ar ?? [])[0]?.mid ?? '') === norm(s.mid));
+      libCache.set(s.mid, out);
+      return out;
+    };
+    for (let round = 0; round < 20 && added < seedOldCap; round += 1) {
+      for (const s of ordered) {
         if (added >= seedOldCap) break;
-        if (norm((t.ar ?? [])[0]?.mid ?? '') !== norm(s.mid)) continue;
-        if (push(t, 'seedOld')) added += 1;
+        const t = libFor(s)[round];
+        if (!t) continue;
+        if (push(t, 'seedOld')) {
+          added += 1;
+          perSeedGot.set(s.mid, countOf(s) + 1);
+        }
       }
     }
   }

@@ -423,19 +423,7 @@ function parseReasonReview(text: string): RawReasonReview {
  * 失败时返回空 Map（= 全部视为无展示短句），调用侧不阻塞落地 —— 与第一轮"失败即停"不同：
  * 理由精炼是**增值**，不是准入闸门（歌单质量由第一轮 reviewPicks 把关）。
  */
-/**
- * reason_for_display 长度硬约束（用户口径 12-25 字）：规则写在代码层，不只靠提示词。
- * 含标点总长超 25 -> 硬截到 25 字并去掉残留标点；不足 12 -> 原样保留（宁可短也不硬凑）。
- */
-function clampDisplay(s: string): string {
-  const MAX = 25;
-  const t = s.trim();
-  const chars = [...t];
-  if (chars.length <= MAX) return t;
-  const cut = chars.slice(0, MAX).join('');
-  const trailing = new RegExp('[' + '，。、；：！？,.;:!?' + ']+$');
-  return cut.replace(trailing, '');
-}
+import { clampDisplay } from '../utils/reason-text.ts';
 
 export async function reviewReasons(
   items: ReasonReviewItem[]
@@ -451,6 +439,7 @@ export async function reviewReasons(
    - rejected = 理由在水（空洞套话、编造历史、与歌不符、泛泛而谈）。
 2. **精炼**（仅 approved）：把长理由压成 **12~25 个字（含标点，总长不超过 25 字）**的短句（reason_for_display），
    保留最打动人的那个听感细节，纯文本、无 Markdown、无安全标签。
+   **建议 15~22 字**：贴着 25 字上限写容易被截成「副歌爆」这种残句，写得稍短一点更稳。
    rejected 的 reason_for_display 留空。
 
 【极简思考要求】：简短中文迅速判断每首，立刻输出合法纯 JSON 对象。
@@ -469,6 +458,7 @@ ${listText}
 请对每首输出 verdict 与 reason_for_display，直接输出纯 JSON 对象（以 "{" 开头，以 "}" 结尾）。`;
 
   let rawText = '';
+  let callFailed = false;
   try {
     rawText = await aiChat(
       [
@@ -478,21 +468,45 @@ ${listText}
       { purpose: 'review', jsonMode: true, maxTokens: 8000, timeoutMs: 900_000 }
     );
   } catch (err) {
-    log.warn(`理由精炼失败（不阻塞落地，全部无展示短句）：${(err as Error).message}`);
-    return out;
+    callFailed = true;
+    log.warn(`理由精炼调用失败：${(err as Error).message} —— 走长理由截断兜底`);
   }
 
-  const raw = parseReasonReview(rawText);
+  const raw = callFailed ? { reviews: [] } : parseReasonReview(rawText);
   for (const r of raw.reviews) {
     if (!valid.has(r.id)) continue;
     const approved = r.verdict === 'approved';
-    const display = clampDisplay(r.reason_for_display.replace(/\s+/g, ' ').trim());
+    const display = clampDisplay(r.reason_for_display);
     out.set(r.id, {
       verdict: approved ? 'approved' : 'rejected',
       reasonForDisplay: approved ? display : '',
     });
   }
+
+  /**
+   * 兜底（P0-A）：没拿到**合格**短句的（调用失败 / 解析失败 / 漏回 / verdict 未给 /
+   * rejected / approved 但短句不合格）→ 从**长理由**（reason_for_review）截 25 字顶上，
+   * 不留空 —— 空推荐语比截短的推荐语更伤体验（实测 40 首里 12~30 首无推荐语）。
+   * 两种长理由兜不动：① 不足 12 字；② 占位短语「本尊新歌（必进项）」（seedNew 没有真听感）。
+   */
+  const PLACEHOLDER = /本尊新歌（必进项）/;
+  let fallbackCount = 0;
+  for (const item of items) {
+    const v = out.get(item.id);
+    const ok = v && v.verdict === 'approved' && !!v.reasonForDisplay;
+    if (ok) continue;
+    const long = String(item.reasonForReview ?? '');
+    if (PLACEHOLDER.test(long)) continue;
+    const display = clampDisplay(long);
+    if (!display) continue;
+    out.set(item.id, { verdict: 'approved', reasonForDisplay: display });
+    fallbackCount += 1;
+  }
+
   const approvedCount = [...out.values()].filter(v => v.verdict === 'approved').length;
-  log.info(`理由精炼完成：approved ${approvedCount}/${items.length} 首（其余 rejected 不展示推荐语）`);
+  const withDisplay = [...out.values()].filter(v => v.verdict === 'approved' && v.reasonForDisplay).length;
+  log.info(
+    `理由精炼完成：approved ${approvedCount}/${items.length} 首 · 有展示短句 ${withDisplay} 首（长理由截断兜底 ${fallbackCount} 首）`
+  );
   return out;
 }

@@ -143,22 +143,26 @@ export function pickTopArtistForToday(userId: number, candidates: string[]): str
  * 即该歌手的**收藏率**。收藏率越低 = 听过但未收藏越多 = 越弱的正信号。
  *
  * 用途：候选池里同歌手的歌按收藏率**降权**（不取消资格，给「没想起来」留口子）。
- * 分母取 `library_tracks` 里该歌手的库内总曲数（不依赖 play_history —— 历史/播放记录
- * 不作为建库/选歌参考，见目标模型 2026-10-29 用户裁定）。
+ * 分母取 `tracks` 表**全曲目**（不限建库）—— 实测 `library_tracks` 覆盖率太低
+ * （uid=1 的 151 个收藏歌手里 114 个 libTot=0，分母为 0 → 收藏率一律 0，弱负信号失效），
+ * 而 `tracks` 表是收藏/推荐全链路的曲目快照，按首歌手 join 覆盖所有收藏歌手（实测 0 缺失）。
+ * 不依赖 play_history —— 历史/播放记录不作为建库/选歌参考，见目标模型 2026-10-29 用户裁定。
  *
- * @returns name -> 收藏率（0~1；库内无该歌手曲目时为 0，视为最弱正信号）
+ * @returns name -> 收藏率（0~1）。**库内/曲目表无该歌手曲目（分母 0）时返回 1（不降权）**：
+ * 分母缺失是数据缺口而非「听过没收藏」，此时若按 0 处理会把歌手一棍子打死（P0-B）。
+ * fav > total（口径差）时截到 1。
  */
 export function favoriteRateByArtist(userId: number, artistNames: string[]): Map<string, number> {
   const out = new Map<string, number>();
   if (artistNames.length === 0) return out;
   const db = getDatabase();
   const holes = artistNames.map(() => '?').join(',');
-  // 分母：库内该歌手（首歌手）总曲数
+  // 分母：tracks 表该歌手（首歌手）全曲目数（不限建库）
   const totals = db
     .prepare(
-      `SELECT json_extract(payload_json, '$.ar[0].name') AS an, COUNT(*) AS n
-        FROM library_tracks
-       WHERE json_extract(payload_json, '$.ar[0].name') IN (${holes})
+      `SELECT json_extract(artists_json, '$[0].name') AS an, COUNT(*) AS n
+        FROM tracks
+       WHERE json_extract(artists_json, '$[0].name') IN (${holes})
        GROUP BY an`
     )
     .all(...artistNames) as unknown as Array<{ an: string; n: number }>;
@@ -176,7 +180,7 @@ export function favoriteRateByArtist(userId: number, artistNames: string[]): Map
   for (const name of artistNames) {
     const total = totalBy.get(name) ?? 0;
     const fav = favBy.get(name) ?? 0;
-    out.set(name, total > 0 ? Math.min(1, fav / total) : 0);
+    out.set(name, total > 0 ? Math.min(1, fav / total) : 1);
   }
   return out;
 }

@@ -73,6 +73,8 @@ const LISTS = 1;
 /** 每日目标首数（用户拍板：合格线 30 首，最大 40 首） */
 const DAILY_COUNT = 40;
 const DAILY_MAX = 40;
+/** 本尊新歌每日硬上限（P0-D）：计入 40 名额，防止 seedNew 挤爆名额 */
+const SEED_NEW_DAILY_CAP = 8;
 /**
  * 落地合格线（用户拍板：强制约束合格线在 30 首）。
  *
@@ -402,8 +404,13 @@ export async function runDailyFlow(
 
     const gap = target - picks.length;
 
-    /** 本尊新歌：无条件全进（不占来源名额），但同样要过审核 */
-    const seedNew = candidates.filter(c => c.source === 'seedNew' && !usedIds.has(c.track.id));
+    /**
+     * 本尊新歌：必进但**每日硬上限 8 首并计入 40 名额**（P0-D）。
+     * 原来"无条件全进不占名额"—— 实测 uid=1 seedNew 占 30%、极端 10 种子 × 8 专辑歌 = 80 首必进，
+     * 直接挤爆 40 名额、来源多样性崩塌。超上限的不丢：留给下一轮/明天（usedIds 不含它们）。
+     */
+    const seedNewAll = candidates.filter(c => c.source === 'seedNew' && !usedIds.has(c.track.id));
+    const seedNew = seedNewAll.slice(0, SEED_NEW_DAILY_CAP);
     /** 模型选的（不含本尊新歌 —— 它在 selectFromPool 里被排除在池外） */
     let modelPicks: Array<{ track: Track; reason: string; source: Candidate['source'] }> = [];
     const wantFromModel = Math.max(0, gap - seedNew.length);

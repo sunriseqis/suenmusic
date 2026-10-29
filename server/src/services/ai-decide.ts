@@ -109,9 +109,24 @@ function fallbackReason(c: Candidate): string {
 }
 
 /**
+ * 各来源最低配额（quota floor，P0-D）：流水补位只能在**保住 floor 之后**再流动，
+ * 防止"playlist 占满 40/40"这类单一来源挤占全部名额（来源多样性崩塌）。
+ * floor 之和（4+4+2+2=12）远小于 count（40），剩下的按 SHARE + 流水分配。
+ */
+export const QUOTA_FLOOR: Record<'simi' | 'playlist' | 'seedOld' | 'chart', number> = {
+  simi: 4,
+  playlist: 4,
+  seedOld: 2,
+  chart: 2,
+};
+
+/**
  * 按来源算名额（最大余额法 + 流水补位 Water-filling）：
  * 若传入候选池实际可用量 poolAvailable，当某来源（如冷启动相似歌手少）未填满时，
  * 缺额顺势流水灌入其他可用量充沛的来源（网友歌单/榜单），保证总名额恒定等于 count！
+ *
+ * P0-D：流水之前先给各来源留 **最低配额（floor）** —— 有货的来源至少拿到
+ * min(floor, 可用量)，余额再流动；floor 拿不满的（池里真没有）才会流走。
  */
 export function quotasFor(
   count: number,
@@ -138,17 +153,38 @@ export function quotasFor(
     return ideal;
   }
 
-  // 流水自适应配额：按可用量截断后，将缺额流动分配给富余来源
+  // 第一步：按可用量截断，并保住各来源最低配额（floor）
   const allocated: Record<'simi' | 'playlist' | 'seedOld' | 'chart', number> = {
-    simi: Math.min(ideal.simi, Math.max(0, poolAvailable.simi ?? 0)),
-    playlist: Math.min(ideal.playlist, Math.max(0, poolAvailable.playlist ?? 0)),
-    seedOld: Math.min(ideal.seedOld, Math.max(0, poolAvailable.seedOld ?? 0)),
-    chart: Math.min(ideal.chart, Math.max(0, poolAvailable.chart ?? 0)),
+    simi: 0,
+    playlist: 0,
+    seedOld: 0,
+    chart: 0,
   };
+  for (const src of order) {
+    const avail = Math.max(0, poolAvailable[src] ?? 0);
+    allocated[src] = Math.min(ideal[src], avail);
+    // 保 floor：理想值没给够、池里又有货 → 至少给 min(floor, avail)
+    if (allocated[src] < QUOTA_FLOOR[src]) {
+      allocated[src] = Math.min(QUOTA_FLOOR[src], avail);
+    }
+  }
 
-  const totalPoolCapacity = Object.values(poolAvailable).reduce((a, b) => a + b, 0);
+  // 第二步：余额流水（只在 floor 之外流动，最多补到理想值的上限由可用量决定）
+  const totalPoolCapacity = order.reduce((a, k) => a + Math.max(0, poolAvailable[k] ?? 0), 0);
   let allocatedSum = allocated.simi + allocated.playlist + allocated.seedOld + allocated.chart;
   let remainingNeed = Math.min(count, totalPoolCapacity) - allocatedSum;
+
+  // 先补到理想值（不越过 floor 之上的理想），再向富余来源流水
+  for (const src of order) {
+    if (remainingNeed <= 0) break;
+    const avail = Math.max(0, poolAvailable[src] ?? 0);
+    const room = Math.min(ideal[src], avail) - allocated[src];
+    if (room > 0) {
+      const give = Math.min(room, remainingNeed);
+      allocated[src] += give;
+      remainingNeed -= give;
+    }
+  }
 
   const fallbackOrder = ['playlist', 'chart', 'simi', 'seedOld'] as const;
   while (remainingNeed > 0) {
