@@ -31,15 +31,27 @@ export interface WebdavView {
 export interface BackupStatus {
   localDir: string;
   localDirReady?: boolean;
-  localFiles: LocalBackupFile[];
+  localFiles: LocalArchiveFile[];
   webdav: WebdavView;
   hasPassword: boolean;
 }
 
+/** 本地备份列表条目（GET /api/admin/backup/local/list） */
+export interface LocalArchiveFile {
+  name: string;
+  size: number;
+  /** 修改时间（毫秒） */
+  lastModified: number;
+  createdAt: number;
+}
+
+
+
 export interface RestoreResponse {
   ok: true;
-  source: 'upload' | 'webdav';
+  source: 'upload' | 'webdav' | 'local';
   fileName?: string;
+  name?: string;
   restored: true;
   requiresRelogin: true;
   backupPath: string;
@@ -151,4 +163,18 @@ export function restoreFromBase64(dataBase64: string, password?: string): Promis
   const body: Record<string, unknown> = { dataBase64 };
   if (password) body.password = password;
   return http.post<RestoreResponse>('/api/admin/backup/restore', body, RESTORE_OPTS);
+}
+
+/** 列出服务端本地备份目录里的 `*.sm`（最新在前） */
+export function fetchLocalArchives(): Promise<{ files: LocalArchiveFile[] }> {
+  return http.get<{ files: LocalArchiveFile[] }>('/api/admin/backup/local/list');
+}
+
+/** 用本地备份文件名整库恢复（成功后所有登录态失效） */
+export function restoreLocalBackup(name: string, password: string): Promise<RestoreResponse> {
+  return http.post<RestoreResponse>(
+    '/api/admin/backup/local/restore',
+    { name, password },
+    RESTORE_OPTS
+  );
 }

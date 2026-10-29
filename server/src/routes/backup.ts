@@ -117,6 +117,51 @@ export function registerBackupRoutes(app: FastifyInstance): void {
     return reply.send(buf);
   });
 
+  /**
+   * 列出本地备份目录下的 `*.sm`（最新在前）。
+   *
+   * 字段以 `listLocalArchives()` 的实际返回为准（name/size/mtimeMs/createdAt），
+   * 其中 mtimeMs 按任务口径暴露为 `lastModified`（毫秒），createdAt 一并保留。
+   * service 层已按 mtime 倒序排好，这里不再重排。
+   */
+  app.get('/api/admin/backup/local/list', async req => {
+    requireWebAdmin(req);
+    const files = listLocalArchives().map(f => ({
+      name: f.name,
+      size: f.size,
+      lastModified: Math.round(f.mtimeMs),
+      createdAt: f.createdAt,
+    }));
+    return { files };
+  });
+
+  /**
+   * 用本地备份文件名整库恢复。
+   *
+   * · name 只接受单个 `*.sm` 文件名（防路径穿越，与 GET local/:name 同一校验）
+   * · 口令来源沿用 resolvePassword()：显式传的优先，否则用库里存的自动备份口令
+   * · 恢复语义与 POST /api/admin/backup/restore 完全一致（同一 restoreWholeDb）
+   */
+  app.post('/api/admin/backup/local/restore', { bodyLimit: 1024 * 1024 }, async req => {
+    requireWebAdmin(req);
+    const body = asRecord(req.body);
+    const name = assertSafeArchiveName(body.name);
+    const path = join(backupDir(), name);
+    if (!existsSync(path) || !statSync(path).isFile()) throw notFound('备份文件不存在');
+    const password = resolvePassword(body);
+    const buffer = readFileSync(path);
+
+    const result = restoreWholeDb(buffer, password);
+    log.warn(`已从本地备份恢复整库：${name}`);
+    return {
+      ok: true,
+      source: 'local',
+      name,
+      ...result,
+      message: '恢复成功，请用备份里的管理员账号重新登录',
+    };
+  });
+
   /** 清理多余的本地备份（只留最新 2 份，与自动轮转同规则） */
   app.post('/api/admin/backup/local/rotate', async req => {
     requireWebAdmin(req);
