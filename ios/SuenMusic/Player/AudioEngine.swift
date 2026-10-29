@@ -147,6 +147,9 @@ final class AudioEngine: NSObject {
     /// time-pos 驱动的进度回写节流点（约 1s 一次，见 writeNowPlayingProgress）
     private var lastNowPlayingProgressAt = Date.distantPast
     private static let nowPlayingProgressInterval: TimeInterval = 1.0
+    /// 进度路径的诊断打点节流点（1s 回写太密，诊断 5s 一条足够）
+    private var lastProgressDiagAt = Date.distantPast
+    private static let progressDiagInterval: TimeInterval = 5.0
 
     // MARK: mpv 侧停滞看门狗（P1 删掉了 AVPlayer 时代的 10s stall 看门狗，这里在 mpv 侧补回来）
 
@@ -180,6 +183,9 @@ final class AudioEngine: NSObject {
 
     /// 诊断打点节流
     private var lastDiagAt = Date.distantPast
+    /// 「会话重申」诊断日志的节流点：loadfile / seek / 播放态都会触发重申，2s 一条足够
+    private var lastReassertDiagAt = Date.distantPast
+    private static let reassertDiagInterval: TimeInterval = 2.0
 
     init(events: AudioEngineEvents) throws {
         self.events = events
@@ -248,6 +254,9 @@ final class AudioEngine: NSObject {
         player.onFileLoaded = { [weak self] in
             guard let self = self else { return }
             NSLog("[Start] mpv 已装载 idx=%d dur=%dms", self.currentIndex, self.currentItemDurationMs())
+            // loadfile 会重建音频输出 → mpv 可能又改了一遍会话，装载完再重申一次
+            self.reassertPlaybackSession(reason: "file-loaded")
+            self.updateNowPlaying()
         }
     }
 
@@ -326,6 +335,8 @@ final class AudioEngine: NSObject {
     func seek(to positionMs: Int) {
         let seconds = max(0, Double(positionMs) / 1000.0)
         mpv?.seek(to: seconds)
+        // seek 会重配音频输出 → 同样重申一次会话（幂等，会话已正确时立刻返回）
+        reassertPlaybackSession(reason: "seek")
         updateNowPlaying()
     }
 
@@ -534,6 +545,11 @@ final class AudioEngine: NSObject {
             // 真正出流：收起缓冲反馈 + 补一次「播放中」
             events?.emitBuffering(false)
             reportPlaying(true)
+            // mpv 的 audiounit 输出会把会话改成 mixWithOthers（日志 opts=1）→ 系统判为
+            // 次要音频、不挂 Now Playing 面板。播放态一到就把会话**完整**改回来，
+            // 再重新发布——顺序必须是「改回会话 → updateNowPlaying()」。
+            reassertPlaybackSession(reason: "mpv-playing")
+            logNowPlayingDiagnostics(reason: "mpv-playing")
             // 缓冲恢复后意图早已是 true（reportPlaying 会被去重），这里再正面刷一次，
             // 保证 PlaybackRate 从 0 立刻回 1.0，而不是等下一个 time-pos tick（最多滞后 1s）
             updateNowPlaying()
@@ -864,6 +880,35 @@ final class AudioEngine: NSObject {
         }
     }
 
+    /// 把音频会话**完整**改回我们设的那一份（.playback / .default / 无 options）。
+    ///
+    /// 为什么不能只 setActive：libmpv 的 ao=audiounit 为了不打断其它 App，会自己把
+    /// 会话改成 `.playback + mixWithOthers`（日志里 opts=1、mode=MoviePlayback），
+    /// 而 mixWithOthers 会让 iOS 把本 App 判成「次要音频」→ 不参与 Now Playing →
+    /// 锁屏 / 控制中心 / 灵动岛**整个媒体面板都不出现**。
+    /// 改动 options 必须 setCategory，且改 category 会作废激活 —— 顺序只能是
+    /// 先 setCategory 再 setActive。
+    private func reassertPlaybackSession(reason: String) {
+        let session = AVAudioSession.sharedInstance()
+        // 会话本来就对（含已激活）就什么都不做：seek 拖动每帧一次，重复 setCategory
+        // 会重配音频输出、把声音拖出毛刺。
+        if session.category == .playback, session.mode == .default,
+           session.categoryOptions.isEmpty, isActivated {
+            return
+        }
+        try? session.setCategory(.playback, mode: .default, options: [])
+        // 按实际结果维护：无条件置 true 会让 activateIfNeeded() 直接短路，
+        // 之后真被系统吊销会话也再没人去激活（以前踩过「永远没声音」）
+        isActivated = (try? session.setActive(true)) != nil
+
+        let now = Date()
+        guard now.timeIntervalSince(lastReassertDiagAt) >= Self.reassertDiagInterval else { return }
+        lastReassertDiagAt = now
+        // 是否真改回来了，看 logNowPlayingDiagnostics 的 opts= / mode= / sessionRestored=
+        NSLog("%@", "[AudioSession/reassert] reason=\(reason) activated=\(isActivated)"
+            + " opts=\(session.categoryOptions.rawValue) mode=\(session.mode.rawValue)")
+    }
+
     // MARK: 私有：系统事件
 
     /// 音频焦点（对齐 Android：来电暂停、让路导航）
@@ -1159,6 +1204,11 @@ final class AudioEngine: NSObject {
         info[MPMediaItemPropertyPlaybackDuration] = Double(max(1, currentItemDurationMs())) / 1000.0
         applyNowPlayingPlayback(currentNowPlayingPlayback(), to: &info)
         nowPlaying.nowPlayingInfo = info
+        // 进度路径节流到 5s 一条（1s 一条会把日志刷爆）
+        if now.timeIntervalSince(lastProgressDiagAt) >= Self.progressDiagInterval {
+            lastProgressDiagAt = now
+            logNowPlayingDiagnostics(reason: "progress")
+        }
     }
 
     /// Now Playing 自检：把系统侧真正生效的状态打到 Xcode 控制台。
@@ -1172,18 +1222,39 @@ final class AudioEngine: NSObject {
         let elapsed = (info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] as? Double) ?? -1
         let duration = (info?[MPMediaItemPropertyPlaybackDuration] as? Double) ?? -1
         let rate = (info?[MPNowPlayingInfoPropertyPlaybackRate] as? Double) ?? -1
+        let hasTitle = info?[MPMediaItemPropertyTitle] != nil
+        let hasDuration = info?[MPMediaItemPropertyPlaybackDuration] != nil
+        let hasElapsed = info?[MPNowPlayingInfoPropertyElapsedPlaybackTime] != nil
         let hasArtwork = info?[MPMediaItemPropertyArtwork] != nil
-        let num = { (v: Double) in String(format: "%.1f", v) }
-        print("[NowPlaying/\(reason)] cat=\(session.category.rawValue) mode=\(session.mode.rawValue) "
-              + "opts=\(session.categoryOptions.rawValue) ioSampleRate=\(session.sampleRate) "
-              + "intent=\(playingIntent ? "play" : "pause")")
-        print("[NowPlaying/\(reason)] title=\(title) playbackState=\(nowPlaying.playbackState.rawValue) "
-              + "rate=\(num(rate)) elapsed=\(num(elapsed)) "
-              + "dur=\(num(duration)) artwork=\(hasArtwork ? "Y" : "N") "
-              + "| cmds play=\(center.playCommand.isEnabled) pause=\(center.pauseCommand.isEnabled) "
-              + "toggle=\(center.togglePlayPauseCommand.isEnabled) next=\(center.nextTrackCommand.isEnabled) "
-              + "prev=\(center.previousTrackCommand.isEnabled) "
-              + "seek=\(center.changePlaybackPositionCommand.isEnabled)")
+        let num: (Double) -> String = { String(format: "%.1f", $0) }
+        let yn: (Bool) -> String = { $0 ? "Y" : "N" }
+        // 一段一段拼：单个巨型字符串插值表达式过不了类型检查（编译超时）。
+        var parts: [String] = []
+        // AVFoundation 没有公开的 session.isActive：用本类维护的 isActivated
+        // （每次 setActive 成功才置 true）作为"会话是否活着"的等价信号。
+        parts.append("isActive(self)=\(isActivated)")
+        parts.append("cat=\(session.category.rawValue)")
+        parts.append("mode=\(session.mode.rawValue)")
+        parts.append("opts=\(session.categoryOptions.rawValue)")
+        // 对照：opts=1 / mode≠default 就是「还被 mpv 改着」→ 肯定没有 Now Playing 面板
+        let sessionRestored = session.category == .playback
+            && session.mode == .default
+            && session.categoryOptions.isEmpty
+        parts.append("sessionRestored=\(yn(sessionRestored))")
+        parts.append("playbackState=\(nowPlaying.playbackState.rawValue)")
+        parts.append("intent=\(playingIntent ? "play" : "pause")")
+        parts.append("title=\(yn(hasTitle))[\(title)]")
+        parts.append("dur=\(yn(hasDuration))(\(num(duration)))")
+        parts.append("elapsed=\(yn(hasElapsed))(\(num(elapsed)))")
+        parts.append("artwork=\(yn(hasArtwork))")
+        parts.append("rate=\(num(rate))")
+        parts.append("cmd.play=\(center.playCommand.isEnabled)")
+        parts.append("cmd.pause=\(center.pauseCommand.isEnabled)")
+        parts.append("cmd.next=\(center.nextTrackCommand.isEnabled)")
+        parts.append("app=\(UIApplication.shared.applicationState.rawValue)")
+        // 一行输出，方便 grep，也方便 log show / Console.app 抓。
+        // 必须是 NSLog：print 只进 stdout，log show 抓不到（回归排查就卡在这里）。
+        NSLog("%@", "[NowPlaying/\(reason)] " + parts.joined(separator: " "))
     }
 
     private func loadArtwork(for trackId: String, url: String) {
