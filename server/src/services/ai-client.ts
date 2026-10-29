@@ -11,6 +11,7 @@
  */
 import { getSetting, setSetting } from '../db/repo/settings.ts';
 import { createLogger } from '../logger.ts';
+import { record } from './ops-log.ts';
 
 const log = createLogger('ai');
 
@@ -386,11 +387,28 @@ export async function aiChat(
       opts.timeoutMs ?? 600_000
     );
   } catch (err) {
+    record({
+      dimension: 'ai',
+      level: 'error',
+      action: 'ai-call',
+      ok: 0,
+      latencyMs: Date.now() - started,
+      summary: `AI ${opts.purpose ?? '默认'} · ${cfg.model} · 失败：${(err as Error).message.slice(0, 120)}（${Date.now() - started}ms）`,
+    });
     throw new AiUnavailableError((err as Error).message);
   }
 
   if (!res.ok) {
     const text = await res.text().catch(() => '');
+    record({
+      dimension: 'ai',
+      level: 'error',
+      action: 'ai-call',
+      ok: 0,
+      latencyMs: Date.now() - started,
+      summary: `AI ${opts.purpose ?? '默认'} · ${cfg.model} · 失败：模型返回 ${res.status}（${Date.now() - started}ms）`,
+      detail: JSON.stringify({ body: text.slice(0, 200) }),
+    });
     throw new AiUnavailableError(`模型返回 ${res.status}：${text.slice(0, 200)}`);
   }
 
@@ -437,6 +455,17 @@ export async function aiChat(
   log.info(
     `模型调用完成：${Date.now() - started}ms · tokens ${data.usage?.total_tokens ?? '?'} · 输出 ${content.length} 字`
   );
+
+  // 旁路埋点：AI 调用成败与耗时（purpose 是「用途」：decide=决策 / review=审核 / memory=画像记忆）
+  record({
+    dimension: 'ai',
+    action: 'ai-call',
+    ok: 1,
+    latencyMs: Date.now() - started,
+    summary: `AI ${opts.purpose ?? '默认'} · ${cfg.model} · 成功（${Date.now() - started}ms，输出 ${content.length} 字）`,
+    detail: JSON.stringify({ tokens: data.usage?.total_tokens ?? null }),
+  });
+
   if (!content.trim()) {
     const finishReason = data.choices?.[0]?.finish_reason;
     if (finishReason === 'length') {

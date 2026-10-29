@@ -14,6 +14,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
+import { record } from '../services/ops-log.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
   getBilibiliStatus,
@@ -24,8 +25,20 @@ import {
 
 export function registerBilibiliRoutes(app: FastifyInstance): void {
   app.get('/api/bilibili/account', async req => {
-    requireUser(req);
-    return getBilibiliStatus();
+    const user = requireUser(req);
+    const status = getBilibiliStatus();
+    // 旁路埋点：只记登录态摘要，绝不写 cookie 本体
+    record({
+      dimension: 'cookie',
+      action: 'cookie-check',
+      ok: status.configured ? 1 : 0,
+      user: user.username,
+      summary: status.configured
+        ? `哔哩哔哩 登录态有效${status.account?.vip ? ' · 大会员' : ''}${status.account?.name ? `（${status.account.name}）` : ''}`
+        : '哔哩哔哩 未登录',
+      detail: JSON.stringify({ source: status.source, hasSessdata: status.hasSessdata }),
+    });
+    return status;
   });
 
   app.post('/api/bilibili/qrcode', async req => {

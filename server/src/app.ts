@@ -30,6 +30,7 @@ import { registerKugouVerifyRoutes } from './routes/kugou-verify.ts';
 import { registerResolveRoutes } from './routes/resolve.ts';
 import { registerStreamRoutes } from './routes/stream.ts';
 import { registerUpdateRoutes } from './routes/update.ts';
+import { registerOpsLogRoutes } from './routes/ops-log.ts';
 
 const log = createLogger('http');
 
@@ -250,6 +251,7 @@ export function buildApp(): FastifyInstance {
   registerKugouVerifyRoutes(app);
   registerStreamRoutes(app);
   registerUpdateRoutes(app);
+  registerOpsLogRoutes(app);
 
   return app;
 }

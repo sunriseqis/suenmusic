@@ -38,9 +38,76 @@ import {
 import { resolveNeteaseSource } from '../sources/netease/source.ts';
 import type { ResolveOutcome } from '../services/resolver.ts';
 import { buildStreamUrl, signStreamToken, STREAM_TOKEN_TTL_MS } from '../utils/stream-token.ts';
-import { wantsMp3Container } from '../http/platform.ts';
+import { clientPlatformLabel, wantsMp3Container } from '../http/platform.ts';
+import { record } from '../services/ops-log.ts';
 
 const log = createLogger('routes:resolve');
+
+/**
+ * 失败 reason 码 → 中文人话（运维日志 summary 用）。
+ * 与 sources/bilibili/stream.ts 的 ResolveFailureReason 同口径；未知码原样透出。
+ */
+function reasonText(reason: string | null | undefined): string {
+  switch (reason) {
+    case 'need_verification':
+      return '上游要求验证码';
+    case 'no_candidates':
+      return '上游未找到候选';
+    case 'below_threshold':
+      return '无高置信匹配';
+    case 'no_stream':
+      return '上游未响应';
+    case 'rate_limited':
+      return '上游限流';
+    case 'cooldown':
+      return '冷却窗口内';
+    case 'error':
+      return '解析出错';
+    default:
+      return reason ? `失败（${reason}）` : '失败';
+  }
+}
+
+/**
+ * resolve 旁路埋点（绝不影响业务：record 内部自吞异常）。
+ * summary 例：「iOS · 无损 · 酷狗《淘金小镇》→ 下发成功 320k flac（842ms）」
+ */
+function logResolveOutcome(opts: {
+  user: string | null;
+  platform: string | null;
+  platformLabel: string;
+  quality: string;
+  meta: { name: string };
+  outcome: {
+    ok: boolean;
+    source?: string;
+    hitLevel: string;
+    costMs: number;
+    reason?: string | null;
+    currentQuality?: string | null;
+  };
+}): void {
+  record({
+    dimension: 'server',
+    level: opts.outcome.ok ? 'info' : 'warn',
+    action: 'resolve',
+    ok: opts.outcome.ok ? 1 : 0,
+    latencyMs: Math.round(opts.outcome.costMs),
+    user: opts.user,
+    platform: opts.platformLabel,
+    summary:
+      `${opts.platformLabel} · ${opts.quality} · ${opts.outcome.source ?? '?'}《${opts.meta.name}》→ ` +
+      (opts.outcome.ok
+        ? `下发成功（${Math.round(opts.outcome.costMs)}ms）`
+        : `下发失败：${reasonText(opts.outcome.reason)}（${Math.round(opts.outcome.costMs)}ms）`),
+    detail: JSON.stringify({
+      cacheHit: opts.outcome.hitLevel !== 'upstream',
+      hitLevel: opts.outcome.hitLevel,
+      requestedQuality: opts.quality,
+      effectiveQuality: opts.outcome.currentQuality ?? null,
+    }),
+  });
+}
 
 /**
  * 直链通道开关（默认开）。
@@ -320,6 +387,17 @@ export function registerResolveRoutes(app: FastifyInstance): void {
       `resolve ${trackId} ok=${outcome.ok} hit=${outcome.hitLevel} ${outcome.costMs}ms`
     );
 
+    let user: { username: string } | null = null;
+    try { user = requireUser(req); } catch { /* 未登录不影响埋点 */ }
+    logResolveOutcome({
+      user: user?.username ?? null,
+      platform: strParam((req.query as any)?.platform) || null,
+      platformLabel: clientPlatformLabel(req),
+      quality,
+      meta,
+      outcome,
+    });
+
     return shape(outcome, meta, mp3Container, quality);
   });
 
@@ -330,7 +408,7 @@ export function registerResolveRoutes(app: FastifyInstance): void {
    * 而预取本来就是后台行为，慢一点无所谓。
    */
   app.post('/api/resolve/batch', async req => {
-    requireUser(req);
+    const user = requireUser(req);
 
     const mp3Container = wantsMp3Container(req);
     const body = (req.body ?? {}) as { trackIds?: unknown; quality?: unknown };
@@ -361,6 +439,14 @@ export function registerResolveRoutes(app: FastifyInstance): void {
         artists: meta.artists,
         durationMs: meta.durationMs,
       }, { mp3Container, quality });
+      logResolveOutcome({
+        user: user?.username ?? null,
+        platform: strParam((req.query as any)?.platform) || null,
+        platformLabel: clientPlatformLabel(req),
+        quality,
+        meta,
+        outcome,
+      });
       results.push(shape(outcome, meta, mp3Container, quality));
     }
 

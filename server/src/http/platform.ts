@@ -43,3 +43,15 @@ export function wantsMp3Container(req: PlatformReq): boolean {
   if (isIosClient(req)) return true;
   return strParam(req.query?.format).toLowerCase() === 'mp3';
 }
+
+/**
+ * 平台显示标签（运维日志用）：iOS / 鸿蒙 / 安卓 / Web。
+ * iOS 复用 isIosClient；鸿蒙看 UA 里的 harmony / hmos / huawei 标识（仅观测用途）。
+ */
+export function clientPlatformLabel(req: PlatformReq): string {
+  if (isIosClient(req)) return 'iOS';
+  const ua = String(req.headers?.['user-agent'] ?? '').toLowerCase();
+  if (ua.includes('harmony') || ua.includes('hmos') || ua.includes('huawei')) return '鸿蒙';
+  if (ua.includes('android') || ua.includes('capacitor')) return '安卓';
+  return 'Web';
+}

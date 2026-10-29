@@ -12,6 +12,7 @@
 
 import type { FastifyInstance } from 'fastify';
 import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
+import { record } from '../services/ops-log.ts';
 import { badGateway, badRequest } from '../http/errors.ts';
 import {
   getNeteaseStatus,
@@ -22,8 +23,20 @@ import {
 
 export function registerNeteaseRoutes(app: FastifyInstance): void {
   app.get('/api/netease/account', async req => {
-    requireUser(req);
-    return getNeteaseStatus();
+    const user = requireUser(req);
+    const status = getNeteaseStatus();
+    const vip = (status.account?.vipType ?? 0) >= 10;
+    record({
+      dimension: 'cookie',
+      action: 'cookie-check',
+      ok: status.configured ? 1 : 0,
+      user: user.username,
+      summary: status.configured
+        ? `网易云 登录态有效${vip ? ' · 黑胶VIP' : ''}${status.account?.name ? `（${status.account.name}）` : ''}`
+        : '网易云 未登录',
+      detail: JSON.stringify({ source: status.source, vipType: status.account?.vipType ?? 0 }),
+    });
+    return status;
   });
 
   app.post('/api/netease/qrcode', async req => {

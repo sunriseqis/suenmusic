@@ -31,6 +31,7 @@ import { runDailyMaintenance } from './services/daily-recommend.ts';
 import { ensureKugouCheckin, runKugouCheckin } from './services/kugou-checkin.ts';
 import { runScheduledBackup } from './services/backup.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
+import { purgeOlderThanDays } from './services/ops-log.ts';
 
 /** 曲目缓存保留 30 天。QQ 侧元数据变动很少，30 天足够且能显著减少上游请求 */
 const TRACK_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -303,6 +304,26 @@ async function main(): Promise<void> {
   scheduleAutoBackup();
 
   /**
+   * 运维日志清理：**服务器本地时间每天 03:10** 删掉 7 天前的记录。
+   * 同款「算到下一个时刻 → setTimeout → 触发后重算」自排程；失败不影响业务。
+   */
+  let opsLogPruneTimer: ReturnType<typeof setTimeout> | null = null;
+  const scheduleOpsLogPrune = (): void => {
+    opsLogPruneTimer = setTimeout(() => {
+      try {
+        const removed = purgeOlderThanDays(7);
+        if (removed > 0) logger.info(`运维日志清理：删除 ${removed} 条 7 天前记录`);
+      } catch (err) {
+        logger.warn(`运维日志清理失败：${(err as Error)?.message ?? String(err)}`);
+      } finally {
+        scheduleOpsLogPrune();
+      }
+    }, msUntilNextLocal(3, 10));
+    opsLogPruneTimer.unref();
+  };
+  scheduleOpsLogPrune();
+
+  /**
    * 更新产物轮询（`SUENMUSIC_UPDATE_SOURCE=github` 时才生效）。
    *
    * 为什么由**服务端**去拉 GitHub 而不是让客户端直连：
@@ -349,6 +370,7 @@ async function main(): Promise<void> {
     if (kugouCheckinTimer) clearTimeout(kugouCheckinTimer);
     if (dailyTimer) clearTimeout(dailyTimer);
     if (autoBackupTimer) clearTimeout(autoBackupTimer);
+    if (opsLogPruneTimer) clearTimeout(opsLogPruneTimer);
     try {
       await app.close();
     } catch (err) {

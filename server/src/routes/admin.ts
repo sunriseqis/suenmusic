@@ -25,6 +25,7 @@ import { countAnchors, deleteAutoAnchors } from '../db/repo/anchors.ts';
 import { fetchArtistSongsMulti } from '../services/artist-songs-multi.ts';
 
 import { createLogger } from '../logger.ts';
+import { record } from '../services/ops-log.ts';
 
 const log = createLogger('admin');
 import { currentDatabasePath } from '../db/index.ts';
@@ -321,7 +322,20 @@ export function registerAdminRoutes(app: FastifyInstance): void {
    * 两端设置页都读这一个接口，文案由服务端给，避免两端各自拼出不同说法。
    */
   app.get('/api/admin/kugou/status', async () => {
-    return { ok: true, ...(await readKugouLoginState()) };
+    const started = Date.now();
+    const state = await readKugouLoginState();
+    record({
+      dimension: 'cookie',
+      action: 'cookie-check',
+      ok: state.state === 'ok' || state.state === 'vip_expired' ? 1 : 0,
+      latencyMs: Date.now() - started,
+      summary:
+        state.state === 'ok' || state.state === 'vip_expired'
+          ? `酷狗 登录态有效 · ${state.svipActive ? `SVIP 至 ${state.svipEndTime}` : state.vipEndTime ? `VIP 至 ${state.vipEndTime}` : '非会员'}`
+          : `酷狗 ${state.statusLabel || state.label}${state.invalidReason ? `（${state.invalidReason}）` : ''}`,
+      detail: JSON.stringify({ state: state.state }),
+    });
+    return { ok: true, ...state };
   });
 
   /** 查询酷狗今日签到与概念 SVIP 升级状态 */
