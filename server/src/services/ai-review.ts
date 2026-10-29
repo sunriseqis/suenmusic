@@ -114,7 +114,16 @@ function parseReview(text: string): RawReview {
 }
 
 /**
- * 复核两份歌单。
+ * 复核两份歌单（**第一轮**：歌单质量闸门）。
+ *
+ * ★ 修复批 4 · P2-D：**失败语义与 `reviewReasons` 不同，是用户裁定的有意设计，不是 bug。**
+ *
+ * - `reviewPicks`（本函数）失败 → `status: 'unavailable'` → 调用侧**失败即停、保留旧歌单**
+ *   （这批歌没拿到"通过"结论，绝不能当"全部通过"落地）；
+ * - `reviewReasons`（第二轮理由精炼）失败 → 返回空 Map → **照常落库**，只是当天没有推荐语。
+ *
+ * 用户 2026-10-29 裁定（方案 A，保持现状）：歌单质量是准入闸门，必须失败即停；
+ * 理由精炼是**增值**，AI 挂了当天没推荐语可接受，下次生成就有了 —— 不要"统一"成同一套语义。
  *
  * @param items 两份歌单的全部曲目（listNo 标记属于哪一份）
  * @param passSets 生成侧各批回传的 pass（含理由）
@@ -422,6 +431,10 @@ function parseReasonReview(text: string): RawReasonReview {
  *
  * 失败时返回空 Map（= 全部视为无展示短句），调用侧不阻塞落地 —— 与第一轮"失败即停"不同：
  * 理由精炼是**增值**，不是准入闸门（歌单质量由第一轮 reviewPicks 把关）。
+ *
+ * ★ 修复批 4 · P2-D：上面这种**失败语义不一致是用户裁定的有意设计（方案 A，2026-10-29），
+ * 不要为了"一致性"把这里改成失败即停**。理由：AI 挂了当天没推荐语可以接受（下次生成就有），
+ * 而歌单本身的质量已由第一轮 `reviewPicks` 把住。
  */
 import { clampDisplay } from '../utils/reason-text.ts';
 

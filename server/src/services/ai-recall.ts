@@ -34,6 +34,7 @@ import { buildStyleProfile, refillPlaylistPool, topStyles } from './playlist-poo
 import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track, Album } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
+import { lruGet, lruSet } from '../utils/lru.ts';
 
 const log = createLogger('ai-recall');
 
@@ -489,18 +490,56 @@ const ALBUM_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  * @returns 最新专辑里还没进库的曲目（作为新歌候选）；拿不到最新专辑时返回空
  */
 const LATEST_ALBUM_TTL_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * ★ 修复批 4 · P2-B：三张「最新专辑」缓存加了**条目上限（LRU 淘汰）**。
+ *
+ * 原先都是裸 `Map`：key 不冲突（设计正确），但只增不删 —— 长跑内存缓慢增长。
+ * 现在统一走 `utils/lru.ts` 的 `lruSet`/`lruGet`：写入与命中都刷新到队尾，
+ * 超过上限就从最旧开始删。淘汰只影响性能（下次重新取上游），不影响正确性 ——
+ * 各自 24h TTL 照旧生效，所以上限可以取得保守。
+ *
+ * 上限依据：key 是**歌手 mid / 专辑 mid**，单用户的种子歌手量级是几十、
+ * 专辑 mid 量级是几百；这里按「多用户 + 长期运行」留足余量。
+ */
+const LATEST_ALBUM_DETAIL_CACHE_MAX = 128; // 存 Track[]（每条最多 40 首），体积最大 → 上限最小
+const LATEST_ALBUM_CACHE_MAX = 512; // 只存 {mid, ts}，极小
+const LATEST_ALBUM_LIST_CACHE_MAX = 256; // 存 Album[]，中等
+
 /** 最新专辑曲目缓存（**TTL = 24h**）：新专辑/新追加曲目 24h 内被识别（用户 2026-10-29） */
 const latestAlbumDetailCache = new Map<string, { songs: Track[]; ts: number }>();
 async function latestAlbumDetailCached(mid: string): Promise<Track[]> {
-  const hit = latestAlbumDetailCache.get(mid);
+  const hit = lruGet(latestAlbumDetailCache, mid);
   if (hit && Date.now() - hit.ts < LATEST_ALBUM_TTL_MS) return hit.songs;
   if (!(await qqGate())) return hit?.songs ?? [];
   const detail = await getAlbumDetail(mid, 40).catch(() => null);
   const songs = detail?.songs ?? [];
-  if (songs.length > 0) latestAlbumDetailCache.set(mid, { songs, ts: Date.now() });
+  if (songs.length > 0) lruSet(latestAlbumDetailCache, mid, { songs, ts: Date.now() }, LATEST_ALBUM_DETAIL_CACHE_MAX);
   return songs;
 }
 const latestAlbumCache = new Map<string, { mid: string; ts: number }>();
+
+/**
+ * 诊断用：三张缓存的当前条目数与各自上限（验证脚本/运维日志用，不参与选歌逻辑）。
+ * 加了 LRU 之后，条目数**永远 ≤ 对应上限**（超出即淘汰），这是 P2-B 的验收口径。
+ */
+export function albumCacheSizes(): {
+  list: number;
+  latest: number;
+  detail: number;
+  caps: { list: number; latest: number; detail: number };
+} {
+  return {
+    list: latestAlbumListCache.size,
+    latest: latestAlbumCache.size,
+    detail: latestAlbumDetailCache.size,
+    caps: {
+      list: LATEST_ALBUM_LIST_CACHE_MAX,
+      latest: LATEST_ALBUM_CACHE_MAX,
+      detail: LATEST_ALBUM_DETAIL_CACHE_MAX,
+    },
+  };
+}
 
 function isCleanAlbum(a: Album): boolean {
   return (
@@ -604,7 +643,7 @@ export async function latestAlbumSongsOf(
     const mid = String((newest as unknown as { mid?: string }).mid ?? '');
     if (!mid) return [];
     // 最新专辑专用 24h TTL：命中即认为「今天已检查过这张最新专辑」
-    const cached = latestAlbumCache.get(seed.mid);
+    const cached = lruGet(latestAlbumCache, seed.mid);
     const fresh = cached && cached.mid === mid && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS;
     // 冷却中：不打上游，但把最新专辑标记入队补拉（不跳过）
     if (!fresh && !(await probe.gate())) enqueueLatestAlbumRefresh(userId, seed.mid, seed.name);
@@ -617,7 +656,7 @@ export async function latestAlbumSongsOf(
      * 之后 24h 内既不打上游也不入队补拉 → **永不补拉，新歌漏检到 TTL 过期**。
      * 现在与 `:423` 的缓存条件对齐：拿到歌才算检查过。
      */
-    if (songs.length > 0) latestAlbumCache.set(seed.mid, { mid, ts: Date.now() });
+    if (songs.length > 0) lruSet(latestAlbumCache, seed.mid, { mid, ts: Date.now() }, LATEST_ALBUM_CACHE_MAX);
     const known = libraryTrackIds(seed.mid);
     const out: Track[] = [];
     for (const t of songs) {
@@ -688,13 +727,13 @@ async function albumsOf(seed: { name: string; mid: string }): Promise<Album[]> {
  */
 const latestAlbumListCache = new Map<string, { albums: Album[]; ts: number }>();
 async function latestAlbumsOf(seed: { name: string; mid: string }): Promise<Album[]> {
-  const cached = latestAlbumListCache.get(seed.mid);
+  const cached = lruGet(latestAlbumListCache, seed.mid);
   if (cached && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS) return cached.albums;
   if (!(await qqGate())) return cached?.albums ?? [];
   // ★ 新发现 A：扩大上限 + 按发行时间降序（否则最新录音室专辑可能不在前 10 张热度序里）
   const albums = await fetchAlbumsByPublishTime(seed);
   if (albums.length > 0) {
-    latestAlbumListCache.set(seed.mid, { albums, ts: Date.now() });
+    lruSet(latestAlbumListCache, seed.mid, { albums, ts: Date.now() }, LATEST_ALBUM_LIST_CACHE_MAX);
     return albums;
   }
   return [];
@@ -843,6 +882,8 @@ export function maintainLibrary(userId: number): { historyPruned: number; librar
   log.debug(`库维护：用户 ${userId} 当前处于 7 天冻结冷却期的推荐曲目共 ${coolCount} 首`);
   // 建库阶段同步打标（用户 2026-10-29）：给 library_tracks 补受控标签，落 track_tags + payload_json。
   // 幂等、只补没打过的；失败不影响主流程。
+  // ★ 修复批 4 · P2-A：这里不再只补 500 首 —— `syncLibraryTrackTags` 内部会按 500 一批
+  // 循环打到存量清空（单次最多 10 轮 = 5000 首的上限保护），所以每日钩子能把积压追完。
   try {
     syncLibraryTrackTags(500);
   } catch (err) {

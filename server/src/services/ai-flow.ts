@@ -703,6 +703,9 @@ export async function runDailyFlow(
    * 选歌 AI 写长理由（reason_for_review）→ 审核判断 approved/rejected + 精炼成 12-25 字短句
    * （reason_for_display）。approved 才落前端；rejected 丢掉推荐语（歌还在，只是没推荐语）。
    * 失败不阻塞落地（理由精炼是增值，不是准入闸门），只是没展示短句。
+   *
+   * ★ 修复批 4 · P2-D：这与上面 ⑥.5 的 `reviewPicks`「失败即停、保留旧歌单」**故意不同**，
+   * 是用户 2026-10-29 裁定的方案 A（保持现状），不是漏改 —— 别把它改成失败即停。
    */
   const displayBy = await reviewReasons(
     finalPicks.map(p => ({

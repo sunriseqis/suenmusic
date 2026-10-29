@@ -610,6 +610,9 @@ export async function autoTagUntagged(
   return { heuristicTagged, aiTagged, instrumentalTagged };
 }
 
+/** 单轮同步打标最多跑几轮（修复批 4 · P2-A 的上限保护） */
+export const SYNC_TAG_MAX_ROUNDS = 10;
+
 /**
  * 建库阶段同步打标（用户 2026-10-29）：给 `library_tracks` 里的曲目打受控标签，
  * 标签**同时落两处** —— `track_tags`（召回/画像统计用）与 `library_tracks.payload_json`，
@@ -618,9 +621,44 @@ export async function autoTagUntagged(
  * 只补没打过标的（`track_tags` 缺失的），幂等；用启发式规则（零网络）。
  * 这是**建库后的增量打标**，不动 `saveLibraryTracks` 的多源去重落库逻辑。
  *
- * @returns 本次打了多少首
+ * ★ 修复批 4 · P2-A：**循环把存量打完**。
+ *
+ * 原先只查一次 `LIMIT 500` —— 库里曲目超过 500 首时，每次调用（含 `maintainLibrary`
+ * 的每日钩子）只补 500 首，新增曲目一堆积就永远追不上存量。
+ * 现在按 `limit` 一批一批地打到「本轮没打满配额」为止（= 待打标的已清空）。
+ *
+ * **上限保护**：最多 `maxRounds` 轮（默认 10 轮 × 500 = 5000 首），防「某首曲目
+ * 打不上标（坏数据）」之类的异常导致死循环 —— 没打完的下次调用继续。
+ * 这是**启发式打标（零网络、零 token）**，跑多少轮都不烧钱，与 AI 打标无关。
+ *
+ * @param limit 每轮批量（默认 500）
+ * @param maxRounds 最多跑几轮（默认 10；脚本可传 1 保持「只打一批」的旧语义）
+ * @returns 本次（多轮合计）打了多少首
  */
-export function syncLibraryTrackTags(limit = 500): number {
+export function syncLibraryTrackTags(limit = 500, maxRounds = SYNC_TAG_MAX_ROUNDS): number {
+  const roundsCap = Math.max(1, Math.floor(maxRounds));
+  let total = 0;
+  let rounds = 0;
+  let changed = 0;
+  do {
+    changed = syncLibraryTrackTagsOnce(limit);
+    total += changed;
+    rounds += 1;
+    // 本轮打满配额 → 存量可能还没完，继续；没打满 → 待打标的已清空（或 limit<=0），收工
+    if (changed < limit) break;
+  } while (rounds < roundsCap);
+  if (total > 0) {
+    log.info(
+      `建库同步打标：${rounds} 轮合计 ${total} 首 library_tracks 写入受控标签（落 track_tags + payload_json）` +
+        (rounds >= roundsCap && changed >= limit ? `（已达单次 ${roundsCap} 轮上限，剩余存量下次调用继续）` : '')
+    );
+  }
+  return total;
+}
+
+/** 同步打标的单轮实现：查一批（≤ limit 首）没打标的，写 track_tags + payload_json */
+function syncLibraryTrackTagsOnce(limit: number): number {
+  if (limit <= 0) return 0;
   const db = getDatabase();
   const rows = db
     .prepare(
@@ -662,6 +700,6 @@ export function syncLibraryTrackTags(limit = 500): number {
     throw err;
   }
   saveTags(tagRows, 'heuristic_library');
-  log.info(`建库同步打标：${tagRows.length} 首 library_tracks 写入受控标签（落 track_tags + payload_json）`);
+  log.debug(`建库同步打标（单轮）：${tagRows.length} 首 library_tracks 写入受控标签（落 track_tags + payload_json）`);
   return tagRows.length;
 }

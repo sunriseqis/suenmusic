@@ -88,7 +88,8 @@ async function main(): Promise<number> {
   }
 
   // ① 先把没有标签行的 library_tracks 补上启发式标签（零网络），让它们进入 ② 的候选集
-  const synced = syncLibraryTrackTags(args.limit);
+  // maxRounds=1：脚本的 `--limit` 是「本次上限」，别被 P2-A 的多轮循环放大（只有日常钩子才循环打存量）
+  const synced = syncLibraryTrackTags(args.limit, 1);
   process.stdout.write(`\n① 建库同步打标：${synced} 首 library_tracks 补上启发式标签\n`);
 
   // ② 分批判器乐维度：每次取一小片（≤ 上限），循环到没活或到上限为止

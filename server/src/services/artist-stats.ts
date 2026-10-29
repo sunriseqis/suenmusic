@@ -52,7 +52,17 @@ export const FAMILIAR_MIN_TOP = 5; // ≥5 进 TOP 池
  */
 export type FamiliarityTier = 'refer' | 'liked' | 'top' | 'huge';
 
+/**
+ * ★ 修复批 4 · P2-C：**hits=10 的两套口径不同，是用户裁定的有意设计，不是 bug，不要"统一"掉。**
+ *
+ * - 熟悉度分档 `familiarityTier`：`>= 10` 就算 `huge`（10 首 = 「巨量」）；
+ * - TOP 歌手名单 `topArtists`：`> 10`（即 ≥11）才算 TOP（受更严的冷却/降频约束）。
+ *
+ * 用户 2026-10-29 裁定：10 首算「巨量」（分档要早一档），但「超巨量」受更严约束 ——
+ * 恰好 10 首不进 TOP 名单。两者服务不同目的，边界相差 1 首是**故意的**。
+ */
 export function familiarityTier(hits: number): FamiliarityTier {
+  // hits=10 → huge：有意为之（见上方 P2-C 注释），不要改成 > 10
   if (hits >= TOP_ARTIST_MIN_FAVORITES) return 'huge';
   if (hits >= FAMILIAR_MIN_TOP) return 'top';
   if (hits >= FAMILIAR_MIN_LIKED) return 'liked';
@@ -85,6 +95,10 @@ export function favoriteArtistRanking(userId: number, limit = 20): ArtistFavorit
  * 注意取的是**每首曲目的第一歌手**（`artists_json[0]`），与候选池里
  * `track.ar[0].name` 的用法保持一致 —— 否则"五月天"与"五月天 阿信"这类
  * 拆分写法会让冷却判不到，规则静默失效。
+ *
+ * ★ 修复批 4 · P2-C：这里的 `HAVING n > ?`（**严格大于** 10）与 `familiarityTier` 的
+ * `hits >= 10 → huge`（大于等于）**故意不同**：10 首算「巨量」分档，但恰好 10 首还不算
+ * 「超巨量」TOP，不受最严的冷却/降频约束。用户 2026-10-29 裁定，**不要改成 >=**。
  */
 export function topArtists(userId: number): ArtistFavoriteCount[] {
   const rows = getDatabase()
