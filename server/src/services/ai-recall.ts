@@ -17,11 +17,20 @@ import { getHomeData, getToplistDetail } from '../sources/qq/home.ts';
 import { getArtistAlbums } from '../sources/qq/artist.ts';
 import { searchQQ, qqCooldown } from '../sources/qq/search.ts';
 import { getAlbumDetail } from '../sources/qq/album.ts';
-import { getLibraryTracks, saveLibraryTracks } from '../db/repo/library.ts';
+import { enqueueBuildJob, getLibraryTracks, hasBuildJob, saveLibraryTracks } from '../db/repo/library.ts';
 import { getRejectionStats, listActiveRejections } from '../db/repo/ai-rejections.ts';
-import { heuristicTag } from './ai-tags.ts';
-import { coolingArtists, pickTopArtistForToday, topArtists } from './artist-stats.ts';
+import { heuristicTag, syncLibraryTrackTags } from './ai-tags.ts';
+import {
+  coolingArtists,
+  familiarityTier,
+  favoriteRateByArtist,
+  referTierArtistNames,
+  pickTopArtistForToday,
+  topArtists,
+  type FamiliarityTier,
+} from './artist-stats.ts';
 import { getSimilarArtists } from './similar-artists.ts';
+import { buildStyleProfile, topStyles } from './playlist-pool.ts';
 import { isCoverOrInstrumental } from './content-filter.ts';
 import type { Track, Album } from '../sources/qq/adapter.ts';
 import { createLogger } from '../logger.ts';
@@ -189,8 +198,23 @@ export interface RecallResult {
   dropped: number;
 }
 
-/** 收藏歌手（名字聚合）—— 与推荐链路同一口径（排除已拉黑歌手） */
-function seedArtists(userId: number): Array<{ name: string; mid: string; hits: number }> {
+export interface SeedArtist {
+  name: string;
+  mid: string;
+  /** 收藏该歌手的曲目数（第一歌手口径） */
+  hits: number;
+  /** 熟悉度分档（阈值 5，见 artist-stats.ts） */
+  tier: FamiliarityTier;
+}
+
+/**
+ * 收藏歌手（名字聚合）—— 与推荐链路同一口径（排除已拉黑歌手）。
+ *
+ * 2026-10-29 熟悉度阈值（用户拍板，阈值 5）：每位种子按收藏数分档。
+ * `refer`（1-2 首）**只作曲风参考、不进 TOP 池**；`top`/`huge`（≥5 首）进 TOP 池。
+ * 规则写在建池层（`buildCandidatePool` 的 `push`），不是提示词。
+ */
+function seedArtists(userId: number): SeedArtist[] {
   const rows = getDatabase()
     .prepare(
       `SELECT json_extract(je.value, '$.name') AS artist_name,
@@ -204,7 +228,12 @@ function seedArtists(userId: number): Array<{ name: string; mid: string; hits: n
         GROUP BY artist_name ORDER BY hits DESC LIMIT 20`
     )
     .all(userId, userId) as unknown as Array<{ artist_name: string; mid: string | null; hits: number }>;
-  return rows.filter(r => r.mid).map(r => ({ name: r.artist_name, mid: String(r.mid), hits: Number(r.hits) }));
+  return rows
+    .filter(r => r.mid)
+    .map(r => {
+      const hits = Number(r.hits);
+      return { name: r.artist_name, mid: String(r.mid), hits, tier: familiarityTier(hits) };
+    });
 }
 
 /** 标签查询：一次把池里用到的曲目标签取出来 */
@@ -239,6 +268,37 @@ function hotRankOf(trackIds: string[]): Map<string, number> {
     .all(...trackIds) as unknown as Array<{ id: string; hot_rank: number }>;
   for (const r of rows) out.set(r.id, Number(r.hot_rank));
   return out;
+}
+
+/**
+ * 曲风参考参考物（用户 2026-10-29）：用**曲风画像**（user_style_profile）当参考物。
+ *
+ * 链路：曲目标签（ai-tags）→ 聚合出 user_style_profile（topStyles 读取）→ 按 tag 匹配
+ * 「曲风相近」的歌喂给候选池的 simi 来源（不再纯按歌手相似发散）。
+ * 用户喜不喜欢这种曲风 = 从收藏曲目的标签分布反推（topStyles 权重即喜好度）。
+ *
+ * @returns 一组 {keyword, weight}（权重降序），供 simi 来源按标签匹配/加权
+ */
+function styleProfileOf(userId: number): Array<{ keyword: string; weight: number }> {
+  return topStyles(userId, 12);
+}
+
+/**
+ * 曲风匹配分：候选曲目的受控标签与用户曲风画像的加权重叠（越高 = 越符合用户口味）。
+ * 用于 simi 来源**加权**（不是过滤）：标签相近的排前面优先占名额，不取消资格。
+ */
+function styleScore(
+  trackTags: { styles: string[]; language: string },
+  profile: Array<{ keyword: string; weight: number }>
+): number {
+  if (profile.length === 0) return 0;
+  const weightBy = new Map(profile.map(p => [p.keyword, p.weight]));
+  let score = 0;
+  for (const s of trackTags.styles) {
+    score += weightBy.get(s) ?? 0;
+  }
+  if (trackTags.language) score += (weightBy.get(trackTags.language) ?? 0) * 0.5;
+  return score;
 }
 
 /** 冻结窗口：推荐历史只冻结这么久（用户拍板 7 天） */
@@ -340,6 +400,118 @@ function libraryTrackIds(artistMid: string): Set<string> {
 // 避免每次生成推荐时都对 10 位种子歌手连续打 10 次 QQ 专辑搜索触发 2001。
 const artistAlbumsCache = new Map<string, { albums: Album[]; ts: number }>();
 const ALBUM_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * ★ 专辑级新作检测（用户 2026-10-29：新歌识别不及时 → 为收藏 ≥5 的种子歌手做专辑级新作检测）。
+ *
+ * 口径：`getArtistAlbums` 按 `releasedate`（publishTime）排序，取**最新一张**非 Live/OST 专辑，
+ * 把它里面的歌当作本尊新歌候选（seedNew，无条件全进）。只认最新一张，避免把老专辑也算成新歌。
+ *
+ * **最新专辑缓存 TTL = 24h**（见 `LATEST_ALBUM_TTL_MS`）：新专辑发了 24h 内必被识别，
+ * 而普通深挖专辑仍是 7 天 TTL（`ALBUM_CACHE_TTL_MS`），两套缓存互不干扰。
+ *
+ * @returns 最新专辑里还没进库的曲目（作为新歌候选）；拿不到最新专辑时返回空
+ */
+const LATEST_ALBUM_TTL_MS = 24 * 60 * 60 * 1000;
+/** 最新专辑曲目缓存（**TTL = 24h**）：新专辑/新追加曲目 24h 内被识别（用户 2026-10-29） */
+const latestAlbumDetailCache = new Map<string, { songs: Track[]; ts: number }>();
+async function latestAlbumDetailCached(mid: string): Promise<Track[]> {
+  const hit = latestAlbumDetailCache.get(mid);
+  if (hit && Date.now() - hit.ts < LATEST_ALBUM_TTL_MS) return hit.songs;
+  if (!(await qqGate())) return hit?.songs ?? [];
+  const detail = await getAlbumDetail(mid, 40).catch(() => null);
+  const songs = detail?.songs ?? [];
+  if (songs.length > 0) latestAlbumDetailCache.set(mid, { songs, ts: Date.now() });
+  return songs;
+}
+const latestAlbumCache = new Map<string, { mid: string; ts: number }>();
+
+function isCleanAlbum(a: Album): boolean {
+  return (
+    !/(live|演唱会|现场|原声|ost|伴奏|精选|remix|混音)/i.test(a.name) &&
+    ((a as unknown as { size?: number }).size ?? 0) >= 4
+  );
+}
+
+async function latestAlbumSongsOf(userId: number, seed: { name: string; mid: string }, cap: number): Promise<Track[]> {
+  try {
+    // 专辑列表：按 releasedate 降序取最新一张。**专用 24h 缓存**（latestAlbumListCache），
+    // 不复用 7 天的 artistAlbumsCache —— 否则新专辑最多延迟 7 天才被看到（用户 2026-10-29）。
+    const albums = await latestAlbumsOf(seed);
+    const clean = albums.filter(isCleanAlbum);
+    // 按 publishTime 降序（ISO 风格日期字符串可直接比大小）
+    const newest = [...clean].sort((a, b) => String(b.publishTime ?? '').localeCompare(String(a.publishTime ?? '')))[0];
+    if (!newest) return [];
+    const mid = String((newest as unknown as { mid?: string }).mid ?? '');
+    if (!mid) return [];
+    // 最新专辑专用 24h TTL：命中即认为「今天已检查过这张最新专辑」
+    const cached = latestAlbumCache.get(seed.mid);
+    const fresh = cached && cached.mid === mid && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS;
+    if (fresh) {
+      // 24h 内已检查过这张最新专辑：仍返回其歌（去重交给 push），但不再打上游
+    } else if (await qqGate()) {
+      latestAlbumCache.set(seed.mid, { mid, ts: Date.now() });
+    } else {
+      // 冷却中：不打上游，但把最新专辑标记入队补拉（不跳过）
+      enqueueLatestAlbumRefresh(userId, seed.mid, seed.name);
+    }
+    const songs = await latestAlbumDetailCached(mid);
+    const known = libraryTrackIds(seed.mid);
+    const out: Track[] = [];
+    for (const t of songs) {
+      if (out.length >= cap) break;
+      if (out.some(x => x.id === t.id)) continue;
+      // 新歌 = 最新专辑里的歌；即使已进库也可能是「刚入库的新歌」，都算本尊新歌候选
+      void known;
+      out.push(t);
+    }
+    return out;
+  } catch (err) {
+    log.warn(`新作检测失败 ${seed.name}: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+/** 最新专辑刷新入队（getHomeData 失败/冷却时不跳过，补拉而非丢弃） */
+function enqueueLatestAlbumRefresh(userId: number, artistMid: string, name: string): void {
+  try {
+    const payload = JSON.stringify({ mid: artistMid, name });
+    if (hasBuildJob('artist_songs', payload)) return;
+    enqueueBuildJob(userId, 'artist_songs', payload, 'new_album_refresh');
+    log.info(`新作检测：${name} 最新专辑待补拉（已入队）`);
+  } catch {
+    /* 入队失败不影响主流程 */
+  }
+}
+
+/** 专辑列表（复用 deepCutsOf 的 7 天缓存 + 上游纪律） */
+async function albumsOf(seed: { name: string; mid: string }): Promise<Album[]> {
+  const cached = artistAlbumsCache.get(seed.mid);
+  if (cached && Date.now() - cached.ts < ALBUM_CACHE_TTL_MS) return cached.albums;
+  if (!(await qqGate())) return cached?.albums ?? [];
+  const res = await getArtistAlbums(seed.mid, seed.name, 10, 1);
+  if (res.albums.length > 0) {
+    artistAlbumsCache.set(seed.mid, { albums: res.albums, ts: Date.now() });
+    return res.albums;
+  }
+  return [];
+}
+/**
+ * 专辑列表（**24h 专用缓存**）：只服务最新专辑检测，确保新专辑 24h 内被看到。
+ * 与 `albumsOf`（7 天，深挖用）分开，互不拖累。
+ */
+const latestAlbumListCache = new Map<string, { albums: Album[]; ts: number }>();
+async function latestAlbumsOf(seed: { name: string; mid: string }): Promise<Album[]> {
+  const cached = latestAlbumListCache.get(seed.mid);
+  if (cached && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS) return cached.albums;
+  if (!(await qqGate())) return cached?.albums ?? [];
+  const res = await getArtistAlbums(seed.mid, seed.name, 10, 1);
+  if (res.albums.length > 0) {
+    latestAlbumListCache.set(seed.mid, { albums: res.albums, ts: Date.now() });
+    return res.albums;
+  }
+  return [];
+}
 
 async function deepCutsOf(seed: { name: string; mid: string }, cap: number): Promise<Track[]> {
   try {
@@ -491,6 +663,19 @@ export function maintainLibrary(userId: number): { historyPruned: number; librar
     )?.n ?? 0
   );
   log.debug(`库维护：用户 ${userId} 当前处于 7 天冻结冷却期的推荐曲目共 ${coolCount} 首`);
+  // 建库阶段同步打标（用户 2026-10-29）：给 library_tracks 补受控标签，落 track_tags + payload_json。
+  // 幂等、只补没打过的；失败不影响主流程。
+  try {
+    syncLibraryTrackTags(500);
+  } catch (err) {
+    log.warn(`建库同步打标失败（不影响选歌）：${(err as Error).message}`);
+  }
+  // 曲风画像（user_style_profile）本地聚合并刷新，供 simi 来源按标签匹配/加权（T5）。
+  try {
+    buildStyleProfile(userId);
+  } catch (err) {
+    log.warn(`曲风画像聚合失败（不影响选歌）：${(err as Error).message}`);
+  }
   return { historyPruned: 0, libraryDropped: 0 };
 }
 
@@ -536,6 +721,15 @@ export async function buildCandidatePool(
    *   4. 同时够格多位时，选**距上次出现在推荐里最久**的那位（让头部歌手交替出场）
    *   5. **本尊新歌（seedNew）豁免**：偶像发新歌不许被这条规则挡住
    */
+  /**
+   * 熟悉度阈值（用户 2026-10-29，阈值 5）：1-2 首收藏的歌手**只作曲风参考、不进 TOP 池**。
+   * 规则写在建池层（`push`），不是提示词 —— 模型看不见就不会违反。
+   * `refer` 名单按**歌手名**（首歌手口径）判定，push 里把这些歌手的本尊歌直接拦掉。
+   */
+  // 全量 refer 档（1-2 首收藏）歌手名：不只 top-20 种子，覆盖所有 1-2 首歌手（熟悉度阈值要求）
+  const referArtistNames = referTierArtistNames(userId);
+  /** 可进 TOP 池的种子（tier != refer，即收藏 >=3 首）：seedOld/seedNew 只从这些人里取 */
+  const poolSeeds = seeds.filter(s => s.tier !== 'refer');
   const topArtistNames = topArtists(userId).map(a => a.name);
   const topArtistSet = new Set(topArtistNames);
   const cooling = coolingArtists(userId);
@@ -595,6 +789,16 @@ export async function buildCandidatePool(
       droppedRef.n += 1;
       return false;
     }
+    /**
+     * ★ 熟悉度阈值（用户 2026-10-29）：1-2 首收藏的歌手（refer 档）**只作曲风参考、不进 TOP 池**。
+     * 本尊老歌 / 本尊新歌属于「该歌手的歌」= TOP 池来源，refer 档歌手一律拦掉；
+     * simi/playlist/chart 是发散来源，不受此限（它们按曲风/相似度进入）。
+     * 规则写在建池层，模型看不见就不会违反。
+     */
+    if ((source === 'seedOld' || source === 'seedNew') && referArtistNames.has(rawFirstArtist)) {
+      droppedRef.n += 1;
+      return false;
+    }
     seen.add(track.id);
     seen.add(key);
     seenArtists.add(artist);
@@ -603,11 +807,29 @@ export async function buildCandidatePool(
   };
 
   // ---- 1) 本尊新歌：无条件全进（只受去重限制）----
-  const home = (await qqGate()) ? await getHomeData().catch(() => null) : null;
-  const seedMids = new Set(seeds.map(s => s.mid));
+  // 本尊新歌必进：只认可进 TOP 池的种子（refer 档 1-2 首不进 TOP 池，其新歌也不作必进项）
+  const seedMids = new Set(poolSeeds.map(s => s.mid));
+  // (a) 全站新歌榜（getHomeData）：失败/冷却时**入队补拉**而非跳过（用户 2026-10-29）
+  let home: Awaited<ReturnType<typeof getHomeData>> | null = null;
+  if (await qqGate()) {
+    home = await getHomeData().catch(() => null);
+    if (!home) enqueueLatestAlbumRefresh(userId, 'home', 'getHomeData');
+  } else {
+    // 冷却中：不打上游，但补拉而不是丢掉（下次建库会把这批新歌补回来）
+    enqueueLatestAlbumRefresh(userId, 'home', 'getHomeData');
+  }
   for (const t of home?.newSongs ?? []) {
     const isSeedArtist = (t.ar ?? []).some(a => seedMids.has(String(a.mid ?? '')));
     if (isSeedArtist) push(t, 'seedNew');
+  }
+  // (b) 专辑级新作检测（用户 2026-10-29：新歌识别不及时）：
+  //     为收藏 ≥5 的种子（top/huge 档）检测**最新一张专辑**，其歌作本尊新歌候选。
+  //     最新专辑缓存 TTL = 24h，新专辑 24h 内必被识别。
+  const newAlbumSeeds = poolSeeds.filter(s => s.tier === 'top' || s.tier === 'huge');
+  for (const s of newAlbumSeeds.slice(0, 10)) {
+    for (const t of await latestAlbumSongsOf(userId, s, 8)) {
+      push(t, 'seedNew');
+    }
   }
 
   // ---- 2) 相似歌手：读缓存名单 → 找库内曲目 ----
@@ -620,11 +842,23 @@ export async function buildCandidatePool(
       .all(...neighborNames) as unknown as Array<{ mid: string }>).map(r => r.mid);
     const simiCap = ratios ? Math.floor(POOL_MAX * SHARE.simi) : POOL_MAX;
     let added = 0;
-    // 深挖优先：同一歌手内先给冷门（hot_rank 大）的，金曲占比自然被压低
-    const ranks = hotRankOf(libraryTracksOf(mids).map(t => t.id));
-    const ordered = libraryTracksOf(mids).sort(
-      (a, b) => (ranks.get(b.id) ?? 0) - (ranks.get(a.id) ?? 0)
-    );
+    /**
+     * 曲风参考加权（用户 2026-10-29）：simi 来源按**用户曲风画像（topStyles）标签匹配度**
+     * 优先排序 —— 标签相近的先占名额（加权，不取消资格）。不再纯按歌手相似发散。
+     */
+    const styleProfile = styleProfileOf(userId);
+    const simiTracks = libraryTracksOf(mids);
+    const simiTags = tagsOf(simiTracks.map(t => t.id));
+    const ranks = hotRankOf(simiTracks.map(t => t.id));
+    const scoreOf = (t: Track): number =>
+      styleScore(simiTags.get(t.id) ?? { styles: [], language: '' }, styleProfile);
+    const ordered = simiTracks.sort((a, b) => {
+      const sa = scoreOf(a);
+      const sb = scoreOf(b);
+      if (sa !== sb) return sb - sa; // 曲风匹配度高的优先
+      // 匹配度相同：深挖优先，同一歌手内先给冷门（hot_rank 大）的，金曲占比自然被压低
+      return (ranks.get(b.id) ?? 0) - (ranks.get(a.id) ?? 0);
+    });
     for (const t of ordered) {
       if (added >= simiCap) break;
       if (push(t, 'simi')) added += 1;
@@ -687,7 +921,19 @@ export async function buildCandidatePool(
 
   // ---- 4) 本尊老歌（反向权重：收藏少的歌手优先）+ **专辑非主打深挖** ----
   {
-    const ordered = [...seeds].sort((a, b) => a.hits - b.hits);
+    // 本尊老歌只从可进 TOP 池的种子取（refer 档 1-2 首不进 TOP 池）
+    // 未收藏 = 弱负信号（T2）：同歌手按**收藏率**降权（收藏率低 = 听过但未收藏多 = 排后面、更难占名额）
+    // —— 降权不取消资格，给「没想起来」留口子。收藏率相同时按收藏数少优先（沿用反向权重）。
+    const seedRates = favoriteRateByArtist(
+      userId,
+      poolSeeds.map(s => s.name)
+    );
+    const ordered = [...poolSeeds].sort((a, b) => {
+      const ra = seedRates.get(a.name) ?? 0;
+      const rb = seedRates.get(b.name) ?? 0;
+      if (ra !== rb) return rb - ra; // 收藏率高的先占名额；收藏率低（听过但未收藏多）= 弱正 = 排后面被降权
+      return a.hits - b.hits;
+    });
     const seedOldCap = ratios ? Math.floor(POOL_MAX * SHARE.seedOld) : POOL_MAX;
     let added = 0;
 

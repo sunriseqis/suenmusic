@@ -358,3 +358,141 @@ ${claimText}
   );
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// 第二轮：理由审核 + 精炼（用户 2026-10-29 新流程）
+// ---------------------------------------------------------------------------
+
+/**
+ * 选歌 AI 的一首长理由（reason_for_review，给审核看）。
+ */
+export interface ReasonReviewItem {
+  id: string;
+  name: string;
+  artist: string;
+  /** 选歌 AI 写的长听感（reason_for_review） */
+  reasonForReview: string;
+}
+
+/**
+ * 审核结论：approved → 精炼成 12-25 字短句（reason_for_display，给前端）；
+ * rejected → 丢掉，前端不展示推荐语（歌还在，只是没推荐语）。
+ */
+export interface ReasonVerdict {
+  verdict: 'approved' | 'rejected';
+  /** 审核精炼后的短句（12-25 字，仅 approved 有值） */
+  reasonForDisplay: string;
+}
+
+interface RawReasonReview {
+  reviews: Array<{ id: string; verdict: string; reason_for_display: string }>;
+}
+
+function parseReasonReview(text: string): RawReasonReview {
+  const cleaned = text.replace(/```json\s*/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start < 0 || end <= start) return { reviews: [] };
+  try {
+    const obj = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    const raw = Array.isArray(obj.reviews) ? obj.reviews : [];
+    return {
+      reviews: raw
+        .map(r => {
+          const o = r as Record<string, unknown>;
+          return {
+            id: String(o.id ?? '').trim(),
+            verdict: String(o.verdict ?? '').trim().toLowerCase(),
+            reason_for_display: String(o.reason_for_display ?? '').trim(),
+          };
+        })
+        .filter(r => r.id),
+    };
+  } catch {
+    return { reviews: [] };
+  }
+}
+
+/**
+ * 第二轮审核（用户 2026-10-29 新流程）：选歌 AI 写长理由 → 审核判断 + 精炼。
+ *
+ * - 判断：这句推荐理由是否**合理且被强烈认可**（approved）还是**在水**（rejected）。
+ * - 精炼：approved 的压成 12-25 字短句（reason_for_display，落前端推荐语页）。
+ * - rejected 的**丢掉**，前端不展示推荐语（歌还在，只是没推荐语）。
+ *
+ * 失败时返回空 Map（= 全部视为无展示短句），调用侧不阻塞落地 —— 与第一轮"失败即停"不同：
+ * 理由精炼是**增值**，不是准入闸门（歌单质量由第一轮 reviewPicks 把关）。
+ */
+/**
+ * reason_for_display 长度硬约束（用户口径 12-25 字）：规则写在代码层，不只靠提示词。
+ * 含标点总长超 25 -> 硬截到 25 字并去掉残留标点；不足 12 -> 原样保留（宁可短也不硬凑）。
+ */
+function clampDisplay(s: string): string {
+  const MAX = 25;
+  const t = s.trim();
+  const chars = [...t];
+  if (chars.length <= MAX) return t;
+  const cut = chars.slice(0, MAX).join('');
+  const trailing = new RegExp('[' + '，。、；：！？,.;:!?' + ']+$');
+  return cut.replace(trailing, '');
+}
+
+export async function reviewReasons(
+  items: ReasonReviewItem[]
+): Promise<Map<string, ReasonVerdict>> {
+  const out = new Map<string, ReasonVerdict>();
+  if (items.length === 0) return out;
+  const valid = new Set(items.map(i => i.id));
+
+  const system = `你是歌单推荐语审核员。选歌 AI 给每首歌写了一句**长听感理由**（reason_for_review，给审核看）。
+你的双重任务（每首歌判一次）：
+1. **判断**：这句推荐理由是否**具体、合理、你强烈认可**。
+   - approved = 理由有具体听感、站得住、值得给用户看。
+   - rejected = 理由在水（空洞套话、编造历史、与歌不符、泛泛而谈）。
+2. **精炼**（仅 approved）：把长理由压成 **12~25 个字（含标点，总长不超过 25 字）**的短句（reason_for_display），
+   保留最打动人的那个听感细节，纯文本、无 Markdown、无安全标签。
+   rejected 的 reason_for_display 留空。
+
+【极简思考要求】：简短中文迅速判断每首，立刻输出合法纯 JSON 对象。
+
+## 输出（严格 JSON，不要 markdown）
+{"reviews":[{"id":"<原样回填>","verdict":"approved|rejected","reason_for_display":"12~25字短句（approved 时填，rejected 留空）"}]}
+每首都要给一条。`;
+
+  const listText = items
+    .map(i => `[${i.id}] ${i.name} - ${i.artist} | 长理由：${i.reasonForReview}`)
+    .join('\n');
+
+  const user = `## 需要你判断 + 精炼的长理由（共 ${items.length} 首）
+${listText}
+
+请对每首输出 verdict 与 reason_for_display，直接输出纯 JSON 对象（以 "{" 开头，以 "}" 结尾）。`;
+
+  let rawText = '';
+  try {
+    rawText = await aiChat(
+      [
+        { role: 'system', content: system },
+        { role: 'user', content: user },
+      ],
+      { purpose: 'review', jsonMode: true, maxTokens: 8000, timeoutMs: 900_000 }
+    );
+  } catch (err) {
+    log.warn(`理由精炼失败（不阻塞落地，全部无展示短句）：${(err as Error).message}`);
+    return out;
+  }
+
+  const raw = parseReasonReview(rawText);
+  for (const r of raw.reviews) {
+    if (!valid.has(r.id)) continue;
+    const approved = r.verdict === 'approved';
+    const display = clampDisplay(r.reason_for_display.replace(/\s+/g, ' ').trim());
+    out.set(r.id, {
+      verdict: approved ? 'approved' : 'rejected',
+      reasonForDisplay: approved ? display : '',
+    });
+  }
+  const approvedCount = [...out.values()].filter(v => v.verdict === 'approved').length;
+  log.info(`理由精炼完成：approved ${approvedCount}/${items.length} 首（其余 rejected 不展示推荐语）`);
+  return out;
+}

@@ -138,7 +138,7 @@ function localCounts(userId: number): Record<keyof typeof POOL_FLOOR, number> {
  * @returns 本次做了什么（空数组 = 全部健康，什么都没做）
  */
 export async function ensurePoolHealth(userId: number): Promise<TopUpReport[]> {
-  // ① 非夜间闲时（3:00-6:00）严禁后台补库，防止白天与用户前台搜索争抢配额触发 2001 限流
+  // ① 非夜间闲时（1:00-6:00）严禁后台补库，防止白天与用户前台搜索争抢配额触发 2001 限流
   if (!isNightIdleWindow()) {
     return [];
   }
@@ -257,6 +257,33 @@ export function enqueueArtists(userId: number, mids: string[], origin: string): 
   for (const mid of mids) {
     if (!mid) continue;
     enqueueBuildJob(userId, 'artist_songs', mid, origin);
+    n += 1;
+  }
+  if (n > 0) kickLibraryBuilder(userId);
+  return n;
+}
+
+/**
+ * 用户行为触发建库（2026-10-29 用户拍板：建库必须被用户行为触发，不能只靠夜间定时）。
+ *
+ * 收藏歌单 / 导入歌单 → 把这批曲目的歌手名送进 `artist_resolve` 队列并**立刻 kick 建库循环**，
+ * 不等夜间窗口。`artist_resolve` 会走「名字 → mid → 建档 → 本地保底 → 多源补源」整条链。
+ *
+ * @returns 真正入队的歌手数（用于调用方日志/响应）
+ */
+export function enqueueArtistsFromTracks(
+  userId: number,
+  tracks: Array<{ ar?: Array<{ name?: string }> }>,
+  origin: string
+): number {
+  const names = new Set<string>();
+  for (const t of tracks ?? []) {
+    const first = (t?.ar ?? [])[0]?.name?.trim();
+    if (first) names.add(first);
+  }
+  let n = 0;
+  for (const name of names) {
+    enqueueBuildJob(userId, 'artist_resolve', name, origin);
     n += 1;
   }
   if (n > 0) kickLibraryBuilder(userId);

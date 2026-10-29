@@ -472,3 +472,59 @@ export async function autoTagUntagged(limit = 500): Promise<{ heuristicTagged: n
   }
   return { heuristicTagged, aiTagged };
 }
+
+/**
+ * 建库阶段同步打标（用户 2026-10-29）：给 `library_tracks` 里的曲目打受控标签，
+ * 标签**同时落两处** —— `track_tags`（召回/画像统计用）与 `library_tracks.payload_json`，
+ * （payload_json 里加 styles/language 字段，标签随曲目元数据一起旅行，选歌阶段可直接按标签过滤/加权）。
+ *
+ * 只补没打过标的（`track_tags` 缺失的），幂等；用启发式规则（零网络）。
+ * 这是**建库后的增量打标**，不动 `saveLibraryTracks` 的多源去重落库逻辑。
+ *
+ * @returns 本次打了多少首
+ */
+export function syncLibraryTrackTags(limit = 500): number {
+  const db = getDatabase();
+  const rows = db
+    .prepare(
+      `SELECT lt.id AS id,
+              json_extract(lt.payload_json, '$.name') AS name,
+              json_extract(lt.payload_json, '$.ar[0].name') AS artist,
+              COALESCE(json_extract(lt.payload_json, '$.al.name'), '') AS album
+         FROM library_tracks lt
+         LEFT JOIN track_tags g ON g.track_id = lt.id
+        WHERE g.track_id IS NULL
+          AND json_extract(lt.payload_json, '$.name') IS NOT NULL
+        LIMIT ?`
+    )
+    .all(limit) as unknown as Array<{ id: string; name: string; artist: string; album: string }>;
+  if (rows.length === 0) return 0;
+
+  const tagRows: TagRow[] = [];
+  const upd = db.prepare('UPDATE library_tracks SET payload_json = ? WHERE id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      const res = heuristicTag({ name: r.name, artist: r.artist, album: r.album });
+      tagRows.push({ trackId: r.id, styles: res.styles, language: res.language });
+      // 标签随元数据落 payload_json（styles / language 字段）
+      try {
+        const row = db.prepare('SELECT payload_json FROM library_tracks WHERE id = ?').get(r.id) as { payload_json: string } | undefined;
+        if (!row) continue;
+        const payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+        payload.styles = res.styles;
+        payload.language = res.language;
+        upd.run(JSON.stringify(payload), r.id);
+      } catch {
+        /* 坏 payload 跳过 */
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  saveTags(tagRows, 'heuristic_library');
+  log.info(`建库同步打标：${tagRows.length} 首 library_tracks 写入受控标签（落 track_tags + payload_json）`);
+  return tagRows.length;
+}

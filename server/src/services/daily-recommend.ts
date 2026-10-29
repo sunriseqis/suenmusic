@@ -307,14 +307,16 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
             !isCoverOrInstrumental(t)
         );
 
-        // 挂载推荐理由（自动清洗 Markdown 符号）
+        // 挂载推荐理由（自动清洗 Markdown 符号）。
+        // **前端只展示审核精炼后的短句（reason_for_display）**：approved 才有值，rejected 为空 →
+        // 前端拿到 undefined 就不展示推荐语（歌还在，只是没推荐语），长理由 reason_for_review 不给前端。
         // 读取期剔除 = 这份 payload 是旧规则生成的（现在选池阶段就能拦下，AI 根本看不到它们）。
         // 不做埋点，直接判过期并在后台重建一次；否则旧 payload 会一直「少几首」且永远没人修。
         if (filteredTracks.length < tracks.length) {
           scheduleStaleRegenerate(userId, tracks.length - filteredTracks.length);
         }
 
-        const reasonMap = new Map(parsed.picks.map(p => [p.trackId, cleanAiText(p.reason)]));
+        const reasonMap = new Map(parsed.picks.map(p => [p.trackId, cleanAiText(p.reason_for_display || '')]));
         const tracksWithReason = filteredTracks.map(t => ({
           ...t,
           recommendReason: reasonMap.get(t.id) || undefined,
@@ -382,7 +384,16 @@ interface DailyPayload {
   generatedAt?: number;
   greeting?: string;
   welcomePhrase?: string;
-  picks: Array<{ trackId: string; name?: string; artist?: string; reason?: string; source?: string }>;
+  picks: Array<{
+    trackId: string;
+    name?: string;
+    artist?: string;
+    /** 选歌 AI 的长听感（reason_for_review，给审核看）—— 不直接给前端 */
+    reason?: string;
+    /** 审核精炼后的短句（reason_for_display，12-25 字，approved 才有）—— 前端展示 */
+    reason_for_display?: string;
+    source?: string;
+  }>;
   /** 生成时的完整曲目快照（与 picks 同序）。老数据没有 → 读取回退到库/上游 */
   snapshot?: Array<Track | null>;
 }

@@ -80,6 +80,53 @@ export function saveLibraryTracks(
   const ts = now();
   const isRanked = options?.isRanked !== false;
 
+  /**
+   * 多源去重（用户 2026-10-29 拍板）：同一首歌在三源里都存在时只入库一次，
+   * id 归一到**首个命中源**的 id（输入顺序即源优先级：酷狗 → 网易云 → QQ）。
+   * 键 = 归一化曲名 + 首歌手名，与 `fetchArtistSongsMulti` 的 norm(name) 口径一致。
+   *
+   * 注意：这里的键不看 `artistMid`（那是归属歌手），只看曲目自带的首歌手名 ——
+   * 同一首合作曲被两位歌手的快照重复携带时，也只留一条（id 归一到首个命中源）。
+   */
+  const norm = (s: string): string =>
+    String(s ?? '')
+      .toLowerCase()
+      .replace(/\s+/g, '')
+      .replace(/[()（）[\]【】]/g, '')
+      .replace(/企画/g, '企划')
+      .replace(/計画/g, '计划');
+  const deduped: Track[] = [];
+  const seenKeys = new Set<string>();
+  for (const t of tracks) {
+    const key = `${norm(t?.name)}|${norm((t?.ar ?? [])[0]?.name ?? '')}`;
+    const [n0, n1] = key.split('|');
+    if (!n0 || !n1) continue;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    deduped.push(t);
+  }
+  if (deduped.length === 0) return;
+
+  // 已在库中的同键曲目（可能由别的来源先入库）也归一到首见 id：同键只留一条。
+  const existingRows = db
+    .prepare('SELECT id, payload_json FROM library_tracks WHERE artist_mid = ?')
+    .all(artistMid) as Array<{ id: string; payload_json: string }>;
+  const existingByKey = new Map<string, string>();
+  for (const row of existingRows) {
+    try {
+      const t = JSON.parse(row.payload_json) as Track;
+      const key = `${norm(t?.name)}|${norm((t?.ar ?? [])[0]?.name ?? '')}`;
+      if (key && !existingByKey.has(key)) existingByKey.set(key, row.id);
+    } catch {
+      /* 坏行跳过 */
+    }
+  }
+  const toInsert = deduped.filter(t => {
+    const key = `${norm(t?.name)}|${norm((t?.ar ?? [])[0]?.name ?? '')}`;
+    return !existingByKey.has(key);
+  });
+  if (toInsert.length === 0) return;
+
   const ins = db.prepare(
     `INSERT INTO library_tracks (id, artist_mid, payload_json, added_at, hot_rank)
      VALUES (?, ?, ?, ?, ?)
@@ -91,7 +138,7 @@ export function saveLibraryTracks(
   // node:sqlite 没有 better-sqlite3 的 .transaction() 助手，手动 BEGIN/COMMIT
   db.exec('BEGIN');
   try {
-    tracks.forEach((t, i) => {
+    toInsert.forEach((t, i) => {
       const rank = isRanked ? i + 1 : 0;
       ins.run(t.id, artistMid, JSON.stringify(t), ts, rank);
     });

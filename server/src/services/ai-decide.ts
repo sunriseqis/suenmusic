@@ -210,7 +210,9 @@ function buildMessages(
 2. **推荐理由拒绝一切空洞套话**：
    - **严禁**使用“符合你的口味”、“贴合你的歌单”、“符合风格偏好”、“拓展收藏歌手”、“情感充沛直接”等空洞套话！
    - **必须写出具体翔实的听感细节**：如器乐编曲（木吉他扫弦/清澈钢琴/复古合成器/低沉贝斯/管乐点缀）、唱腔质感（气声叙事/沙哑醇厚/空灵通透/松弛微醺）、或者具体的旋律场景（独处夜晚的沉静感/散步时的轻快律动/副歌爆发的穿透力）。
-   - **字数极简控制**：每首曲目的推荐理由严格控制在 **12 ~ 25 个汉字** 之间（至多 25 字，绝不允许长篇大论，确保在播放界面至多两行，轻量不喧宾夺主）。
+   - **推荐理由写给审核看（reason_for_review）**：写**详细翔实的听感**（30~80 字），讲清编曲、唱腔、旋律场景为什么触动"你"。
+     这是给审核 AI 看的长理由，**不是**给前端直接展示的短句 —— 前端短句由审核 AI 精炼。
+     严禁空洞套话，必须有具体听感细节。
 3. **不要编造历史**：
    - 理由聚焦在“这首歌本身的听觉亮点为什么会触动你”，不能凭空断言“你昨天听了某某歌”或“你上周收藏了某某”。
 
@@ -233,7 +235,7 @@ function buildMessages(
 9. **严禁挑选非歌曲音频**：任何短音频、切片、念白、伴奏、广告、无意义吟唱或片段均不得入选。
 
 ## 输出格式（严格 JSON，严禁包裹任何 markdown 标记、严禁额外解释、严禁输出“User Safety: safe”等安全风控元数据）
-{"picks":[{"id":"<候选池里的 id>","reason":"12~25字纯文本理由，严禁 Markdown 标记（禁 #、##、* 等），禁安全标签"}]}`;
+{"picks":[{"id":"<候选池里的 id>","reason_for_review":"30~80字详细听感（给审核看，纯文本，严禁 Markdown 标记、禁安全标签）"}]}`;
 
   const lines = selectFeedPool(pool, FEED_MAX)
     .map(c => {
@@ -274,7 +276,7 @@ ${lines}
 
 请为“你”从候选池挑 ${count} 首。
 ⚠️ 输出格式关键约束：请直接输出合法的纯 JSON 对象（必须以 "{" 开头，以 "}" 结尾，严禁任何前导问候、寒暄闲聊或 Markdown 格式）。
-输出 JSON 模板：{"picks":[{"id":"<候选池里的 id>","reason":"12~25字听感理由（纯文本，不要任何#号）"}]}`;
+输出 JSON 模板：{"picks":[{"id":"<候选池里的 id>","reason_for_review":"30~80字详细听感（给审核看，纯文本，不要任何#号）"}]}`;
 
   return [
     { role: 'system', content: system },
@@ -329,7 +331,8 @@ function parseDecision(text: string, pool?: Candidate[]): RawDecision {
       const obj = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
       const picks = (Array.isArray(obj.picks) ? obj.picks : []).map(p => {
         const o = p as Record<string, unknown>;
-        let reason = cleanAiText(String(o.reason ?? ''));
+        // 新字段 reason_for_review（长听感，给审核看）；兼容旧字段 reason
+        let reason = cleanAiText(String(o.reason_for_review ?? o.reason ?? ''));
         reason = reason.replace(/他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
         // 2026-10-23：**不再截断到 26 字**（用户在客户端看到每条推荐理由都以「…」结尾，
         // 那条「…」是这里加的，不是客户端 ellipsis）。仅保留一道防呆上限 120 字，

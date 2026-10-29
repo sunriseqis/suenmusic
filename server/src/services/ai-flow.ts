@@ -27,7 +27,9 @@ import { todayStr } from '../utils/dates.ts';
 import {
   reviewPicks,
   reviewExclusions,
+  reviewReasons,
   type ReviewItem,
+  type ReasonReviewItem,
   type ReviewOutcome,
   type ExclusionClaim,
 } from './ai-review.ts';
@@ -89,6 +91,8 @@ export interface FlowList {
     name: string;
     artist: string;
     reason: string;
+    /** 审核精炼后的短句（12-25 字）；rejected 或未精炼时为空，前端不展示推荐语 */
+    reason_for_display?: string;
     source: string;
     track?: Track;
   }>;
@@ -641,6 +645,24 @@ export async function runDailyFlow(
   const ts = Date.now();
   const batchId = `flow_${ts.toString(36)}`;
   const finalPicks = picks.slice(0, DAILY_MAX);
+  /**
+   * ⑦.5 第二轮理由审核 + 精炼（用户 2026-10-29 新流程）：
+   * 选歌 AI 写长理由（reason_for_review）→ 审核判断 approved/rejected + 精炼成 12-25 字短句
+   * （reason_for_display）。approved 才落前端；rejected 丢掉推荐语（歌还在，只是没推荐语）。
+   * 失败不阻塞落地（理由精炼是增值，不是准入闸门），只是没展示短句。
+   */
+  const displayBy = await reviewReasons(
+    finalPicks.map(p => ({
+      id: p.trackId,
+      name: p.name,
+      artist: p.artist,
+      reasonForReview: p.reason,
+    }))
+  );
+  for (const p of finalPicks) {
+    const v = displayBy.get(p.trackId);
+    p.reason_for_display = v && v.verdict === 'approved' ? v.reasonForDisplay : '';
+  }
   // 快照：把**完整 Track** 跟着 payload 一起存（而不是只存 id）。
   //
   // 为什么：读取路径此前只拿到 id，要 `getTracks()` 回查，查不到就串行打 QQ 补 —— 
@@ -656,6 +678,7 @@ export async function runDailyFlow(
       name: p.name,
       artist: p.artist,
       reason: p.reason,
+      reason_for_display: p.reason_for_display || '',
       source: p.source,
     })),
     // 快照顺序与 picks 一致；缺失曲目（模型编造/解析失败）对应位置为空，读取时跳过

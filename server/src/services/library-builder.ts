@@ -31,6 +31,7 @@ import { getArtistSongs } from '../sources/qq/artist.ts';
 import { fetchArtistSongsMulti } from './artist-songs-multi.ts';
 import { fetchSearchSlice, qqCooldown } from '../sources/qq/search.ts';
 import { findLocalArtist, findLocalTracksForArtist } from './local-catalog.ts';
+import { businessNow } from '../utils/dates.ts';
 
 const log = createLogger('library-builder');
 
@@ -46,17 +47,24 @@ const MAX_EXTERNAL_JOBS_PER_ROUND = 2;
 const EXTERNAL_TICK_DELAY_MS = 4_000;
 
 /**
- * 闲时窗口判定：每天凌晨 3:00 - 6:00
- * 白天（6:00 - 次日 3:00）严禁后台主动向 QQ 发起建库/补库网络请求，保证用户前台搜索 100% 顺畅。
+ * 闲时窗口判定：每天凌晨 1:00 - 6:00（用户 2026-10-29 拍板，原 3:00-6:00 太窄）。
+ * 白天（6:00 - 次日 1:00）严禁后台主动向 QQ 发起建库/补库网络请求，保证用户前台搜索 100% 顺畅。
+ * 用 businessNow()（业务本地时区）取小时，避免容器跑 UTC 时窗口漂移。
  */
 export function isNightIdleWindow(): boolean {
-  const hour = new Date().getHours();
-  return hour >= 3 && hour < 6;
+  const hour = businessNow().getUTCHours();
+  return hour >= 1 && hour < 6;
 }
 
 const sleep = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
 const norm = (s: string): string => String(s ?? '').toLowerCase().replace(/\s+/g, '');
+
+/**
+ * 多源上线时间（2026-10-27）。此前只拉过 QQ 单源的歌手，
+ * `hot_fetched_at` 早于它 → 强制走多源重拉，把 kg_/ne_ 补进来。
+ */
+const MULTI_SOURCE_LAUNCH_TS = Date.parse('2026-10-27T00:00:00+08:00');
 
 let building = false;
 
@@ -110,7 +118,7 @@ async function runLoop(triggerUserId: number): Promise<void> {
         }
         consecutiveExternalSkips += 1;
         if (consecutiveExternalSkips >= 5) {
-          log.info(`当前非夜间闲时（3:00-6:00），暂停后台外网建库，仅保留本地回填`);
+          log.info(`当前非夜间闲时（1:00-6:00），暂停后台外网建库，仅保留本地回填`);
           break;
         }
         continue;
@@ -193,19 +201,36 @@ async function resolveArtistName(job: BuildJob): Promise<{ resolvedLocally: bool
     upsertLibraryArtist(mid, cleanName);
     linkUserArtist(job.userId, mid, job.origin);
 
-    // 检查本地歌单池是否有该歌手现成曲目，就地回填
+    // ① 本地回填**只作保底**，不再短路多源（用户 2026-10-29 拍板）。
+    //    之前命中即 markArtistFetched + return，导致 fetchArtistSongsMulti 永不被调用，
+    //    library_tracks 100% 是 QQ 单源（kg_/ne_ 各 0）。
     if (!artistHasTracks(mid)) {
       const localTracks = findLocalTracksForArtist(mid);
       if (localTracks.length > 0) {
         saveLibraryTracks(mid, localTracks);
-        markArtistFetched(mid);
         log.info(
-          `[本地回填] 歌手「${cleanName}」(${mid}) 命中本地歌单，就地入库 ${localTracks.length} 首曲目（零网络请求）`
+          `[本地回填] 歌手「${cleanName}」(${mid}) 命中本地歌单，保底入库 ${localTracks.length} 首曲目（零网络请求），继续走多源补源`
         );
-      } else if (!hasBuildJob('artist_songs', mid)) {
-        enqueueBuildJob(job.userId, 'artist_songs', mid, job.origin);
       }
-    } else {
+    }
+
+    // ② 继续走多源补源：拉多源并入库（saveLibraryTracks 内部按 name+首歌手 去重，
+    //    同曲不同源 id 只留首个命中的源）。
+    //    强制条件：曲目不足 或 hot_fetched_at 早于多源上线时间（历史单源歌手必须重拉）。
+    const existing = getLibraryArtist(mid)?.hotFetchedAt ?? null;
+    const staleSingleSource = existing === null || existing < MULTI_SOURCE_LAUNCH_TS;
+    const needMulti = !artistHasTracks(mid) || staleSingleSource;
+    if (needMulti) {
+      const multi = await fetchArtistSongsMulti(cleanName, 30);
+      if (multi.songs.length > 0) {
+        saveLibraryTracks(mid, multi.songs);
+        log.info(
+          `[多源建库] 歌手「${cleanName}」(${mid}) 本地保底后多源补源 ${multi.songs.length} 首` +
+            ` 源=${multi.source} (酷狗${multi.detail.kugou}/网易云${multi.detail.netease}/QQ${multi.detail.qq})`
+        );
+      } else {
+        log.info(`[多源建库] 歌手「${cleanName}」(${mid}) 多源无新增曲目（保留本地保底）`);
+      }
       markArtistFetched(mid);
     }
     return { resolvedLocally: true };
@@ -292,28 +317,30 @@ async function fetchArtistSongs(job: BuildJob): Promise<{ resolvedLocally: boole
   const artist = getLibraryArtist(mid);
   const name = artist?.name ?? job.origin;
 
-  // 1. 已有曲目
-  if (artistHasTracks(mid)) {
+  // 1. 已有曲目：仅当 hot_fetched_at 早于多源上线时间时才强制重拉（补 kg_/ne_）
+  const fetchedAt = artist?.hotFetchedAt ?? null;
+  const staleSingleSource = fetchedAt === null || fetchedAt < MULTI_SOURCE_LAUNCH_TS;
+  if (artistHasTracks(mid) && !staleSingleSource) {
     markArtistFetched(mid);
     linkUserArtist(job.userId, mid, job.origin);
     return { resolvedLocally: true };
   }
 
-  // 2. 本地歌单池回填
+  // 2. 本地歌单池回填（只作保底，不再短路多源 —— 见 resolveArtistName 同款改造）
   const localTracks = findLocalTracksForArtist(mid);
   if (localTracks.length > 0) {
     const cleanName = localTracks[0]?.ar?.find(a => a.mid === mid)?.name ?? name;
     upsertLibraryArtist(mid, cleanName);
     saveLibraryTracks(mid, localTracks);
-    markArtistFetched(mid);
     linkUserArtist(job.userId, mid, job.origin);
     log.info(
-      `[本地回填] 歌手曲目「${name}」(${mid}) 命中本地歌单，回填 ${localTracks.length} 首（零网络请求）`
+      `[本地回填] 歌手曲目「${name}」(${mid}) 命中本地歌单，保底回填 ${localTracks.length} 首（零网络请求），继续走多源补源`
     );
-    return { resolvedLocally: true };
+    // 不 return：继续往下走多源补源
   }
 
-  // 3. 本地无曲目，走多源外网拉取（酷狗为主 → 网易云为辅 → QQ 兜底，不受 QQ 冷却阻塞）
+  // 3. 走多源外网拉取（酷狗为主 → 网易云为辅 → QQ 兜底，不受 QQ 冷却阻塞）
+  //    本地已有保底曲目时也照拉，靠 saveLibraryTracks 的 name+首歌手 去重归一 id。
 
   /**
    * 多源拉取（用户 2026-10-26 定稿）：**酷狗为主 → 网易云为辅 → QQ 兜底**。

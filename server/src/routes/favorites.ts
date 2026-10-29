@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path';
 import { getDatabase } from '../db/index.ts';
 import { getFavoritesSummary, getPersonaDetail, importPersonaSummary, triggerFavoritesSummaryUpdate } from '../services/ai-memory.ts';
 import { tagSingleTrack } from '../services/ai-tags.ts';
+import { enqueueArtistsFromTracks } from '../services/library-topup.ts';
 import { createZip, parseZip } from '../utils/zip.ts';
 import { cleanAiText } from '../utils/text.ts';
 import { createLogger } from '../logger.ts';
@@ -175,6 +176,9 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
     if (added) {
       triggerFavoritesSummaryUpdate(user.id);
       tagSingleTrack(trackId);
+      // 用户行为触发建库：收藏即刻把歌手排进 artist_resolve 并 kick 建库循环（不等夜间）
+      const t0 = getTracks([trackId])[0];
+      if (t0) enqueueArtistsFromTracks(user.id, [t0], 'fav:collect');
     }
     reply.code(added ? 201 : 200);
     return { ok: true, added, trackId };
@@ -233,6 +237,7 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
     }
     if (added > 0) {
       triggerFavoritesSummaryUpdate(user.id);
+      enqueueArtistsFromTracks(user.id, body.tracks as any[], 'fav:import');
     }
 
     return { ok: true, received: ids.length, added, total: repo.countFavorites(user.id) };
@@ -280,6 +285,7 @@ export function registerFavoriteRoutes(app: FastifyInstance): void {
     }
     if (added > 0) {
       triggerFavoritesSummaryUpdate(user.id);
+      enqueueArtistsFromTracks(user.id, tracks, 'fav:playlist');
     }
 
     return {
