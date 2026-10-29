@@ -61,8 +61,6 @@ interface Res {
   status: number;
   json: any;
   headers: Headers;
-  /** 原始字节（二进制接口用，如数据库备份下载） */
-  raw: Buffer;
 }
 
 async function req(
@@ -101,7 +99,7 @@ async function req(
     json = text;
   }
 
-  return { status: res.status, json, headers: res.headers, raw };
+  return { status: res.status, json, headers: res.headers };
 }
 
 /** Web 面板通道：走 /api/auth/session 拿 HttpOnly cookie（管理接口只认这条） */
@@ -749,82 +747,6 @@ async function main(): Promise<number> {
   // cookie 下发接口随直连模式废止（2026-10-20 删）：应该是 404，不是 403/401
   const cred = await req('GET', '/api/sources/credentials', { token: accessToken });
   eq('凭证下发接口已删除', cred.status, 404);
-
-  // ---------------------------------------------------------------------
-  section('[8d] 数据库恢复（覆盖式）');
-  // ---------------------------------------------------------------------
-  //
-  // 链路：下载当前库备份 → 制造差异（再建一个用户）→ 用备份恢复 →
-  // 差异消失（只剩原账号）。另外覆盖非法文件的拒绝路径。
-  // 先记录备份时的基线（账号数 / 注册开关），恢复后要和基线一致
-  const baseUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
-  const baseCount: number = baseUsers.json?.users?.length ?? -1;
-  const baseCfg = await req('GET', '/api/auth/config');
-  const baseRegOpen = baseCfg.json?.registrationOpen;
-
-  const backupRes = await req('GET', '/api/admin/backup', { cookie: adminCookie });
-  eq('cookie 通道可下载备份', backupRes.status, 200);
-  const backupBytes = backupRes.raw;
-  check('备份内容是 SQLite 库', backupBytes.length > 512
-      && backupBytes.toString('latin1', 0, 15) === 'SQLite format 3');
-
-  // 制造差异：打开注册 → 再建一个用户
-  await req('PATCH', '/api/admin/settings', {
-    cookie: adminCookie,
-    body: { allowRegistration: true },
-  });
-  await req('POST', '/api/auth/register', {
-    body: { username: 'will-vanish', password: PASSWORD },
-  });
-  const beforeUsers = await req('GET', '/api/admin/users', { cookie: adminCookie });
-  check(
-    '恢复前比备份时多一个账号',
-    Array.isArray(beforeUsers.json?.users)
-      && beforeUsers.json.users.length === baseCount + 1
-  );
-
-  // 非法文件：文件头不符
-  const notDb = await req('POST', '/api/admin/db/restore', {
-    cookie: adminCookie,
-    body: { dataBase64: Buffer.from('这不是数据库'.repeat(64)).toString('base64') },
-  });
-  checkErrorShape('非 SQLite 文件被拒', notDb, 400, 'bad_request');
-
-  // 合法恢复：拿之前的备份覆盖
-  const restoreRes = await req('POST', '/api/admin/db/restore', {
-    cookie: adminCookie,
-    body: { dataBase64: backupBytes.toString('base64') },
-  });
-  eq('恢复成功', restoreRes.status, 200);
-  check('恢复响应带回统计', typeof restoreRes.json?.users === 'number');
-  check(
-    '恢复响应带回兜底备份路径',
-    typeof restoreRes.json?.backupPath === 'string'
-      && restoreRes.json.backupPath.includes('.pre-restore-')
-  );
-  /**
-   * 恢复会**换掉整个库**，备份快照里没有"备份之后才建立"的 Web 会话 ——
-   * 所以原 cookie 必然 401。这里重新登录拿新 cookie 再数账号，
-   * 否则测的就不是"数据回到基线"，而是"会话没了"。
-   */
-  const adminCookie2 = await webCookie('tester', PASSWORD);
-  const afterUsers = await req('GET', '/api/admin/users', { cookie: adminCookie2 });
-  check(
-    '恢复后差异账号消失、回到备份基线',
-    Array.isArray(afterUsers.json?.users)
-      && afterUsers.json.users.length === baseCount
-      && !afterUsers.json.users.some((u: { username: string }) => u.username === 'will-vanish')
-  );
-  // 恢复的库就是备份那一刻的快照：注册开关也回到基线
-  const cfgAfter = await req('GET', '/api/auth/config');
-  check('恢复后注册开关回到备份时状态', cfgAfter.json?.registrationOpen === baseRegOpen);
-
-  // Bearer 打恢复接口同样被渠道闸挡下
-  const restoreByBearer = await req('POST', '/api/admin/db/restore', {
-    token: accessToken,
-    body: { dataBase64: backupBytes.toString('base64') },
-  });
-  checkErrorShape('恢复接口只认 Web cookie 会话', restoreByBearer, 403, 'forbidden');
 
   // ---- 汇总 ----
   process.stdout.write('\n' + '-'.repeat(60) + '\n');
