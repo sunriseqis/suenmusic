@@ -259,6 +259,30 @@ Mac（`suenqi@suenqideimac.lan`）上为拉 MPVKit 留下的两样，**保留不
 - web 资料库重排为 偏好信息 / 歌单管理 / 数据备份 三行
 - 旧的裸 .db 备份路由与双端备份死代码（约 −812 行）全部下线
 
+## 七·补二：iOS 编译验证已补跑（2026-10-29 晚）
+
+Mac 恢复后补跑了一整晚欠的 iOS 编译：
+
+```
+** BUILD SUCCEEDED **
+版本 2.1.0 (2010000)
+INSTALL_EXIT=0 / LAUNCH_EXIT=0，pid 1988
+
+[Mpv] 已选择音频输出 ao=audiounit
+[Mpv] 初始化完成 client_api=2
+[NowPlaying/engine-init] isActive(self)=true
+  cat=AVAudioSessionCategoryPlayback
+  mode=AVAudioSessionModeDefault     ← 不是 MoviePlayback
+  opts=0                             ← 不是 mixWithOthers
+  sessionRestored=Y
+```
+
+**验证覆盖**：本轮所有 iOS 改动（mpv 内核、音频会话修复、音质胶囊、备份死代码删除 −412 行、
+ImportReply 等孤儿清理）全部编译通过。
+
+**未能验的**：实际播放未触发 —— 备份恢复测试（整库覆盖）轮换了 jwt secret，
+所有账号被登出，模拟器需要重新登录。**这不是代码问题**。
+
 ## 八、当前进度
 
 - [x] P0 生成器 SPM + MPVKit 编译通过（`nm` 155 个 mpv_ 符号，Release 有 DCE 陷阱已记录）
@@ -270,7 +294,10 @@ Mac（`suenqi@suenqideimac.lan`）上为拉 MPVKit 留下的两样，**保留不
 - [ ] **P6 MVP 内核精简（音频专用 ffmpeg + libmpv）** ← 下一步
 - [ ] **P7 真机待验批次**（锁屏/灵动岛/自愈/重置/AirPlay/线控/后台，见第十节）
 - [ ] backupUrls 客户端侧换镜像（服务端已下发，iOS 尚未消费）
-- [ ] **CI 验证 iOS / 鸿蒙编译**（Mac 整晚离线，两端只过了静态门禁；web/server 本地已真编译）
+- [x] **iOS 编译验证**（2026-10-29 补跑）：Mac 恢复后 `BUILD SUCCEEDED`，
+  装机运行正常，`[Mpv] ao=audiounit` 加载成功、
+  `[NowPlaying/engine-init] opts=0 mode=Default sessionRestored=Y` —— 锁屏/灵动岛根因修复确认生效
+- [ ] **鸿蒙编译验证**（走 CI，Windows 离线；CI 出包即真实编译）
 - [ ] P3 移除 AVPlayer
 - [ ] P4 回归
 - [ ] P5 放开无损 + 多镜像
