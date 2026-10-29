@@ -40,6 +40,7 @@ final class AppState: ObservableObject {
             api.reloadTokenFromDefaults()
             NSLog("[Boot] 已从环境变量注入刷新令牌")
         }
+
         // 无触摸环境（模拟器自动化验收）用账号直接登录：SUEN_USER + SUEN_PASS，配合 SUEN_BASE_URL。
         // 注意：不能只在 !api.isLoggedIn 时登 —— 旧 accessToken 还在内存里时 isLoggedIn 为真，
         // 但 /api/auth/me 会 401（令牌轮换过），结果是卡在登录页永远进不去。
@@ -62,13 +63,21 @@ final class AppState: ObservableObject {
         }
     }
 
+
     func login(address: String, username: String, password: String) async {
         errorMessage = nil
         var addr = address.trimmingCharacters(in: .whitespacesAndNewlines)
         while addr.hasSuffix("/") { addr.removeLast() }
         if !addr.isEmpty {
             ServerRouter.shared.currentBaseURL = addr
-            ServerRouter.shared.save(candidates: [ServerCandidate(url: addr, name: "默认")])
+            // ⚠️ 只在「列表里还没有这个地址」时补一条，**绝不整表覆盖**：
+            // 原实现 `save(candidates: [addr])` 会把用户已配置的其他服务器（反代/隧道）全删掉，
+            // 于是「重新登录一次」就等于清空服务器列表 —— 多服务端形同虚设。
+            var list = ServerRouter.shared.candidates
+            if !list.contains(where: { $0.url == addr }) {
+                list.append(ServerCandidate(url: addr, name: "默认"))
+            }
+            ServerRouter.shared.save(candidates: list)
             serverAddress = addr
         }
         do {

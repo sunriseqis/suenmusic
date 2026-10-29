@@ -266,7 +266,7 @@ final class APIClient {
         req.httpMethod = method
         req.timeoutInterval = timeout
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.setValue("Accept", forHTTPHeaderField: "application/json")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let bearer, !bearer.isEmpty {
             req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
@@ -288,6 +288,9 @@ final class APIClient {
             throw ApiError(status: 401, code: "unauthorized", message: "登录已失效，请重新登录")
         }
         guard (200..<300).contains(http.statusCode) else {
+            NSLog("[Switch] directJSON %@ %@ → HTTP %d respLen=%d reqBodyLen=%d body=%@",
+                  method, path, http.statusCode, data.count, body?.count ?? -1,
+                  String(data: data.prefix(200), encoding: .utf8) ?? "(binary)")
             if let parsed = try? JSONDecoder().decode(ApiErrorBody.self, from: data) {
                 throw ApiError(status: http.statusCode, code: parsed.error.code, message: parsed.error.message)
             }

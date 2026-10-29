@@ -361,7 +361,7 @@ final class ServerStore: ObservableObject {
         req.httpMethod = method
         req.timeoutInterval = verifyTimeout
         req.cachePolicy = .reloadIgnoringLocalCacheData
-        req.setValue("Accept", forHTTPHeaderField: "application/json")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
         if let token, !token.isEmpty {
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
