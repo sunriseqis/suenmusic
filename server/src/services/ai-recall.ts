@@ -167,8 +167,15 @@ export function isJunk(track: Track): boolean {
   if (/(翻唱合集|铃声|短视频)/i.test(albumName)) return true;
 
   // 时长过滤：必须为完整单曲（>= 90 秒），杜绝 29 秒无意义短音频/吟唱/间奏
+  /**
+   * ★ 2026-10-29：`sec <= 0`（拿不到时长）**也判 junk**。
+   *
+   * 原来写的是 `sec > 0 && sec < MIN`，于是「dt 缺失 / dt=0 / 时长解析失败」的条目
+   * 整条从时长过滤里漏过 —— 一个不知道多长的东西照样被推进歌单（片段/试听/间奏
+   * 恰恰最可能没有时长字段）。宁可少推一首，也不推一个不知道多长的东西。
+   */
   const sec = (track.dt ? track.dt / 1000 : track.duration) || 0;
-  if (sec > 0 && sec < MIN_SONG_DURATION_SEC) return true;
+  if (sec <= 0 || sec < MIN_SONG_DURATION_SEC) return true;
 
   // UGC 味很重的标题：超长 + 大量符号/标签
   if (name.length > 40) return true;
@@ -278,6 +285,23 @@ function hotRankOf(trackIds: string[]): Map<string, number> {
     .all(...trackIds) as unknown as Array<{ id: string; hot_rank: number }>;
   for (const r of rows) out.set(r.id, Number(r.hot_rank));
   return out;
+}
+
+/**
+ * 已判定为器乐/翻奏/片段的曲目 id（`track_tags.is_instrumental = 1`）。
+ *
+ * ★ 2026-10-29（方案 B）：关键词方案（content-filter.ts）永远追不上器乐专辑的命名，
+ * 所以「是不是器乐」改由 AI 打标判定、落到 `track_tags.is_instrumental`，召回按字段过滤。
+ *
+ * 性能：候选由 5 路来源在流程中**逐步产生**（相似歌手/网友歌单/本尊老歌/榜单/新歌），
+ * 建池前拿不到完整 id 列表，所以这里**一次查询**把已判定为器乐的 id 全取进内存
+ * （命中 `idx_track_tags_instrumental`），push 里只做 Set 查找 —— 绝不 per-track 查库。
+ */
+function instrumentalTrackIds(): Set<string> {
+  const rows = getDatabase()
+    .prepare('SELECT track_id FROM track_tags WHERE is_instrumental = 1')
+    .all() as unknown as Array<{ track_id: string }>;
+  return new Set(rows.map(r => r.track_id));
 }
 
 /**
@@ -906,6 +930,12 @@ export async function buildCandidatePool(
     ? (topArtistRows.find(a => a.name === allowedTopToday)?.mid ?? '')
     : '';
 
+  /**
+   * ★ 器乐/翻奏/片段的**第二道防线**（2026-10-29 用户裁定，方案 B）。
+   * 建池开头一次性取好（见 instrumentalTrackIds），push 里只做内存查找。
+   */
+  const instrumentalIds = instrumentalTrackIds();
+
   const push = (track: Track, source: CandidateSource): boolean => {
     if (isJunk(track)) {
       droppedRef.n += 1;
@@ -920,6 +950,17 @@ export async function buildCandidatePool(
      * 不需要在每个来源各写一遍。
      */
     if (isCoverOrInstrumental(track)) {
+      droppedRef.n += 1;
+      return false;
+    }
+    /**
+     * 第二道：AI 打标判定的器乐/翻奏/片段（`is_instrumental = 1`）→ 不入池。
+     *
+     * 为什么两道都要留：关键词能抓的当场抓掉（零成本、零等待），抓不到的
+     * （`北国之春 | 刘慧敏 | 琴意绵绵Ⅱ` 这种干净命名的器乐专辑）靠打标兜底。
+     * NULL（未判定）**不拦** —— 没有证据不等于有罪，等打标补齐。
+     */
+    if (instrumentalIds.has(track.id)) {
       droppedRef.n += 1;
       return false;
     }

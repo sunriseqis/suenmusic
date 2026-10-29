@@ -8,6 +8,10 @@
  *    我们**丢弃并计数**（拒收率是衡量模型是否听话的指标）。
  * 2. **语种不是风格**：单列字段。给"中文流行/日文流行"这种混维度标签一律不许。
  * 3. 召回不引向量库：缺的是标签，不是相似度计算。标签落库后召回就是 SQL 过滤。
+ * 4. **「是不是器乐/翻奏/片段」是独立的准入维度，不是风格词**（2026-10-29 用户裁定，方案 B）：
+ *    单独一个布尔字段 `track_tags.is_instrumental`（NULL=未判定 / 0=正常歌曲 / 1=器乐·翻奏·纯音乐·片段），
+ *    与 styles / language 并列，**不进受控词表**。理由见 026 迁移文件头：
+ *    器乐专辑的命名是无限的（琴意绵绵/夜色/镜夜…），关键词方案永远追不上，只能让模型判。
  *
  * 输出是短 JSON（每首一行），正好避开"长 JSON 空手"的模型短板。
  */
@@ -63,6 +67,14 @@ export interface TagRow {
   trackId: string;
   styles: string[];
   language: string;
+  /**
+   * 器乐/翻奏/片段：1 = 是（召回丢弃）/ 0 = 正常歌曲 / null = 本次未判定。
+   *
+   * 为什么用 null 而不是 false：启发式规则（`heuristicTag`）**不产出这个维度**
+   * —— 它只能靠关键词，而那正是本方案要绕开的东西。写成 0 等于把「没判定」
+   * 谎报成「判定为正常歌曲」，之后永远不会再被 AI 判一次。
+   */
+  instrumental: number | null;
 }
 
 /** 统计：用来判断模型是否"听话" */
@@ -70,6 +82,8 @@ export interface TagStats {
   tagged: number;
   rejectedStyles: string[];
   rejectedLanguages: string[];
+  /** 器乐维度上越界的值（模型给了 true/false 之外的东西，如 "器乐"/"maybe"） */
+  rejectedInstrumental: string[];
   batches: number;
 }
 
@@ -236,6 +250,8 @@ export function tagTracksHeuristic(limit = 1000): number {
       trackId: r.id,
       styles: res.styles,
       language: res.language,
+      // 启发式不判器乐（关键词正是本方案要绕开的东西）→ 留 NULL，等 AI 补判
+      instrumental: null,
     });
   }
 
@@ -263,8 +279,18 @@ ${STYLE_VOCAB.join(' / ')}
 只能填一个且必须在受控清单中：${LANGUAGE_VOCAB.join(' / ')}
 （绝对不要出现“中文流行/国语流行”等混合词）。
 
+## 器乐/翻奏（instrumental）—— 布尔值，只能填 true 或 false
+这是**内容类型**判定，与风格无关：一首古风歌可以有人声（false），一首钢琴曲也可以是古典（true）。
+- true：纯器乐 / 钢琴曲 / 演奏版 / 伴奏 / 翻奏（非原唱）/ 八音盒 / 音乐盒 / BGM / 冥想助眠白噪音 /
+  琴曲集、夜色钢琴、轻音乐合辑这类**整张都是器乐**的专辑；片段（试听/剪辑/间奏）也算 true。
+- false：有人声演唱的正式歌曲（原唱、以及有人声的翻唱）。
+- 翻唱判定：**歌手不是原唱、且明显是翻唱/改编版本** → true（用户不要翻唱）。
+- 拿不准时按 false（宁可漏判，不要误杀正常歌）。
+- 判定提示：专辑名像器乐合辑（琴意绵绵 / 夜色 / 镜夜 / 延禧 / 钢琴集）、
+  歌手是演奏者/翻奏者、曲名带 (钢琴版)/(演奏版)/(伴奏)/八音盒 的，都要判 true。
+
 ## 输出格式（严格纯 JSON 对象，严禁 Markdown 标记）
-{"items":[{"id":"<原样回填 id>","styles":["情歌","R&B"],"language":"华语"}]}`;
+{"items":[{"id":"<原样回填 id>","styles":["情歌","R&B"],"language":"华语","instrumental":false}]}`;
 
   const user = rows.map(r => `id=${r.id} | ${r.name} | ${r.artist} | ${r.album}`).join('\n');
   return [
@@ -315,7 +341,20 @@ function validate(
       if (language) stats.rejectedLanguages.push(language);
       language = '';
     }
-    out.push({ trackId: id, styles: pickedStyles.slice(0, 3), language });
+    // 器乐维度：只收布尔（容忍 "true"/"false" 字符串），其余一律丢弃并计数（沿用拒收率机制）
+    let instrumental: number | null = null;
+    const rawInst: unknown = item.instrumental;
+    if (typeof rawInst === 'boolean') {
+      instrumental = rawInst ? 1 : 0;
+    } else if (typeof rawInst === 'string') {
+      const v = rawInst.trim().toLowerCase();
+      if (v === 'true') instrumental = 1;
+      else if (v === 'false') instrumental = 0;
+      else if (v) stats.rejectedInstrumental.push(v);
+    } else if (rawInst !== undefined && rawInst !== null) {
+      stats.rejectedInstrumental.push(String(rawInst));
+    }
+    out.push({ trackId: id, styles: pickedStyles.slice(0, 3), language, instrumental });
   }
   return out;
 }
@@ -324,16 +363,18 @@ function saveTags(rows: TagRow[], model: string): void {
   if (rows.length === 0) return;
   const db = getDatabase();
   const ins = db.prepare(
-    `INSERT INTO track_tags (track_id, styles, language, acceptance, source, model, tagged_at)
-     VALUES (?, ?, ?, 0, 'ai', ?, ?)
+    `INSERT INTO track_tags (track_id, styles, language, is_instrumental, acceptance, source, model, tagged_at)
+     VALUES (?, ?, ?, ?, 0, 'ai', ?, ?)
      ON CONFLICT(track_id) DO UPDATE SET
        styles = excluded.styles, language = excluded.language,
+       -- COALESCE：本次没判定（null）时保留库里已有的判定，绝不用 NULL 覆盖已知结果
+       is_instrumental = COALESCE(excluded.is_instrumental, track_tags.is_instrumental),
        source = 'ai', model = excluded.model, tagged_at = excluded.tagged_at`
   );
   const ts = Date.now();
   db.exec('BEGIN');
   try {
-    for (const r of rows) ins.run(r.trackId, JSON.stringify(r.styles), r.language, model, ts);
+    for (const r of rows) ins.run(r.trackId, JSON.stringify(r.styles), r.language, r.instrumental, model, ts);
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -358,9 +399,12 @@ export function tagSingleTrack(trackId: string): void {
 
   if (row) {
     const res = heuristicTag(row);
-    saveTags([{ trackId: row.id, styles: res.styles, language: res.language }], 'heuristic');
+    saveTags([{ trackId: row.id, styles: res.styles, language: res.language, instrumental: null }], 'heuristic');
   }
 }
+
+/** 打标输入行（tracks / library_tracks 两个口径取出来的形状一样） */
+type TagSourceRow = { id: string; name: string; artist: string; album: string };
 
 /**
  * 批量打标：一次跑 limit 首（每批 BATCH_SIZE 首调一次模型）。
@@ -374,17 +418,89 @@ export async function tagTracks(limit: number): Promise<TagStats> {
   if (!cfg) {
     log.info('AI 模型未配置，执行启发式快速打标');
     const hTagged = tagTracksHeuristic(limit);
-    return { tagged: hTagged, rejectedStyles: [], rejectedLanguages: [], batches: 0 };
+    return emptyStats(hTagged);
   }
 
   const rows = pickUntagged(limit);
   if (rows.length === 0) {
     log.info('没有待打标的曲目');
-    return { tagged: 0, rejectedStyles: [], rejectedLanguages: [], batches: 0 };
+    return emptyStats(0);
   }
-  log.info(`待打标 ${rows.length} 首，每批 ${BATCH_SIZE} 首`);
+  return runAiTagging(rows, cfg.model, { heuristicFallback: true, label: '待打标' });
+}
 
-  const stats: TagStats = { tagged: 0, rejectedStyles: [], rejectedLanguages: [], batches: 0 };
+function emptyStats(tagged = 0): TagStats {
+  return { tagged, rejectedStyles: [], rejectedLanguages: [], rejectedInstrumental: [], batches: 0 };
+}
+
+/**
+ * 待判定器乐维度的曲目（`is_instrumental IS NULL`）。
+ *
+ * 为什么不能复用 `pickUntagged`：那一支只挑「`track_tags` 里根本没有行」的曲目，
+ * 而器乐判定是**后加的维度** —— 存量 8308 行都有标签行、只是这一列是 NULL。
+ * 用错口径会出现「明明没判定过，却永远挑不到」的死角。
+ *
+ * 两个来源合并：`tracks`（搜索结果/收藏）与 `library_tracks`（建库曲目，未必在 tracks 里）。
+ */
+export function pickUnjudgedInstrumental(limit: number): TagSourceRow[] {
+  return getDatabase()
+    .prepare(
+      `SELECT g.track_id AS id,
+              COALESCE(json_extract(t.payload_json, '$.name'), json_extract(lt.payload_json, '$.name')) AS name,
+              COALESCE(json_extract(t.artists_json, '$[0].name'), json_extract(lt.payload_json, '$.ar[0].name')) AS artist,
+              COALESCE(json_extract(t.payload_json, '$.al.name'), json_extract(lt.payload_json, '$.al.name'), '') AS album
+         FROM track_tags g
+         LEFT JOIN tracks t ON t.id = g.track_id
+         LEFT JOIN library_tracks lt ON lt.id = g.track_id
+        WHERE g.is_instrumental IS NULL
+          AND COALESCE(json_extract(t.payload_json, '$.name'), json_extract(lt.payload_json, '$.name')) IS NOT NULL
+        ORDER BY EXISTS(SELECT 1 FROM favorites f WHERE f.track_id = g.track_id) DESC, g.tagged_at DESC
+        LIMIT ?`
+    )
+    .all(limit) as unknown as TagSourceRow[];
+}
+
+/** 还有多少首等着判定器乐维度（回填脚本报数用） */
+export function countUnjudgedInstrumental(): number {
+  const row = getDatabase()
+    .prepare('SELECT COUNT(*) AS n FROM track_tags WHERE is_instrumental IS NULL')
+    .get() as { n?: number } | undefined;
+  return Number(row?.n ?? 0);
+}
+
+/**
+ * 器乐/翻奏/片段维度批量判定（2026-10-29 用户裁定，方案 B）。
+ *
+ * 只挑 `is_instrumental IS NULL` 的曲目，**不动已有判定**；AI 未配置时直接跳过
+ * （启发式规则不产出这个维度 —— 见 TagRow.instrumental 的注释）。
+ *
+ * ⚠️ 刻意**不做启发式兜底**：这一维度的兜底就是关键词方案本身（`isCoverOrInstrumental`，
+ * 已作为召回第一道防线），在这里写假判定只会把「未判定」永久钉成「正常歌曲」。
+ * 模型失败 → 保持 NULL → 下次再判（回填脚本会报出剩余数量）。
+ */
+export async function tagInstrumental(limit: number): Promise<TagStats> {
+  const cfg = readAiConfig();
+  if (!cfg) {
+    log.warn('AI 模型未配置：器乐维度无法判定（该维度不吃启发式规则），本次跳过');
+    return emptyStats(0);
+  }
+  const rows = pickUnjudgedInstrumental(limit);
+  if (rows.length === 0) {
+    log.info('没有待判定器乐维度的曲目');
+    return emptyStats(0);
+  }
+  return runAiTagging(rows, cfg.model, { heuristicFallback: false, label: '待判定器乐' });
+}
+
+/** 模型调用 + 严格校验 + 落库的批处理内核（tagTracks / tagInstrumental 共用一份） */
+async function runAiTagging(
+  rows: TagSourceRow[],
+  model: string,
+  opts: { heuristicFallback: boolean; label: string }
+): Promise<TagStats> {
+  log.info(`${opts.label} ${rows.length} 首，每批 ${BATCH_SIZE} 首`);
+
+  const stats = emptyStats(0);
 
   for (let i = 0; i < rows.length; i += BATCH_SIZE) {
     const batch = rows.slice(i, i + BATCH_SIZE);
@@ -401,7 +517,7 @@ export async function tagTracks(limit: number): Promise<TagStats> {
           log.warn(`第 ${Math.floor(i / BATCH_SIZE) + 1} 批：模型输出里没有可用条目（尝试 ${attempt + 1}）`);
           continue;
         }
-        saveTags(valid, cfg.model);
+        saveTags(valid, model);
         tagged = valid.length;
         break;
       } catch (err) {
@@ -409,8 +525,8 @@ export async function tagTracks(limit: number): Promise<TagStats> {
       }
     }
 
-    // 容灾兜底：若 AI 未能成功打标该批，由启发式规则保底
-    if (tagged < batch.length) {
+    // 容灾兜底：若 AI 未能成功打标该批，由启发式规则保底（仅风格/语种维度）
+    if (opts.heuristicFallback && tagged < batch.length) {
       const db = getDatabase();
       const untaggedInBatch = batch.filter(b => {
         const row = db.prepare('SELECT track_id FROM track_tags WHERE track_id = ?').get(b.id);
@@ -419,7 +535,7 @@ export async function tagTracks(limit: number): Promise<TagStats> {
       if (untaggedInBatch.length > 0) {
         const fallbackRows: TagRow[] = untaggedInBatch.map(r => {
           const h = heuristicTag(r);
-          return { trackId: r.id, styles: h.styles, language: h.language };
+          return { trackId: r.id, styles: h.styles, language: h.language, instrumental: null };
         });
         saveTags(fallbackRows, 'heuristic_fallback');
         tagged += fallbackRows.length;
@@ -433,15 +549,18 @@ export async function tagTracks(limit: number): Promise<TagStats> {
   }
 
   const uniqRejected = [...new Set(stats.rejectedStyles)].slice(0, 10);
+  const uniqInst = [...new Set(stats.rejectedInstrumental)].slice(0, 10);
   log.info(
     `打标完成：${stats.tagged} 首 · ${stats.batches} 批` +
-      (uniqRejected.length > 0 ? ` · **被丢弃的词表外标签**：${uniqRejected.join('、')}` : ' · 无越界标签 ✓')
+      (uniqRejected.length > 0 ? ` · **被丢弃的词表外标签**：${uniqRejected.join('、')}` : ' · 无越界标签 ✓') +
+      (uniqInst.length > 0 ? ` · **器乐维度越界值**：${uniqInst.join('、')}` : '')
   );
   return stats;
 }
-
 /** 每轮留给 AI 精细打标的配额（模型调用慢且贵，只做小批量补位） */
 const AI_TAG_SLICE = 30;
+/** 每轮留给器乐维度判定的配额（日常只跟新增；存量走 backfill-instrumental 脚本） */
+const AI_INSTRUMENTAL_SLICE = 15;
 
 /**
  * 自动打标总调度：先秒级跑完启发式规则打标，再让 AI 补一批精细标签。
@@ -453,7 +572,9 @@ const AI_TAG_SLICE = 30;
  * 现在改成**预留配额**：配了 AI 就只让启发式吃掉 limit - AI_TAG_SLICE，
  * 剩下的交给模型；没配 AI 则启发式全量跑，行为与从前一致。
  */
-export async function autoTagUntagged(limit = 500): Promise<{ heuristicTagged: number; aiTagged: number }> {
+export async function autoTagUntagged(
+  limit = 500
+): Promise<{ heuristicTagged: number; aiTagged: number; instrumentalTagged: number }> {
   const cfg = readAiConfig();
   const aiSlice = cfg ? Math.min(AI_TAG_SLICE, limit) : 0;
   const heuristicTagged = tagTracksHeuristic(Math.max(0, limit - aiSlice));
@@ -470,7 +591,23 @@ export async function autoTagUntagged(limit = 500): Promise<{ heuristicTagged: n
       }
     }
   }
-  return { heuristicTagged, aiTagged };
+
+  /**
+   * 器乐维度单独排一小片配额（2026-10-29）：启发式打标把 is_instrumental 留成 NULL，
+   * 不主动补判的话新入库曲目永远停在「未判定」，召回的第二道防线形同不存在。
+   * 配额小（`AI_INSTRUMENTAL_SLICE`）是因为存量回填另有 `backfill-instrumental` 脚本，
+   * 日常只用来跟上新增。
+   */
+  let instrumentalTagged = 0;
+  if (cfg) {
+    try {
+      const stats = await tagInstrumental(AI_INSTRUMENTAL_SLICE);
+      instrumentalTagged = stats.tagged;
+    } catch (e) {
+      log.warn(`后台器乐维度判定异常：${(e as Error).message}`);
+    }
+  }
+  return { heuristicTagged, aiTagged, instrumentalTagged };
 }
 
 /**
@@ -506,7 +643,7 @@ export function syncLibraryTrackTags(limit = 500): number {
   try {
     for (const r of rows) {
       const res = heuristicTag({ name: r.name, artist: r.artist, album: r.album });
-      tagRows.push({ trackId: r.id, styles: res.styles, language: res.language });
+      tagRows.push({ trackId: r.id, styles: res.styles, language: res.language, instrumental: null });
       // 标签随元数据落 payload_json（styles / language 字段）
       try {
         const row = db.prepare('SELECT payload_json FROM library_tracks WHERE id = ?').get(r.id) as { payload_json: string } | undefined;

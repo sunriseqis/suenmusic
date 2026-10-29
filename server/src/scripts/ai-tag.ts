@@ -17,6 +17,10 @@ async function main(): Promise<void> {
   const t0 = Date.now();
   const stats = await tagTracks(limit);
   log.info(`耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
+  if (stats.rejectedInstrumental.length > 0) {
+    const uniq = [...new Set(stats.rejectedInstrumental)];
+    log.warn(`器乐维度越界值 ${stats.rejectedInstrumental.length} 次（去重 ${uniq.length} 个）：${uniq.join('、')}`);
+  }
   if (stats.rejectedStyles.length > 0) {
     const uniq = [...new Set(stats.rejectedStyles)];
     log.warn(`模型越界造词 ${stats.rejectedStyles.length} 次（去重 ${uniq.length} 个）：${uniq.join('、')}`);
