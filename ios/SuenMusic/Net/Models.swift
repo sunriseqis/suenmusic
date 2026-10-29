@@ -308,16 +308,6 @@ struct DailyStatusDetail: Codable {
 
 // MARK: - 收藏导入 / 去重（`/api/favorites/*`）
 
-/// `POST /api/favorites/import` 的返回
-struct ImportReply: Decodable {
-    let ok: Bool?
-    /// 服务端收到的曲目数（含已收藏的）
-    let received: Int?
-    /// 真正新加入收藏的数量（已存在的不计数）
-    let added: Int?
-    let total: Int?
-}
-
 /// `POST /api/favorites/import-qq-playlist` 的返回
 struct QqImportReply: Decodable {
     let ok: Bool?

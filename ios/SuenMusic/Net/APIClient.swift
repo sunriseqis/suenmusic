@@ -430,20 +430,6 @@ final class APIClient {
 
     // MARK: 收藏内容 / 导入 / 去重
 
-    /// 收藏的曲目内容（服务端一次补齐，上限 500 首）
-    func favoriteTracks(limit: Int = 500) async throws -> [Track] {
-        struct Reply: Decodable { let tracks: [Track] }
-        let r: Reply = try await get("/api/favorites/tracks", query: ["limit": String(limit)])
-        return r.tracks
-    }
-
-    /// 用完整曲目对象批量导入收藏（服务端 500 首封顶，重复的自动跳过）
-    func importFavorites(_ tracks: [Track]) async throws -> ImportReply {
-        struct Body: Encodable { let tracks: [Track] }
-        let data = try JSONEncoder().encode(Body(tracks: tracks))
-        return try await send("/api/favorites/import", method: "POST", body: data)
-    }
-
     /// 从 QQ 音乐歌单链接 / 歌单 id 直接导入收藏（服务端自动去重）
     func importQqPlaylist(link: String) async throws -> QqImportReply {
         struct Body: Encodable { let link: String }

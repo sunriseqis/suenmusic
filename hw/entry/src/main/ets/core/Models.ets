@@ -484,11 +484,6 @@ export interface DedupeReply {
   remainingCount: number;
 }
 
-/** `GET /api/favorites/tracks` 的返回（收藏曲目内容一次补齐） */
-export interface FavoriteTracksReply {
-  tracks: Track[];
-}
-
 /** `POST /api/favorites/import` 的返回（备份恢复用，tracks ≤ 500/批） */
 export interface ImportFavoritesReply {
   ok: boolean;

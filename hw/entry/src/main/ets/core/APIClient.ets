@@ -19,7 +19,7 @@ import {
   ResolveResponse, AvailabilityResponse, PinSourceReply, KugouLoginState, ServerCandidate, StreamSessionToken, ApiErrorBody, LyricResult,
   SearchResult, DailyRecommend, FavoritesCheckReply, FavoriteUpsertReply, FavoriteRemoveReply,
   DislikeReply, Track, DislikeListReply, DislikeRow, QQImportReply, DedupePreviewReply,
-  DedupeReply, FavoriteTracksReply, ImportFavoritesReply, PersonaDetail, TuneReply,
+  DedupeReply, ImportFavoritesReply, PersonaDetail, TuneReply,
   SourceStatus, OkReply, AlbumDetail, ArtistSongs, ArtistAlbums, SimilarArtists,
   QQPlaylistResult, ToplistDetail, BiliCandidatesResult, AnchorBody, TrackAnchorReply,
   UpdateCheckReply
