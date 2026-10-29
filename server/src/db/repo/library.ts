@@ -66,6 +66,39 @@ export function unlinkUserArtist(userId: number, artistMid: string): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * ★ P0-H：payload_json 合并 —— 重入库不得冲掉打标结果。
+ *
+ * `syncLibraryTrackTags` 会把受控标签写进 `library_tracks.payload_json`
+ * （`styles`/`language`，标签随元数据旅行）。而这些曲目随时可能被再次入库
+ * （多源补源、深挖专辑），如果整段覆盖 payload，标签就静默丢失。
+ *
+ * 规则：**新数据的字段照旧覆盖，但新数据没有标签（缺失/空数组/空串）时沿用旧标签。**
+ * 新数据自带标签时以新的为准（那是刚打出来的）。
+ */
+export function mergeTrackPayload(prevJson: string, next: Track): string {
+  const nextJson = JSON.stringify(next);
+  let prev: Record<string, unknown>;
+  try {
+    prev = JSON.parse(prevJson) as Record<string, unknown>;
+  } catch {
+    return nextJson; // 旧 payload 坏了：没东西可保，直接覆盖
+  }
+  if (!prev || typeof prev !== 'object') return nextJson;
+  const merged = { ...(next as unknown as Record<string, unknown>) };
+  for (const key of ['styles', 'language']) {
+    const fresh = merged[key];
+    const stale = prev[key];
+    const freshEmpty =
+      fresh === undefined ||
+      fresh === null ||
+      fresh === '' ||
+      (Array.isArray(fresh) && fresh.length === 0);
+    if (freshEmpty && stale !== undefined && stale !== null) merged[key] = stale;
+  }
+  return JSON.stringify(merged);
+}
+
+/**
  * 保存某歌手的曲库曲目（蓄水池模式：只增不减、更新热度，绝不全量物理删除）。
  *
  * @param options.isRanked 是否是按热度排序的曲目列表（如 getArtistSongs 默认 true，下标+1 作为 hot_rank；深挖专辑传 false，hot_rank 保持 0）
@@ -127,6 +160,27 @@ export function saveLibraryTracks(
   });
   if (toInsert.length === 0) return;
 
+  /**
+   * ★ P0-H：重入库时保住 payload_json 里的**打标字段**。
+   *
+   * 原先是 `payload_json = excluded.payload_json` 裸覆盖 —— `syncLibraryTrackTags`
+   * 写进 payload 的 `styles`/`language` 会被下一次入库（多源补源、深挖专辑
+   * `deepCutsOf` 同样触发）静默冲掉，T5「标签随元数据旅行」直接失效。
+   * 现在按 id 取旧 payload，合并时**旧标签优先**（新数据没有标签就沿用旧的），
+   * 其余字段照旧覆盖。
+   */
+  const prevPayloadById = new Map<string, string>();
+  const insertIds = toInsert.map(t => t.id);
+  for (let i = 0; i < insertIds.length; i += 400) {
+    const chunk = insertIds.slice(i, i + 400);
+    const rows = db
+      .prepare(
+        `SELECT id, payload_json FROM library_tracks WHERE id IN (${chunk.map(() => '?').join(',')})`
+      )
+      .all(...chunk) as Array<{ id: string; payload_json: string }>;
+    for (const row of rows) prevPayloadById.set(row.id, row.payload_json);
+  }
+
   const ins = db.prepare(
     `INSERT INTO library_tracks (id, artist_mid, payload_json, added_at, hot_rank)
      VALUES (?, ?, ?, ?, ?)
@@ -140,7 +194,8 @@ export function saveLibraryTracks(
   try {
     toInsert.forEach((t, i) => {
       const rank = isRanked ? i + 1 : 0;
-      ins.run(t.id, artistMid, JSON.stringify(t), ts, rank);
+      const prev = prevPayloadById.get(t.id);
+      ins.run(t.id, artistMid, prev ? mergeTrackPayload(prev, t) : JSON.stringify(t), ts, rank);
     });
     db.exec('COMMIT');
   } catch (err) {

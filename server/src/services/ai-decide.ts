@@ -11,7 +11,8 @@
  * `ai-welcome.ts` 的独立回合。
  *
  * 两条硬规则由代码兜底，不指望模型自觉：
- *   - **本尊新歌必须进**（收藏歌手的新作品是必进项，只受去重限制）
+ *   - **本尊新歌必须进，且必须写 reason_for_review**（收藏歌手的新作品是必进项，
+ *     不占来源名额、不受同歌手 1 首限制；理由和其它歌一个标准，不许写占位语）
  *   - 同一歌手最多 1 首
  */
 import { aiChat, AiUnavailableError } from './ai-client.ts';
@@ -255,8 +256,12 @@ function buildMessages(
 ## 硬性选曲规则
 1. **只能从候选池里挑**，id 必须原样回填。池外的歌一律不要写。
 2. 同一歌手最多 1 首（多歌手合作曲另算）。
-3. **本尊新歌必须全进**：候选池里**标了 [本尊新歌] 的**才是必进项，必须全部进 picks。
+3. **本尊新歌必须全进，且必须写 reason_for_review**：候选池里**标了 [本尊新歌] 的**才是必进项，必须全部进 picks。
    没标的歌（哪怕是收藏歌手的歌）**不是必进项**，别自己认领。
+   - **本尊新歌同样必须写 reason_for_review（30~80 字真听感）**，标准和其它歌一样，不许省。
+   - 就算你**没听过**这首歌，也要基于**歌名 / 专辑名 / 歌手名 / 风格标签**写出具体的听感预期
+     （例：歌名里的雨夜意象 + 专辑的合成器标签 → 预期气声铺底的慢板、副歌留白）。
+   - **严禁**给本尊新歌写「本尊新歌（必进项）」这类占位语：审核无从精炼，前端就没有推荐语可展示。
 4. **以“你大概率没听过”为主**：专辑非主打、近期新作、合作曲、冷门宝藏优先；
    成名曲可以有，但整份歌单里最多 ${HIT_MAX} 首。
 5. 数量必须给够：**正好 ${count} 首**，少给会被打回重来。
@@ -271,14 +276,18 @@ function buildMessages(
 9. **严禁挑选非歌曲音频**：任何短音频、切片、念白、伴奏、广告、无意义吟唱或片段均不得入选。
 
 ## 输出格式（严格 JSON，严禁包裹任何 markdown 标记、严禁额外解释、严禁输出“User Safety: safe”等安全风控元数据）
-{"picks":[{"id":"<候选池里的 id>","reason_for_review":"30~80字详细听感（给审核看，纯文本，严禁 Markdown 标记、禁安全标签）"}]}`;
+{"picks":[{"id":"<候选池里的 id>","reason_for_review":"30~80字详细听感（给审核看，纯文本，严禁 Markdown 标记、禁安全标签）"}]}
+（**标了 [本尊新歌] 的 id 也必须在 picks 里出现**，且 reason_for_review 同样写 30~80 字真听感 —— 严禁「本尊新歌（必进项）」这类占位语）`;
 
   const lines = selectFeedPool(pool, FEED_MAX)
     .map(c => {
       const label = SOURCE_LABEL[c.source] ?? c.source;
       const styles = c.styles.length > 0 ? ` #${c.styles.join('/')}` : '';
       const lang = c.language ? ` (${c.language})` : '';
-      return `[${label}] ${c.track.id} | ${c.track.name} | ${(c.track.ar ?? []).map(a => a.name).join('、')}${lang}${styles}`;
+      // 专辑名也喂给模型：本尊新歌它多半没听过，只能靠「歌名/专辑名/歌手名/标签」写听感预期
+      const albumName = c.track.al?.name ?? c.track.album?.name ?? '';
+      const album = albumName ? ` | 专辑《${albumName}》` : '';
+      return `[${label}] ${c.track.id} | ${c.track.name} | ${(c.track.ar ?? []).map(a => a.name).join('、')}${lang}${styles}${album}`;
     })
     .join('\n');
 
@@ -369,7 +378,7 @@ function parseDecision(text: string, pool?: Candidate[]): RawDecision {
         const o = p as Record<string, unknown>;
         // 新字段 reason_for_review（长听感，给审核看）；兼容旧字段 reason
         let reason = cleanAiText(String(o.reason_for_review ?? o.reason ?? ''));
-        reason = reason.replace(/他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
+        reason = reason.replace(/(?<!吉)他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
         // 2026-10-23：**不再截断到 26 字**（用户在客户端看到每条推荐理由都以「…」结尾，
         // 那条「…」是这里加的，不是客户端 ellipsis）。仅保留一道防呆上限 120 字，
         // 防模型跑飞输出整段；正常理由远小于此，原样返回给客户端换行显示。
@@ -400,7 +409,7 @@ function parseDecision(text: string, pool?: Candidate[]): RawDecision {
       if (m) {
         const rawTitle = m[1]!.replace(/[\(\)（）]/g, '').trim();
         let reason = cleanAiText((m[2] || ''));
-        reason = reason.replace(/他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
+        reason = reason.replace(/(?<!吉)他/g, '你').replace(/该用户/g, '你').replace(/此用户/g, '你');
         if (reason.length > REASON_MAX_CHARS) {
           reason = reason.slice(0, REASON_MAX_CHARS - 2) + '…';
         }
@@ -473,9 +482,17 @@ export async function selectFromPool(
      */
     excluded: ExcludedGroup[];
   }> {
-  const pool = candidates.filter(
-    c => !opts.usedIds.has(c.track.id) && c.source !== 'seedNew'
-  );
+  /**
+   * 池子里**包含 seedNew（本尊新歌）**。
+   *
+   * 为什么不再排除：seedNew 是代码强制必进项，但**理由得由模型写**。
+   * 以前把它们挡在池外 → 模型没机会为它们写 reason_for_review →
+   * ai-flow 只能塞一句占位语「本尊新歌（必进项）」→ 审核无从精炼 →
+   * reason_for_display 为空 → 前端 8 首本尊新歌全都没有推荐语（批 1 遗留问题）。
+   * 现在放进来：模型为它们写 30~80 字真听感；tryPush 对 seedNew 不占名额、不参与
+   * 同歌手去重（必进项本来就不受这两条约束），只取它的 reason。
+   */
+  const pool = candidates.filter(c => !opts.usedIds.has(c.track.id));
 
   const poolAvailable: Record<'simi' | 'playlist' | 'seedOld' | 'chart', number> = {
     simi: 0,
@@ -521,9 +538,23 @@ export async function selectFromPool(
 
   /** 金曲硬上限（代码执行，不依赖模型） */
   let hotPicked = 0;
+  /** 计入 opts.count 的选中数（**不含 seedNew** —— 本尊新歌不占名额） */
+  let pickedNormal = 0;
   const tryPush = (c: Candidate, reason: string, ignoreQuota = false): boolean => {
-    if (picked.length >= opts.count) return false;
     if (used.has(c.track.id)) return false;
+    const isSeedNew = c.source === 'seedNew';
+    if (isSeedNew) {
+      /**
+       * 本尊新歌：必进项由代码保证（ai-flow 无条件收下），这里**只取模型写的理由**。
+       * 不占名额、不参与同歌手去重（同一位歌手的多张新专辑都要进）；
+       * 但模型没给理由的（空串）就不收 —— 空理由进了审核也没法精炼。
+       */
+      if (!reason.trim()) return false;
+      used.add(c.track.id);
+      picked.push({ track: c.track, reason, source: c.source });
+      return true;
+    }
+    if (pickedNormal >= opts.count) return false;
     const artist = norm((c.track.ar ?? [])[0]?.name ?? c.track.id);
     if (seenArtists.has(artist)) return false;
     // 金曲（该歌手的成名曲）最多 HIT_MAX 首：弱模型不认识歌也没关系，代码卡住
@@ -538,6 +569,7 @@ export async function selectFromPool(
     used.add(c.track.id);
     usedBySource.set(c.source, (usedBySource.get(c.source) ?? 0) + 1);
     if (c.hot === true) hotPicked += 1;
+    pickedNormal += 1;
     picked.push({ track: c.track, reason, source: c.source });
     return true;
   };
@@ -569,25 +601,29 @@ export async function selectFromPool(
    * "池子真的没货"还是"模型偷懒/输出被截断"。有了归类说明，就能送审核判定，
    * 审核确认成立才把那些歌记进 AI 黑名单 —— 模型无法单方面掏空池子。
    */
-  if (picked.length < opts.count) {
+  if (pickedNormal < opts.count) {
     /** 首轮模型主动给出的归类（首轮没要求它给，但可能给了）—— 追问失败时兜底 */
     const volunteered = sanitizeExcluded(raw.excluded);
-    const missing = opts.count - picked.length;
-    const chosen = picked.map(p => `${p.track.id} | ${p.track.name}`).join('\n');
+    const missing = opts.count - pickedNormal;
+    // 只列占名额的那些（seedNew 不占名额，列进去会让模型误以为名额已满）
+    const chosen = picked
+      .filter(p => p.source !== 'seedNew')
+      .map(p => `${p.track.id} | ${p.track.name}`)
+      .join('\n');
     const asked = [
       ...messages,
       { role: 'assistant' as const, content: JSON.stringify({ picks: raw.picks }) },
       {
         role: 'user' as const,
         content:
-          `你去重/去重歌手后只给了 ${picked.length} 首，还差 ${missing} 首。\n` +
+          `你去重/去重歌手后只给了 ${pickedNormal} 首，还差 ${missing} 首。\n` +
           `已确定选入：\n${chosen || '（无）'}\n\n` +
           '请**二选一**（能补就补，确实补不出来才用 B）：\n' +
           `A. 继续从候选池里挑，补足 ${missing} 首（不要重复上面的、不要同一歌手两首、仍守来源名额与金曲上限）；\n` +
           'B. 如果候选池里**确实没有**符合要求的歌了，就说明原因 —— ' +
           '**按类归纳，不要逐首写理由**：每一类给一句整体理由 + 该类曲目 id 列表。\n\n' +
           '输出合法纯 JSON（可以同时给 A 和 B）：\n' +
-          '{"picks":[{"id":"...","reason":"..."}],"excluded":[{"why":"整体归类理由","ids":["id1","id2"]}]}',
+          '{"picks":[{"id":"...","reason_for_review":"30~80字详细听感"}],"excluded":[{"why":"整体归类理由","ids":["id1","id2"]}]}',
       },
     ];
     try {
@@ -618,13 +654,15 @@ export async function selectFromPool(
    * 这时候用代码硬塞它明确不要的歌，等于把它的判断踩掉。交给上层处理 ——
    * 审核确认 → 这些歌进 AI 冷却 → 换新池子重选。
    */
-  if (picked.length < opts.count && excluded.length === 0) {
+  if (pickedNormal < opts.count && excluded.length === 0) {
     for (const c of pool) {
-      if (picked.length >= opts.count) break;
+      if (pickedNormal >= opts.count) break;
+      // seedNew 不走兜底：它的理由是模型写的真听感，代码兜底句只留给普通来源
+      if (c.source === 'seedNew') continue;
       tryPush(c, fallbackReason(c), true);
     }
   }
-  const shortfall = picked.length < opts.count;
+  const shortfall = pickedNormal < opts.count;
   /**
    * **按来源算缺口**（用户口径：要说明白缺的是哪一类，好驱动后端只补那一类）。
    *
@@ -639,11 +677,14 @@ export async function selectFromPool(
     }))
     .filter(g => g.need > 0)
     .sort((a, b) => b.need - a.need);
-  const usedArtists = [...new Set(picked.map(p => norm((p.track.ar ?? [])[0]?.name ?? '')))]
-    .filter(Boolean);
+  const usedArtists = [
+    ...new Set(
+      picked.filter(p => p.source !== 'seedNew').map(p => norm((p.track.ar ?? [])[0]?.name ?? ''))
+    ),
+  ].filter(Boolean);
   if (shortfall) {
     log.warn(
-      `池子不足：只选出 ${picked.length}/${opts.count} 首（池内可用 ${pool.length} 首）· ` +
+      `池子不足：只选出 ${pickedNormal}/${opts.count} 首（池内可用 ${pool.length} 首）· ` +
         '缺口：' + (gaps.map(g => `${g.src} 差 ${g.need}`).join('、') || '无名额缺口（同类候选已用尽）') +
         ` · 已用歌手 ${usedArtists.length} 位（补库要避开）`
     );

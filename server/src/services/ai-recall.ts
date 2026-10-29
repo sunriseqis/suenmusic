@@ -433,29 +433,115 @@ function isCleanAlbum(a: Album): boolean {
   );
 }
 
-async function latestAlbumSongsOf(userId: number, seed: { name: string; mid: string }, cap: number): Promise<Track[]> {
+/**
+ * ★ P0-E：publishTime → 毫秒时间戳（归一口径，无法解析时 NaN）。
+ *
+ * **为什么不能直接 localeCompare**：上游混用两种格式 —— epoch 数字串
+ * （`'1761945600000'`）与 ISO 日期串（`'2026-10-01'`）。按字符串比大小时首字符
+ * `'1'` < `'2'`，于是**每一条 epoch 专辑都输给任何 ISO 专辑** → 选错最新专辑。
+ *
+ * 三种输入的处理：
+ * · 纯数字串：10 位当 epoch 秒、11-14 位当 epoch 毫秒；
+ * · ISO / 日期串：`Date.parse`；
+ * · 空串 / `'0'` 这类占位与解析失败：**NaN** —— 排序时排最后，与改造前
+ *   「空串、占位符排在最后」的安全行为一致。
+ */
+export function publishTimeMs(album: Album): number {
+  const raw = String((album as { publishTime?: unknown }).publishTime ?? '').trim();
+  if (raw === '') return NaN;
+  if (/^\d+$/.test(raw)) {
+    // 纯数字串：只有 10-14 位才当 epoch（10 位秒 / 11-14 位毫秒）。
+    // 更短的是 `'0'` 之类的占位符（注意 `Date.parse('0')` 会解析成 2000 年，
+    // 必须在这里拦掉），一律视为「无日期」。
+    if (raw.length < 10 || raw.length > 14) return NaN;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n <= 0) return NaN;
+    return raw.length === 10 ? n * 1000 : n;
+  }
+  const ts = Date.parse(raw);
+  return Number.isFinite(ts) ? ts : NaN;
+}
+
+/**
+ * ★ P0-F：挑「最新一张**已发行**的干净专辑」。
+ *
+ * 为什么必须过滤未来专辑：`publishTime='2027-01-01'` 的预售/未发行专辑按时间戳排是
+ * **最新**的，一旦胜出，① 它的曲目会被当成本尊新歌提前进 seedNew（用户根本没听过，
+ * 甚至拿不到音源）；② `latestAlbumCache` 的 24h TTL 从 `Date.now()` 起算、不看
+ * publishTime，于是这张未来专辑会**永久遮蔽**歌手真实的新专辑（每 24h 续一次，直到
+ * 它真的发行）。
+ *
+ * 所以：`publishTime > now` 的专辑**不进 newest 候选**（`publishTime` 解析不出来的
+ * 保持旧行为，不因缺日期就被排除）。
+ */
+export function pickNewestReleasedAlbum(albums: Album[], nowMs: number = Date.now()): Album | undefined {
+  const released = albums.filter(a => {
+    const ts = publishTimeMs(a);
+    return !(Number.isFinite(ts) && ts > nowMs);
+  });
+  return [...released].sort(comparePublishTimeDesc)[0];
+}
+
+/** ★ P0-E：按真实时间戳降序比较（NaN 一律排最后，两个都 NaN 时保持原序） */
+export function comparePublishTimeDesc(a: Album, b: Album): number {
+  const ta = publishTimeMs(a);
+  const tb = publishTimeMs(b);
+  const fa = Number.isFinite(ta);
+  const fb = Number.isFinite(tb);
+  if (fa && fb) return tb - ta;
+  if (fa) return -1;
+  if (fb) return 1;
+  return 0;
+}
+
+/**
+ * 新作检测的上游依赖（默认真实 QQ 上游）。
+ *
+ * 抽成可注入的探针是为了**能实测时序**：比如「专辑详情失败后，下一次必须重新尝试，
+ * 而不是被判成 fresh 跳过」（P0-G）。这类 bug 用真上游测不出来，只能注入假探针。
+ */
+export interface AlbumProbe {
+  listAlbums(seed: { name: string; mid: string }): Promise<Album[]>;
+  loadSongs(albumMid: string): Promise<Track[]>;
+  gate(): Promise<boolean>;
+}
+const defaultAlbumProbe: AlbumProbe = {
+  listAlbums: seed => latestAlbumsOf(seed),
+  loadSongs: albumMid => latestAlbumDetailCached(albumMid),
+  gate: () => qqGate(),
+};
+
+export async function latestAlbumSongsOf(
+  userId: number,
+  seed: { name: string; mid: string },
+  cap: number,
+  probe: AlbumProbe = defaultAlbumProbe
+): Promise<Track[]> {
   try {
     // 专辑列表：按 releasedate 降序取最新一张。**专用 24h 缓存**（latestAlbumListCache），
     // 不复用 7 天的 artistAlbumsCache —— 否则新专辑最多延迟 7 天才被看到（用户 2026-10-29）。
-    const albums = await latestAlbumsOf(seed);
+    const albums = await probe.listAlbums(seed);
     const clean = albums.filter(isCleanAlbum);
-    // 按 publishTime 降序（ISO 风格日期字符串可直接比大小）
-    const newest = [...clean].sort((a, b) => String(b.publishTime ?? '').localeCompare(String(a.publishTime ?? '')))[0];
+    // ★ P0-E 按 publishTime 归一时间戳降序（NaN 排最后）+ ★ P0-F 未来/预售专辑不进候选
+    const newest = pickNewestReleasedAlbum(clean);
     if (!newest) return [];
     const mid = String((newest as unknown as { mid?: string }).mid ?? '');
     if (!mid) return [];
     // 最新专辑专用 24h TTL：命中即认为「今天已检查过这张最新专辑」
     const cached = latestAlbumCache.get(seed.mid);
     const fresh = cached && cached.mid === mid && Date.now() - cached.ts < LATEST_ALBUM_TTL_MS;
-    if (fresh) {
-      // 24h 内已检查过这张最新专辑：仍返回其歌（去重交给 push），但不再打上游
-    } else if (await qqGate()) {
-      latestAlbumCache.set(seed.mid, { mid, ts: Date.now() });
-    } else {
-      // 冷却中：不打上游，但把最新专辑标记入队补拉（不跳过）
-      enqueueLatestAlbumRefresh(userId, seed.mid, seed.name);
-    }
-    const songs = await latestAlbumDetailCached(mid);
+    // 冷却中：不打上游，但把最新专辑标记入队补拉（不跳过）
+    if (!fresh && !(await probe.gate())) enqueueLatestAlbumRefresh(userId, seed.mid, seed.name);
+    const songs = await probe.loadSongs(mid);
+    /**
+     * ★ P0-G：**只有真的拿到歌**才置位「这张最新专辑已检查过」（24h TTL）。
+     *
+     * 原实现把 set 放在 detail 之前 —— 于是 detail 失败（返回 []，见
+     * `latestAlbumDetailCached` 只在 songs>0 时缓存）时也会被判成 fresh，
+     * 之后 24h 内既不打上游也不入队补拉 → **永不补拉，新歌漏检到 TTL 过期**。
+     * 现在与 `:423` 的缓存条件对齐：拿到歌才算检查过。
+     */
+    if (songs.length > 0) latestAlbumCache.set(seed.mid, { mid, ts: Date.now() });
     const known = libraryTrackIds(seed.mid);
     const out: Track[] = [];
     for (const t of songs) {

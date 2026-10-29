@@ -76,6 +76,23 @@ const DAILY_MAX = 40;
 /** 本尊新歌每日硬上限（P0-D）：计入 40 名额，防止 seedNew 挤爆名额 */
 const SEED_NEW_DAILY_CAP = 8;
 /**
+ * 本尊新歌的**兜底**长理由（模型确实没给 seedNew 写 reason_for_review 时才用）。
+ *
+ * 只用手上真有的元数据（歌名 / 专辑名 / 歌手名 / 风格标签）拼一句听感预期。
+ * 刻意**不写**「本尊新歌（必进项）」这类占位语：审核 AI 拿占位语无从精炼，
+ * reason_for_display 就为空，前端这 8 首全都没有推荐语（批 1 遗留问题）。
+ */
+function seedNewFallbackReason(c: Candidate): string {
+  const artist = (c.track.ar ?? [])[0]?.name ?? '你常听的歌手';
+  const album = c.track.al?.name ?? c.track.album?.name ?? '';
+  const traits = [c.styles.join('/'), c.language].filter(Boolean).join('·');
+  const head = `${artist} 的新作《${c.track.name}》${album ? `（出自专辑《${album}》）` : ''}`;
+  const tail = traits
+    ? `，${traits} 的走向和你近来偏爱的质感一脉相承，值得先听后评`
+    : '，值得先听后评';
+  return head + tail;
+}
+/**
  * 落地合格线（用户拍板：强制约束合格线在 30 首）。
  *
  * 每份歌单 ≥ LAND_MIN (30 首) 才装填入库，少于 30 首判定"数据不足"不装填。
@@ -411,8 +428,18 @@ export async function runDailyFlow(
      */
     const seedNewAll = candidates.filter(c => c.source === 'seedNew' && !usedIds.has(c.track.id));
     const seedNew = seedNewAll.slice(0, SEED_NEW_DAILY_CAP);
-    /** 模型选的（不含本尊新歌 —— 它在 selectFromPool 里被排除在池外） */
+    /**
+     * 超每日上限的本尊新歌：不递模型（模型只会为它们白写理由，回来也要被丢掉）。
+     * 放进 usedIds 当"本轮不可见"，下一轮/明天自然还能捞到。
+     */
+    const seedNewOverflowIds = seedNewAll.slice(SEED_NEW_DAILY_CAP).map(c => c.track.id);
+    /**
+     * 模型选的。**现在会包含本尊新歌** —— 它的理由（reason_for_review）必须由模型写：
+     * 以前把 seedNew 挡在池外，模型没机会为它们写听感，只能塞占位语，审核无从精炼。
+     */
     let modelPicks: Array<{ track: Track; reason: string; source: Candidate['source'] }> = [];
+    /** 模型选的**占名额**的那些（不含 seedNew —— 本尊新歌不占名额） */
+    const modelNormalCount = () => modelPicks.filter(p => p.source !== 'seedNew').length;
     const wantFromModel = Math.max(0, gap - seedNew.length);
 
     if (wantFromModel > 0) {
@@ -420,7 +447,8 @@ export async function runDailyFlow(
       const res = await runBatch(candidates, {
         userId,
         count: wantFromModel,
-        usedIds: new Set([...usedIds, ...seedNew.map(c => c.track.id)]),
+        // seedNew 不再塞进 usedIds：要让模型看见它们，才能为它们写 reason_for_review
+        usedIds: new Set([...usedIds, ...seedNewOverflowIds]),
         remaining: quotasFor(wantFromModel, poolAvailable),
         memory,
         blocked: blockedThisRun,
@@ -437,9 +465,9 @@ export async function runDailyFlow(
        * 这一步是"模型说池子没货了"这句话的唯一闸门 —— 没有它，模型能单方面
        * 把用户的候选池掏空（说一句"都不合适"就能拉黑一批歌）。
        */
-      if (excluded.length > 0 && modelPicks.length < wantFromModel) {
-        let prevCount = modelPicks.length;
-        while (excluded.length > 0 && modelPicks.length < wantFromModel) {
+      if (excluded.length > 0 && modelNormalCount() < wantFromModel) {
+        let prevCount = modelNormalCount();
+        while (excluded.length > 0 && modelNormalCount() < wantFromModel) {
           const claims = toClaims(excluded, byId);
           if (claims.length === 0) break;
 
@@ -463,8 +491,12 @@ export async function runDailyFlow(
           log.info(`归类理由不成立（${verdict.note || '未说明'}）→ 从同一批池子重选`);
           const retry = await runBatch(candidates, {
             userId,
-            count: wantFromModel - modelPicks.length,
-            usedIds: new Set([...usedIds, ...seedNew.map(c => c.track.id), ...modelPicks.map(p => p.track.id)]),
+            count: wantFromModel - modelNormalCount(),
+            usedIds: new Set([
+              ...usedIds,
+              ...seedNewOverflowIds,
+              ...modelPicks.map(p => p.track.id),
+            ]),
             remaining: quotasFor(wantFromModel, poolAvailable),
             memory,
             avoidNotes: verdict.note,
@@ -476,18 +508,32 @@ export async function runDailyFlow(
           }
           modelPicks = [...modelPicks, ...retry.picks];
           excluded = retry.excluded;
-          if (modelPicks.length <= prevCount) {
+          if (modelNormalCount() <= prevCount) {
             log.warn('重选后选中数没有增长，停止重选（改由下一轮换池补）');
             break;
           }
-          prevCount = modelPicks.length;
+          prevCount = modelNormalCount();
         }
       }
     }
 
+    /**
+     * 模型为本尊新歌写的长理由（reason_for_review），按 id 索引。
+     * 本尊新歌仍是**代码强制必进**（模型漏写也不影响进单），但理由取模型写的真听感；
+     * 模型确实没写的才退回基于歌名/专辑/歌手/标签的兜底句 —— 绝不写「本尊新歌（必进项）」
+     * 那种占位语（占位语审核无从精炼 → reason_for_display 为空 → 前端没推荐语）。
+     */
+    const seedNewReasonById = new Map(
+      modelPicks.filter(p => p.source === 'seedNew').map(p => [p.track.id, p.reason])
+    );
     const roundPicks: Array<{ track: Track; reason: string; source: Candidate['source'] }> = [
-      ...seedNew.map(c => ({ track: c.track, reason: '本尊新歌（必进项）', source: c.source })),
-      ...modelPicks,
+      ...seedNew.map(c => ({
+        track: c.track,
+        reason: seedNewReasonById.get(c.track.id) || seedNewFallbackReason(c),
+        source: c.source,
+      })),
+      // 模型选的本尊新歌已按上面的强制清单收口（去重），这里只补普通来源
+      ...modelPicks.filter(p => p.source !== 'seedNew'),
     ];
     if (roundPicks.length === 0) {
       log.warn(`第 ${poolRound} 轮一首都没选出来，停止补选（已选 ${picks.length} 首）`);
@@ -575,7 +621,7 @@ export async function runDailyFlow(
     }
     const added = picks.length - before;
     refilledTotal += added;
-    if (modelPicks.length < wantFromModel) shortfallHit = true;
+    if (modelNormalCount() < wantFromModel) shortfallHit = true;
 
     log.info(
       `第 ${poolRound} 轮完成：选出 ${roundPicks.length} 首 · 打回 ${review.rejects.size} 首 · ` +
