@@ -2,12 +2,12 @@
  * 设置页（T10 批次 C 重排：对齐 web Settings.vue 移动断点的「本机 / 智能 / 高级」三 tab）。
  *
  * 取舍（逐项对齐 web 移动版）：
- *   - 本机：播放（缓存 + 歌词翻译）/ 资料库（黑名单 / QQ 歌单导入 / 去重 / 数据备份）/ 账号
+ *   - 本机：播放（缓存 + 歌词翻译）/ 资料库（黑名单 / QQ 歌单导入 / 去重）/ 账号
  *   - 智能：画像（展开摘要 + 特征行）/ 调优（guidance 文本框）
  *   - 高级：多服务端（服务端管理 + 自动选路开关）/ 音源授权（只读状态）
  *   - web 的 AI 模型 / 账号管理 / 数据维护 / 更新通道（WebPanel 管理员专属）不出现
  *   - web 的「应用更新」按 S5 裁决 A 不做鸿蒙更新通道；「主题」见回执（缺全端浅色体系）
- *   - 黑名单 / 导入 / 去重 / 备份四张底部弹层在页内 Stack 实现
+ *   - 黑名单 / 导入 / 去重三张底部弹层在页内 Stack 实现
  *
  * @Builder 响应性注意：状态值一律在 builder 体内直接引用 `this.xxx`，
  * 经参数传值不会建立依赖、状态变了 UI 不刷（T10 实测口径，与 NativeRoot tabItem 同款）。
@@ -15,14 +15,11 @@
 
 import { AppState, K_USER_NAME, K_USER_DISPLAY, K_USER_ROLE, K_LYRIC_TRANS, K_AUTO_FAILOVER, K_LAST_TUNE, K_BASE_URL } from '../viewmodel/AppState';
 import { APIClient, ApiError } from '../core/APIClient';
-import { WebDavClient } from '../core/WebDavClient';
 import { Tokens } from '../common/Tokens';
 import { Dim, Motion } from '../common/Dimension';
 import { AppToast } from '../common/AppToast';
-import { DislikeRow, DedupeGroup, PersonaDetail, Track } from '../core/Models';
-import { picker, fileIo } from '@kit.CoreFileKit';
+import { DislikeRow, DedupeGroup, PersonaDetail } from '../core/Models';
 import { bundleManager, common } from '@kit.AbilityKit';
-import { util } from '@kit.ArkTS';
 import { NeuInput } from './NeuInput';
 import { NeuTabs } from '../common/NeuTabs';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -31,25 +28,6 @@ import { Copy } from '../common/Copy';
 import { OfflineCache } from '../core/OfflineCache';
 import { WebIcon, WebIconButton, WebIconName, NeuBtnChrome } from '../common/WebIcons';
 import { WebButton, NeuBtnVariant, NeuBtnSize } from '../common/WebButtons';
-
-/** WebDAV 配置的持久化形态（JSON 三字段） */
-interface DavCfg {
-  url: string;
-  user: string;
-  pass: string;
-}
-
-/** 备份文件导出形态（web SmBackup 同构） */
-interface SmBackupFile {
-  version: number;
-  app: string;
-  type: string;
-  exportedAt: string;
-  total: number;
-  tracks: Track[];
-  dislikes: DislikeRow[];
-  webdav: DavCfg;
-}
 
 /** 画像 md 行解析结果（kind：0 正文 / 1 标题 / 2 列表项 / 3 分隔线；minor = 次级行） */
 class MdLine {
@@ -78,7 +56,7 @@ export struct SettingsPage {
 
   /** 0 = 本机 / 1 = 智能 / 2 = 高级（web NeuTabs） */
   @State seg: number = 0;
-  /** 当前弹层：'' / dislikes / import / dedupe / backup */
+  /** 当前弹层：'' / dislikes / import / dedupe / password */
   @State sheet: string = '';
 
   @State dislikes: DislikeRow[] = [];
@@ -89,11 +67,6 @@ export struct SettingsPage {
   @State dupBusy: boolean = false;
   @State dupMsg: string = '';
   @State dupGroups: DedupeGroup[] = [];
-  @State backupBusy: boolean = false;
-  @State backupMsg: string = '';
-  @State davUrl: string = '';
-  @State davUser: string = '';
-  @State davPass: string = '';
   @State persona: PersonaDetail | null = null;
   @State personaOpen: boolean = false;
   @State guidance: string = '';
@@ -129,7 +102,6 @@ export struct SettingsPage {
 
   aboutToAppear(): void {
     this.loadCacheUsage();
-    this.loadWebdavFields();
     this.loadDislikes();
     this.loadPersona();
     this.loadSources();
@@ -410,222 +382,6 @@ export struct SettingsPage {
       this.dupMsg = (e as ApiError).message;
     } finally {
       this.dupBusy = false;
-    }
-  }
-
-  // ---------------- 备份（文件 + WebDAV，web backup.ts 同口径） ----------------
-
-  private saveDav(): void {
-    const cfg: DavCfg = { url: this.davUrl, user: this.davUser, pass: this.davPass };
-    AppState.shared().saveWebdav(JSON.stringify(cfg));
-  }
-
-  private loadWebdavFields(): void {
-    const raw = AppState.shared().readWebdav();
-    if (raw.length === 0) { return; }
-    try {
-      const cfg = JSON.parse(raw) as DavCfg;
-      this.davUrl = cfg.url ?? '';
-      this.davUser = cfg.user ?? '';
-      this.davPass = cfg.pass ?? '';
-    } catch (e) {
-      // 损坏静默，按空配置处理
-    }
-  }
-
-  /** 组装备份 JSON（web SmBackup 同构：tracks + dislikes + webdav 自包含） */
-  private async buildBackupJson(): Promise<string> {
-    let tracks: Track[] = [];
-    try {
-      tracks = await APIClient.shared().favoriteTracks();
-    } catch (e) {
-      tracks = [];
-    }
-    let dislikes: DislikeRow[] = [];
-    try {
-      dislikes = await APIClient.shared().fetchDislikes();
-    } catch (e) {
-      dislikes = [];
-    }
-    const backup: SmBackupFile = {
-      version: 1,
-      app: 'suenmusic',
-      type: 'favorites_backup',
-      exportedAt: new Date().toISOString(),
-      total: tracks.length,
-      tracks: tracks,
-      dislikes: dislikes,
-      webdav: { url: this.davUrl, user: this.davUser, pass: this.davPass }
-    };
-    return JSON.stringify(backup, null, 2);
-  }
-
-  /** 备份 JSON 的解析形态（字段全部可缺省，校验后再用） */
-  private parseBackup(text: string): Object {
-    interface SmBackupRaw {
-      type?: string;
-      tracks?: Track[];
-      dislikes?: DislikeRow[];
-      webdav?: DavCfg;
-    }
-    let data: SmBackupRaw;
-    try {
-      data = JSON.parse(text) as SmBackupRaw;
-    } catch (e) {
-      throw new ApiError(0, 'invalid', '不是有效的备份文件');
-    }
-    if (data.type !== 'favorites_backup' || !Array.isArray(data.tracks)) {
-      throw new ApiError(0, 'invalid', '备份结构不正确（缺少 tracks）');
-    }
-    return data as Object;
-  }
-
-  /** 回写备份到服务端（导入文件 / WebDAV 下载共用路径） */
-  private async applyBackupText(text: string): Promise<void> {
-    const raw = this.parseBackup(text) as Record<string, Object>;
-    const tracks = raw['tracks'] as Track[];
-    let added = 0;
-    if (tracks.length > 0) {
-      added = await APIClient.shared().importFavorites(tracks);
-    }
-    const dislikes = (raw['dislikes'] ?? []) as DislikeRow[];
-    for (let i = 0; i < dislikes.length; i++) {
-      const d = dislikes[i];
-      if (d.type !== 'track' && d.type !== 'artist') { continue; }
-      try {
-        await APIClient.shared().dislike(d.type, d.targetId, d.name);
-      } catch (e) {
-        // 单条恢复失败不阻断整份备份
-      }
-    }
-    const dav = raw['webdav'] as DavCfg | undefined;
-    if (dav !== undefined && dav.url !== undefined && dav.url.length > 0) {
-      this.davUrl = dav.url;
-      this.davUser = dav.user ?? '';
-      this.davPass = dav.pass ?? '';
-      this.saveDav();
-    }
-    AppState.shared().bumpFavRev();
-    AppState.shared().bumpDailyRefresh();
-    this.backupMsg = `新增 ${added} 首 · 跳过 ${Math.max(0, tracks.length - added)}`;
-  }
-
-  private async exportBackup(): Promise<void> {
-    if (this.backupBusy) { return; }
-    this.backupBusy = true;
-    this.backupMsg = '';
-    try {
-      const text = await this.buildBackupJson();
-      const ctx = this.getUIContext().getHostContext();
-      if (ctx === undefined) {
-        this.backupMsg = '无法获取应用上下文';
-        return;
-      }
-      const docPicker = new picker.DocumentViewPicker(ctx);
-      const options = new picker.DocumentSaveOptions();
-      const now = new Date();
-      const mm = now.getMonth() + 1 < 10 ? '0' + (now.getMonth() + 1) : '' + (now.getMonth() + 1);
-      const dd = now.getDate() < 10 ? '0' + now.getDate() : '' + now.getDate();
-      options.newFileNames = [`suenmusic_backup_${now.getFullYear()}-${mm}-${dd}.sm`];
-      const uris: string[] = await docPicker.save(options);
-      if (uris.length === 0) { return; }
-      const file = fileIo.openSync(uris[0], fileIo.OpenMode.READ_WRITE);
-      try {
-        fileIo.writeSync(file.fd, text);
-      } finally {
-        fileIo.closeSync(file);
-      }
-      this.backupMsg = '已导出';
-    } catch (e) {
-      this.backupMsg = (e as ApiError).message;
-    } finally {
-      this.backupBusy = false;
-    }
-  }
-
-  private readTextFromUri(uri: string): string {
-    let file: fileIo.File | undefined = undefined;
-    try {
-      file = fileIo.openSync(uri, fileIo.OpenMode.READ_ONLY);
-      const stat = fileIo.statSync(file.fd);
-      const buf = new ArrayBuffer(stat.size);
-      fileIo.readSync(file.fd, buf);
-      const decoder = util.TextDecoder.create('utf-8');
-      return decoder.decodeToString(new Uint8Array(buf));
-    } catch (e) {
-      throw new ApiError(0, 'file', '读取备份文件失败');
-    } finally {
-      if (file !== undefined) {
-        try {
-          fileIo.closeSync(file);
-        } catch (e) {
-          // 关闭失败不影响读取结果
-        }
-      }
-    }
-  }
-
-  private async pickBackup(): Promise<void> {
-    if (this.backupBusy) { return; }
-    this.backupBusy = true;
-    this.backupMsg = '';
-    try {
-      const ctx = this.getUIContext().getHostContext();
-      if (ctx === undefined) {
-        this.backupMsg = '无法获取应用上下文';
-        return;
-      }
-      const docPicker = new picker.DocumentViewPicker(ctx);
-      const options = new picker.DocumentSelectOptions();
-      options.fileSuffixFilters = ['.sm', '.json'];
-      options.maxSelectNumber = 1;
-      const uris: string[] = await docPicker.select(options);
-      if (uris.length === 0) { return; }
-      const text = this.readTextFromUri(uris[0]);
-      await this.applyBackupText(text);
-    } catch (e) {
-      this.backupMsg = (e as ApiError).message;
-    } finally {
-      this.backupBusy = false;
-    }
-  }
-
-  private async uploadWebdav(): Promise<void> {
-    if (this.backupBusy) { return; }
-    if (this.davUrl.trim().length === 0) {
-      this.backupMsg = '请填写 WebDAV 地址';
-      return;
-    }
-    this.backupBusy = true;
-    this.backupMsg = '';
-    try {
-      this.saveDav();
-      const text = await this.buildBackupJson();
-      await WebDavClient.put(this.davUrl, this.davUser, this.davPass, text);
-      this.backupMsg = '已上传';
-    } catch (e) {
-      this.backupMsg = (e as ApiError).message;
-    } finally {
-      this.backupBusy = false;
-    }
-  }
-
-  private async downloadWebdav(): Promise<void> {
-    if (this.backupBusy) { return; }
-    if (this.davUrl.trim().length === 0) {
-      this.backupMsg = '请填写 WebDAV 地址';
-      return;
-    }
-    this.backupBusy = true;
-    this.backupMsg = '';
-    try {
-      this.saveDav();
-      const text = await WebDavClient.get(this.davUrl, this.davUser, this.davPass);
-      await this.applyBackupText(text);
-    } catch (e) {
-      this.backupMsg = (e as ApiError).message;
-    } finally {
-      this.backupBusy = false;
     }
   }
 
@@ -1241,123 +997,6 @@ export struct SettingsPage {
       .animation({ duration: Motion.standard, curve: Motion.curve }))
   }
 
-  /** 数据备份弹层：文件导出/导入 + WebDAV 三栏（label + 输入，web .field 同构） */
-  @Builder
-  backupSheet() {
-    Column({ space: Dim.s3 }) {
-      this.sheetGrip()
-      this.sheetHead('数据备份')
-      Row({ space: Dim.s2 }) {
-        Column() {
-          WebButton({
-            labelStr: this.backupBusy ? '处理中…' : '导出文件',
-            blockFlag: true,
-            sizeKind: NeuBtnSize.MD,
-            disabledFlag: this.backupBusy,
-            onTap: () => {
-              this.exportBackup();
-            }
-          })
-        }
-        .layoutWeight(1)
-        .accessibilityText('导出备份文件')
-        Column() {
-          WebButton({
-            labelStr: '导入文件',
-            blockFlag: true,
-            sizeKind: NeuBtnSize.MD,
-            disabledFlag: this.backupBusy,
-            onTap: () => {
-              this.pickBackup();
-            }
-          })
-        }
-        .layoutWeight(1)
-        .accessibilityText('导入备份文件')
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-
-      if (this.backupMsg.length > 0) {
-        Text(this.backupMsg)
-          .fontSize(Dim.fsMinor)
-          .fontColor(Tokens.text2)
-          .width('100%')
-      }
-
-      Row()
-        .width('100%')
-        .height(Dim.hairline)
-        .backgroundColor(Tokens.line)
-
-      Row({ space: Dim.s2 }) {
-        Text('WebDAV')
-          .fontSize(Dim.fsBody)
-          .fontColor(Tokens.text2)
-          .width(Dim.fieldLabelW)
-        NeuInput({ content: this.davUrl, placeholder: 'https://dav.example.com/music' })
-          .layoutWeight(1)
-      }
-      .width('100%')
-
-      Row({ space: Dim.s2 }) {
-        Text('账号')
-          .fontSize(Dim.fsBody)
-          .fontColor(Tokens.text2)
-          .width(Dim.fieldLabelW)
-        NeuInput({ content: this.davUser, placeholder: 'WebDAV 账号' })
-          .layoutWeight(1)
-      }
-      .width('100%')
-
-      Row({ space: Dim.s2 }) {
-        Text('口令')
-          .fontSize(Dim.fsBody)
-          .fontColor(Tokens.text2)
-          .width(Dim.fieldLabelW)
-        NeuInput({ content: this.davPass, placeholder: 'WebDAV 口令', password: true })
-          .layoutWeight(1)
-      }
-      .width('100%')
-
-      Row({ space: Dim.s2 }) {
-        Column() {
-          WebButton({
-            labelStr: '上传',
-            blockFlag: true,
-            sizeKind: NeuBtnSize.MD,
-            onTap: () => {
-              this.uploadWebdav();
-            }
-          })
-        }
-        .layoutWeight(1)
-        .accessibilityText('上传备份到 WebDAV')
-        Column() {
-          WebButton({
-            labelStr: '下载',
-            variantKind: NeuBtnVariant.PRIMARY,
-            blockFlag: true,
-            sizeKind: NeuBtnSize.MD,
-            onTap: () => {
-              this.downloadWebdav();
-            }
-          })
-        }
-        .layoutWeight(1)
-        .accessibilityText('从 WebDAV 下载备份')
-      }
-      .width('100%')
-      .alignItems(VerticalAlign.Center)
-    }
-    .width('100%')
-    .padding({ left: Dim.s4, right: Dim.s4, top: Dim.s3, bottom: Dim.s4 })
-    .backgroundColor(Tokens.panel)
-    .borderRadius({ topLeft: Dim.radiusLg, topRight: Dim.radiusLg })
-    .transition(TransitionEffect.translate({ y: '100%' })
-      .animation({ duration: Motion.standard, curve: Motion.curve }))
-  }
-
   // ---------------- 页面 ----------------
 
   build() {
@@ -1674,9 +1313,6 @@ export struct SettingsPage {
       }
       if (this.sheet === 'dedupe') {
         this.dedupeSheet()
-      }
-      if (this.sheet === 'backup') {
-        this.backupSheet()
       }
       if (this.sheet === 'password') {
         this.passwordSheet()

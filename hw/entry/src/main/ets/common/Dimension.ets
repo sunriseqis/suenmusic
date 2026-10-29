@@ -100,8 +100,6 @@ export class Dim {
   /** 弹层顶把手（web Sheet .grip 36×3） */
   static readonly gripW = 36;
   static readonly gripH = 3;
-  /** 弹层表单左侧 label 列宽（web .field label 60px） */
-  static readonly fieldLabelW = 60;
   /** 弹层内明细列表最大高（超出滚动；备份/去重弹层共用） */
   static readonly sheetListMax = 320;
   /** 服务端管理弹层列表上限（约 3 条服务器行的高度，超出滚动） */

@@ -49,9 +49,6 @@ export const K_FAV_KEYWORD = 'fav_search_keyword';
  *  NativeRoot onBackPress 读到非 'none' 先清它（返回第一下关浮层而不是关播放页） */
 export const K_PLAYER_SHEET = 'np_player_sheet';
 
-/** WebDAV 备份配置（JSON 字符串：{url,user,pass}）的偏好键（T10 批次 C） */
-const PREF_WEBDAV = 'webdav_config';
-
 /** 首页快照的偏好键（成功拉取 /api/home 后写入，离线启动时先渲染它） */
 const PREF_HOME_SNAPSHOT = 'home_snapshot';
 const PREF_HOME_SNAPSHOT_AT = 'home_snapshot_at';
@@ -241,28 +238,4 @@ export class AppState {
     }
   }
 
-  // ---------------- WebDAV 备份配置（T10 批次 C） ----------------
-
-  /** 读 WebDAV 配置（无/损坏返回空串；设置页解析成 url/user/pass 三栏） */
-  readWebdav(): string {
-    const pref = this.pref;
-    if (pref === null) { return ''; }
-    try {
-      return pref.getSync(PREF_WEBDAV, '') as string;
-    } catch (e) {
-      return '';
-    }
-  }
-
-  /** 写 WebDAV 配置（设置页任意一次上传/下载前都会先保存，用户填了就该记住） */
-  saveWebdav(json: string): void {
-    const pref = this.pref;
-    if (pref === null) { return; }
-    try {
-      pref.putSync(PREF_WEBDAV, json);
-      pref.flush();
-    } catch (e) {
-      hilog.warn(DOMAIN, TAG, '写 WebDAV 配置失败: %{public}s', JSON.stringify(e));
-    }
-  }
 }

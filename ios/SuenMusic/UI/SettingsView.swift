@@ -7,11 +7,11 @@ import SwiftUI
  *   标题「设置」18 Bold → NeuTabs(本机/智能/高级) → 分段内容；
  *   分区标签 = 11 Medium text2 + 右侧延伸发丝线，内容卡片 = panel 底 + 发丝描边 + radiusMd。
  *
- *   · 本机：播放（缓存行：已用 / 上限，点击二次确认清空 / 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重 / 数据备份）/ 账号
+ *   · 本机：播放（缓存行：已用 / 上限，点击二次确认清空 / 歌词翻译开关）/ 主题（三态）/ 资料库（黑名单 / 歌单导入 / 去重）/ 账号
  *   · 智能：画像折叠卡（summary → 分隔线 → profileLines → ledgerLines）/ 调优（guidance 输入 + 上一次回显）
  *   · 高级：检查更新（三形态）/ 多服务端 / 音源授权（只读）
  *
- * 五张弹层在 SettingsSheets.swift；本页只负责挂载与数据。
+ * 四张弹层在 SettingsSheets.swift；本页只负责挂载与数据。
  * 提示统一走 ToastCenter，二次确认统一走 ConfirmDialog（不再用系统 alert）。
  */
 struct SettingsView: View {
@@ -453,8 +453,6 @@ struct SettingsView: View {
             SettingsImportSheet(onClose: closeSheet)
         case .dedupe:
             SettingsDedupeSheet(onClose: closeSheet)
-        case .backup:
-            SettingsBackupSheet(onClose: closeSheet)
         case .password:
             SettingsPasswordSheet(onClose: closeSheet)
         case nil:
@@ -677,12 +675,11 @@ struct SettingsView: View {
 
 // MARK: - 弹层种类
 
-/// 设置页的五张弹层（与 hw 的 sheet 字符串一一对应）
+/// 设置页的四张弹层（与 hw 的 sheet 字符串一一对应）
 enum SettingsSheetKind: String, Identifiable {
     case dislikes
     case importPlaylist
     case dedupe
-    case backup
     case password
 
     var id: String { rawValue }

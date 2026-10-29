@@ -710,13 +710,6 @@ export class APIClient {
       http.RequestMethod.POST, '', true, false);
   }
 
-  /** 收藏曲目内容（备份导出用，一次拉齐 ≤ 500 首） */
-  async favoriteTracks(): Promise<Track[]> {
-    const r = await this.request<FavoriteTracksReply>('/api/favorites/tracks?limit=500',
-      http.RequestMethod.GET, '', true, false);
-    return r.tracks;
-  }
-
   /** 批量回写收藏（备份导入用；服务端单次上限 500，这里自动分批，返回累计新增数） */
   async importFavorites(tracks: Track[]): Promise<number> {
     interface TracksBody { tracks: Track[]; }
