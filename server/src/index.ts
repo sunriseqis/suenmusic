@@ -26,7 +26,7 @@ import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { ensurePoolHealth, getActiveUserIds } from './services/library-topup.ts';
 import { autoTagUntagged } from './services/ai-tags.ts';
-import { refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
+import { pruneAllStaleParts, refreshAll as refreshUpdateArtifacts } from './services/github-update.ts';
 import { runDailyMaintenance } from './services/daily-recommend.ts';
 import { ensureKugouCheckin, runKugouCheckin } from './services/kugou-checkin.ts';
 import { msUntilNextLocal } from './utils/dates.ts';
@@ -291,6 +291,9 @@ async function main(): Promise<void> {
    * 启动 20 秒后先拉一次（避开启动初始化），之后每 `updatePollMinutes` 分钟一次。
    * 间隔设 0 表示不自动轮询，只在用户手点（`force=1`）时核对。
    */
+  // 启动清一次下载残留（*.part）：进程被杀留下的半截包不会自己消失，一个 hap 就上百 MB
+  pruneAllStaleParts();
+
   if (config.updateSource === 'github' && config.updatePollMinutes > 0) {
     const intervalMs = config.updatePollMinutes * 60 * 1000;
     setTimeout(() => {

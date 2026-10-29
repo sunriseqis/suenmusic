@@ -13,7 +13,7 @@
  *     `UpdateArtifact.versionCode` 固定回 0，路由层会自动退回名称比较）
  */
 
-import { createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { Readable } from 'node:stream';
@@ -113,17 +113,82 @@ function latestJsonPath(platform: UpdatePlatform): string {
   return join(cacheDir(platform), 'latest.json');
 }
 
-/** 已经缓存的产物信息（无缓存返回 null）。**不发起任何网络请求** */
+/**
+ * 未完成下载的 `*.part` 保留时长。
+ *
+ * 下载器不支持跨进程续传，所以超过这个时间的 `.part` 一定是**残留**
+ * （进程被杀 / 断网 / 磁盘满），留着只会占盘 —— 一个 hap 就上百 MB。
+ */
+const STALE_PART_MS = 60 * 60 * 1000;
+
+/**
+ * 清理下载残留（`*.part`）。正在写的不动（mtime 很新），只清超过 1 小时的。
+ *
+ * 服务启动时与每次 `refreshPlatform` 开头各调一次：前者防长期积压，
+ * 后者保证一个平台的残留不会被另一个平台的轮询漏掉。
+ */
+export function pruneStaleParts(platform: UpdatePlatform): void {
+  let names: string[];
+  try {
+    names = readdirSync(cacheDir(platform));
+  } catch {
+    return; // 目录还不存在 = 没有残留
+  }
+  const dir = cacheDir(platform);
+  const now = Date.now();
+  for (const name of names) {
+    if (!name.endsWith('.part')) continue;
+    const file = join(dir, name);
+    try {
+      const st = statSync(file);
+      if (now - st.mtimeMs < STALE_PART_MS) continue;
+      rmSync(file, { force: true });
+      log.info('清理下载残留：' + platform + '/' + name + '（' + Math.max(1, Math.round(st.size / 1024)) + ' KB）');
+    } catch {
+      /* 并发被清掉 / 权限不足：都不该影响主流程 */
+    }
+  }
+}
+
+/** 全部平台的 `*.part` 残留清理（服务启动时调一次） */
+export function pruneAllStaleParts(): void {
+  for (const p of Object.keys(EXTENSIONS) as UpdatePlatform[]) pruneStaleParts(p);
+}
+
+/**
+ * 已经缓存的产物信息（无缓存返回 null）。**不发起任何网络请求**。
+ *
+ * 只认「**已完整落盘**」的包 —— 客户端拿到 available=true 就去下载/安装，
+ * 半个包比没有包更坏。三条校验：
+ *   · `latest.json` 里的 path 文件必须真实存在（可能被手删 / 被清理带走）；
+ *   · `size` 必须 > 0；
+ *   · `size` 必须与实际文件大小一致（磁盘满 / 被截断）。
+ * 任一不满足即视为**没有包**（不是报错：客户端显示「已是最新」），并顺手清掉 `.part` 残留。
+ *
+ * 「没下完」天然被排除：下载中写的是 `<name>.part`，`latest.json` 只在 rename 成功后才写。
+ */
 export function readCachedArtifact(platform: UpdatePlatform): UpdateArtifact | null {
   try {
     const raw = readFileSync(latestJsonPath(platform), 'utf8');
     const meta = JSON.parse(raw) as UpdateArtifact;
-    if (!meta || typeof meta.fileName !== 'string') return null;
-    const file = join(cacheDir(platform), meta.fileName);
-    if (!existsSync(file)) return null;
+    if (!meta || typeof meta.fileName !== 'string' || meta.fileName === '') return null;
+
+    const file = typeof meta.path === 'string' && meta.path !== '' ? meta.path : join(cacheDir(platform), meta.fileName);
+    const declared = Number(meta.size);
+    if (!existsSync(file) || !Number.isFinite(declared) || declared <= 0) {
+      pruneStaleParts(platform);
+      return null;
+    }
+    const size = statSync(file).size;
+    if (size <= 0 || size !== declared) {
+      log.warn('缓存包大小不符，视为没有包：' + platform + '/' + meta.fileName + '（声明 ' + declared + '，实际 ' + size + '）');
+      pruneStaleParts(platform);
+      return null;
+    }
+
     // 旧缓存里 versionCode 可能是 0（当年上游不给）→ 用 versionName 现算，保证单轴比较
     const code = meta.versionCode > 0 ? meta.versionCode : versionCodeOf(meta.versionName);
-    return { ...meta, versionCode: code, path: file, size: statSync(file).size };
+    return { ...meta, versionCode: code, path: file, size };
   } catch {
     return null;
   }
@@ -236,6 +301,7 @@ export async function refreshPlatform(
   platform: UpdatePlatform,
   force = false
 ): Promise<UpdateArtifact | null> {
+  pruneStaleParts(platform);
   const cached = readCachedArtifact(platform);
   const releases = await listReleases();
   const picked = pickAsset(releases, platform);

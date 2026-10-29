@@ -1,7 +1,7 @@
 /**
  * 更新通道 HTTP 面。**唯一来源是 GitHub Releases**，服务端拉回本地缓存后由客户端从这里下载。
  *
- *   GET /api/update/check     查是否有新版本（读本地缓存，零上游；`force=1` 才去 GitHub 核对）
+ *   GET /api/update/check     查是否有新版本（**只读本地完整包**，零上游、零等待、零报错；`force=1` 只触发一次后台刷新后立即返回）
  *   GET /api/update/download  下载产物（本地文件流式发送，**支持 Range/206**）
  *
  * 为什么客户端不直连 GitHub：
@@ -15,7 +15,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createReadStream } from 'node:fs';
 import { requireUser, requireWebAdmin } from '../http/require-auth.ts';
-import { badGateway, badRequest, serviceUnavailable } from '../http/errors.ts';
+import { badRequest, serviceUnavailable } from '../http/errors.ts';
 import { config } from '../config.ts';
 import {
   PLATFORM_CONTENT_TYPE,
@@ -33,6 +33,9 @@ import {
 } from '../services/update-settings.ts';
 import { SERVER_VERSION } from '../app.ts';
 import { getDeployMode } from '../services/deploy-mode.ts';
+import { createLogger } from '../logger.ts';
+
+const log = createLogger('update');
 
 function versionName(value: unknown): string {
   const text = String(value ?? '').trim();
@@ -53,11 +56,6 @@ function platform(value: unknown): UpdatePlatform {
   return text;
 }
 
-function upstreamError(err: unknown): never {
-  const message = err instanceof Error ? err.message : String(err);
-  throw badGateway(`更新源暂时不可用：${message}`, 'update_upstream_failed');
-}
-
 export function registerUpdateRoutes(app: FastifyInstance): void {
   app.get('/api/update/check', async req => {
     requireUser(req);
@@ -73,21 +71,22 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
     }
 
     /**
-     * 默认**只读本地缓存**：客户端登录/回前台/定时检查都不会给 GitHub 添压力，
-     * 也不会被它的限流牵连。只有 `force=1`（用户手点检查更新）才去上游核对。
+     * **检查更新 = 只读本地完整包**：零上游、零等待、零报错（2026-10-29 用户裁定）。
+     *
+     * 客户端只问一件事：「我本地有没有比我版本更高的完整安装包？」
+     * 下载是**服务端自己的事** —— 手动/自动触发后立刻在后台下（走已配置的代理），
+     * 下完并校验通过才落盘生效。这里若等下载，整包传输时间就压进客户端超时：
+     * 鸿蒙那个 2.1MB 的 hap 就足以让两端「点检查更新」直接报错。
+     *
+     * `force=1` 的新语义 = **触发一次后台刷新，但立即返回**当前本地结论。
+     * 因此任何情况下都不因「没有包 / 网络失败」返回 5xx：无包就 available=false。
      */
-    let artifact;
-    try {
-      artifact = force
-        ? await refreshPlatform(target, true)
-        : readCachedArtifact(target);
-      if (!artifact) {
-        // 首次启动还没轮询到：同步拉一次，避免"刚开机查不到更新"
-        artifact = await refreshPlatform(target, true);
-      }
-    } catch (err) {
-      return upstreamError(err);
+    if (force) {
+      void refreshPlatform(target, true).catch(err =>
+        log.warn(`后台刷新更新产物失败（${target}）：${err instanceof Error ? err.message : String(err)}`)
+      );
     }
+    const artifact = readCachedArtifact(target);
 
     const noUpdate = {
       available: false,
