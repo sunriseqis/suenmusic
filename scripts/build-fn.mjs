@@ -101,6 +101,23 @@ async function injectManifestVersion(semver) {
   await writeFile(manifestPath, content, 'utf8');
 }
 
+/**
+ * 把仓库根 VERSION 写进打包产物，供服务端 readRootVersion() 读取。
+ *
+ * 服务端依次试 config.webRoot/../../VERSION、server/src/../../VERSION、
+ * server/src/../VERSION：前两个在包内都指向 fn/app/VERSION，第三个指向
+ * fn/app/server/VERSION —— 两个位置都要有，否则管理端界面只能退回未知版本。
+ *
+ * ⚠️ 只能在第 4 步装配完 app/server 之后写：第 4 步先 rm -rf app/server 再重建，
+ * 在那之前写进去的会被删掉。
+ */
+async function injectRuntimeVersion(semver) {
+  log(`4.1/6 写入运行时 VERSION 文件: app/VERSION、app/server/VERSION = ${semver}`);
+  for (const target of [join(APP_DIR, 'VERSION'), join(APP_DIR, 'server', 'VERSION')]) {
+    await writeFile(target, `${semver}\n`, 'utf8');
+  }
+}
+
 async function updateIconAssets() {
   log('2/6 校验并更新官方图标资产...');
   const icon256 = join(FN_DIR, 'ICON_256.PNG');
@@ -168,7 +185,7 @@ async function ensureStandaloneNode() {
   log(`Node.js 运行时就绪: ${targetNodeBin}`);
 }
 
-async function prepareNativeAppPayload() {
+async function prepareNativeAppPayload(semver) {
   log('4/6 装配原生服务端与 Web SPA 静态资产...');
   // 清理任何历史 Docker 遗留
   await rm(join(APP_DIR, 'docker'), { recursive: true, force: true });
@@ -259,6 +276,8 @@ async function prepareNativeAppPayload() {
     await rm(pkgBinDir, { recursive: true, force: true });
     log('已移除 node_modules/.bin（CLI 软链进 fpk 会变死链）');
   }
+
+  await injectRuntimeVersion(semver);
 
   // 3. 严格规范套件所有目录与文件权限（杜绝 700/600 导致非 root 用户或 fnOS 应用中心报权限出错）
   log('规范套件文件与目录权限 (目录 755 / 文件 644 / 脚本 755)...');
@@ -358,7 +377,7 @@ async function main() {
   await injectManifestVersion(semver);
   await updateIconAssets();
   await ensureStandaloneNode();
-  await prepareNativeAppPayload();
+  await prepareNativeAppPayload(semver);
   const fnpackBin = await ensureFnpack();
   await assembleFpk(fnpackBin, semver);
 }

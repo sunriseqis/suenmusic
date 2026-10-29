@@ -43,7 +43,8 @@ function readRootVersion(): string {
   } catch {
     /* ignore */
   }
-  return '2.0.0';
+  log.warn('未能定位 VERSION 文件，版本号未知');
+  return '0.0.0';
 }
 
 export const SERVER_VERSION = readRootVersion();
