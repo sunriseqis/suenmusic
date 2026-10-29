@@ -157,7 +157,11 @@ final class APIClient {
     /// 访问令牌**只在内存**
     private var accessToken: String?
     private var refreshToken: String?
-    private var refreshTask: Task<Void, Error>?
+    /// 令牌轮换的单飞槽位。
+    ///
+    /// `refreshIfPossible`（常规 401 刷新）与**切服验证**共用它：两者轮换的是同一个刷新令牌，
+    /// 并发必然让后到的一方拿着已被吊销的令牌去换而 401。
+    private var rotationTask: Task<AuthSession, Error>?
 
     private let tokenKey = "suenmusic.refreshToken"
 
@@ -195,28 +199,106 @@ final class APIClient {
 
     /// 单飞刷新：并发 401 共用同一次刷新（旧令牌被轮换后，第二个请求必然失败）
     private func refreshIfPossible() async throws {
-        guard let token = refreshToken else {
+        _ = try await rotateTokens()
+    }
+
+    /**
+     * 用刷新令牌换一对新令牌（`base` 传 nil = 打**当前**服务端；切服验证传目标地址）。
+     *
+     * ## 为什么必须「刷新成功就立刻落盘」
+     *
+     * 刷新一旦成功，**服务端已经吊销了旧令牌**。此时若把新令牌攒在调用方手里、
+     * 等后续步骤都成功再保存，一旦后续失败新令牌就永久丢失 —— 客户端只剩已吊销的旧令牌，
+     * 之后切任何服务器都会 401，等于被静默登出。
+     *
+     * 这不是理论风险：域名同时有 IPv4/IPv6 记录时，iOS 的 Happy Eyeballs 对**连续两个请求**
+     * 可能选不同地址族 —— `/api/auth/refresh` 走通的那条、`/api/auth/me` 撞上另一条不通的路由，
+     * 正好就是这个「刷新成功、验证失败」的组合。鸿蒙端 `refresh()` 一直是在函数内立刻 `putSync`
+     * 落盘的，所以那边从没出现过这个问题。
+     *
+     * ## 为什么共用单飞槽位
+     *
+     * 常规 401 刷新和切服验证轮换的是**同一个**刷新令牌，并发必然让后到的一方拿着
+     * 已吊销的令牌去换而失败。两者共用 `rotationTask`，同一时刻只允许一次轮换。
+     */
+    @discardableResult
+    func rotateTokens(on base: String? = nil) async throws -> AuthSession {
+        if let running = rotationTask { return try await running.value }
+        let token = refreshToken ?? UserDefaults.standard.string(forKey: tokenKey) ?? ""
+        guard !token.isEmpty else {
             throw ApiError(status: 401, code: "unauthorized", message: "登录已失效，请重新登录")
         }
-        if let running = refreshTask {
-            try await running.value
-            return
-        }
-        let task = Task<Void, Error> { [weak self] in
-            guard let self else { return }
+        let target = base ?? self.base
+        let task = Task<AuthSession, Error> { [weak self] in
             struct Body: Encodable { let refreshToken: String }
-            struct Reply: Decodable { let accessToken: String; let refreshToken: String }
             let payload = try JSONEncoder().encode(Body(refreshToken: token))
-            let reply: Reply = try await self.send(
-                "/api/auth/refresh", method: "POST", body: payload, authed: false, noRetry: true
+            let session: AuthSession = try await APIClient.directJSON(
+                base: target, path: "/api/auth/refresh", method: "POST",
+                body: payload, bearer: nil
             )
-            self.accessToken = reply.accessToken
-            self.refreshToken = reply.refreshToken
-            UserDefaults.standard.set(reply.refreshToken, forKey: self.tokenKey)
+            // ★ 刷新成功 → 立刻落盘（内存 + UserDefaults），不等调用方的后续步骤
+            if let self {
+                self.accessToken = session.accessToken
+                self.refreshToken = session.refreshToken
+                UserDefaults.standard.set(session.refreshToken, forKey: self.tokenKey)
+            }
+            return session
         }
-        refreshTask = task
-        defer { refreshTask = nil }
-        try await task.value
+        rotationTask = task
+        defer { rotationTask = nil }
+        return try await task.value
+    }
+
+    /**
+     * 直连**指定 base** 的最小 HTTP：不走选路重放、不走 401 自动刷新。
+     *
+     * 切服验证必须用它 —— 验证期间「当前 base」是半成品状态，走主管线 `send`
+     * 会在网络失败时触发 `failoverIfNeeded()`，把验证请求打到别的候选服务器上去。
+     */
+    static func directJSON<T: Decodable>(
+        base: String, path: String, method: String, body: Data?, bearer: String?,
+        timeout: TimeInterval = 15
+    ) async throws -> T {
+        guard let url = URL(string: base + path) else {
+            throw ApiError(status: 0, code: "bad_url", message: "服务器地址无效")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.timeoutInterval = timeout
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue("Accept", forHTTPHeaderField: "application/json")
+        if let bearer, !bearer.isEmpty {
+            req.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = body
+        }
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await URLSession.shared.data(for: req)
+        } catch {
+            throw ApiError(status: 0, code: "network", message: "连不上服务端，请检查网络或服务器地址")
+        }
+        guard let http = resp as? HTTPURLResponse else {
+            throw ApiError(status: 0, code: "bad_response", message: "服务端返回异常")
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw ApiError(status: 401, code: "unauthorized", message: "登录已失效，请重新登录")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            if let parsed = try? JSONDecoder().decode(ApiErrorBody.self, from: data) {
+                throw ApiError(status: http.statusCode, code: parsed.error.code, message: parsed.error.message)
+            }
+            throw ApiError(status: http.statusCode, code: "http_\(http.statusCode)",
+                           message: "服务端返回 HTTP \(http.statusCode)")
+        }
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            throw ApiError(status: http.statusCode, code: "decode", message: "响应解析失败")
+        }
     }
 
     // MARK: 请求

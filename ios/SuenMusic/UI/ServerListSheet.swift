@@ -310,34 +310,41 @@ final class ServerStore: ObservableObject {
     }
 
     /// 在目标服务器上验证「这台服务器上你的账号还在」：刷新令牌换会话 + `/api/auth/me`
+    ///
+    /// ## 两步的顺序与失败语义（2026-10-29 修正）
+    ///
+    /// ① 刷新令牌换会话 —— 走 `APIClient.rotateTokens(on:)`：
+    ///   · **刷新成功即落盘**（与 hw `refresh()` 同语义），不等第 ② 步；
+    ///   · 与常规 401 刷新**共用单飞槽位**，不会两边并发轮换同一个令牌。
+    /// ② `/api/auth/me` 验证账号确实在这台服务器上。
+    ///
+    /// 为什么 ① 必须自己落盘：服务端刷新时会**立刻吊销旧令牌**。若把新令牌攒到 ② 成功
+    /// 才保存，那么 ② 一失败（典型：域名同时有 IPv4/IPv6 记录，iOS 对连续两个请求可能选不同
+    /// 地址族，① 走通的那条、② 撞上不通的那条）新令牌就永久丢失 —— 客户端只剩已吊销的旧令牌，
+    /// 之后切**任何**服务器都 401，等于被静默登出。hw 端从没这个问题的原因就在这。
     private static func verifyAccount(on base: String) async throws -> AuthSession {
         guard let refresh = UserDefaults.standard.string(forKey: refreshKey), !refresh.isEmpty else {
             throw ApiError(status: 401, code: "unauthorized", message: unauthorizedMessage)
         }
-        struct Body: Encodable { let refreshToken: String }
-        struct Session: Decodable {
-            let accessToken: String
-            let refreshToken: String
-            let accessExpiresAt: Double?
-            let refreshExpiresAt: Double?
-        }
         struct MeReply: Decodable { let user: PublicUser }
-        let payload = try JSONEncoder().encode(Body(refreshToken: refresh))
-        // 诊断（2026-10-29）：切服报「服务端返回 HTTP 400」时，服务端日志只说是「缺少 refreshToken」，
-        // 但本函数上一行已守卫空串 —— 必须确认「守卫通过之后实际发出的 body 到底是什么」。
-        // 只打长度与前后各 4 位，不泄露令牌本体。
-        NSLog("[Switch] verifyAccount base=%@ tokenLen=%d bodyLen=%d tokenHead=%@ tokenTail=%@",
-              base, refresh.count, payload.count,
-              String(refresh.prefix(4)), String(refresh.suffix(4)))
-        let session: Session = try await send(base + "/api/auth/refresh", method: "POST",
-                                              body: payload, token: nil)
+        NSLog("[Switch] verifyAccount base=%@ tokenLen=%d", base, refresh.count)
+        // ① 刷新（内部已单飞 + 成功即落盘）；失败按切服文案映射
+        let session: AuthSession
+        do {
+            session = try await APIClient.shared.rotateTokens(on: base)
+        } catch let e as ApiError where e.isUnauthorized {
+            throw ApiError(status: 401, code: "unauthorized", message: unauthorizedMessage)
+        } catch let e as ApiError where e.isNetwork {
+            throw ApiError(status: 0, code: "network", message: "切换失败：连不上该服务器")
+        }
+        // ② 验证账号（失败时新令牌已落盘，回滚地址也不会把账号废掉）
         let me: MeReply = try await send(base + "/api/auth/me", method: "GET",
                                          body: nil, token: session.accessToken)
         return AuthSession(user: me.user,
                            accessToken: session.accessToken,
                            refreshToken: session.refreshToken,
-                           accessExpiresAt: session.accessExpiresAt ?? 0,
-                           refreshExpiresAt: session.refreshExpiresAt ?? 0)
+                           accessExpiresAt: session.accessExpiresAt,
+                           refreshExpiresAt: session.refreshExpiresAt)
     }
 
     /**
