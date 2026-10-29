@@ -152,8 +152,8 @@ Live Activity 与 Widget Extension 已在 `60ecdcd` 彻底移除，**灵动岛�
 | # | 待验项 | 为什么模拟器验不了 |
 | :-- | :-- | :-- |
 | 1 | 锁屏显示元数据 + 进度推进 | 模拟器不渲染锁屏媒体控件 |
-| 2 | ~~灵动岛媒体卡片与按钮~~ | **已结论（2026-10-28）**：Live Activity / Widget Extension 已在 `60ecdcd` 移除，系统原生媒体卡片在 App 前台不显示；两个参照项目（`AprDeci/bili-music`、`NaivG/bilimusic`，均 `audio_service` + mpv）行为一致。**不作为缺陷，不纳入验收。** |
-| 3 | 锁屏/控制中心的播放暂停按钮行为 | 系统面板不出现时无需验；若后续恢复面板再验（buffering 用 `playbackState=.playing + rate=0` 是权宜） |
+| 2 | ~~灵动岛媒体卡片与按钮~~ | ✅ **已修复并真机验证（2026-10-29）**：根因是 mpv 的 `ao=audiounit` 把音频会话改成 `mixWithOthers` + `MoviePlayback`，iOS 判为次要音频 → 不参与 Now Playing → 三处面板全无。`reassertPlaybackSession()` 改回 `.playback/.default/[]` 后，**用户真机确认灵动岛/系统媒体面板回归**。 |
+| 3 | 锁屏/控制中心的播放暂停按钮行为 | 🟡 面板已恢复（用户真机确认灵动岛），**播放/暂停按钮的具体行为仍待逐项验**（buffering 用 `playbackState=.playing + rate=0` 是权宜） |
 | 4 | seek 后进度不漂 | 需要真实拖动 + 锁屏对照 |
 | 5 | 10s 停滞自愈 | 要造断流（切飞行模式 / 换劣质 CDN） |
 | 6 | 媒体服务重置后重建 MpvPlayer | 模拟器难稳定触发 Reset Media Services |
@@ -297,6 +297,8 @@ ImportReply 等孤儿清理）全部编译通过。
 - [x] **iOS 编译验证**（2026-10-29 补跑）：Mac 恢复后 `BUILD SUCCEEDED`，
   装机运行正常，`[Mpv] ao=audiounit` 加载成功、
   `[NowPlaying/engine-init] opts=0 mode=Default sessionRestored=Y` —— 锁屏/灵动岛根因修复确认生效
+- [x] **灵动岛 / 系统媒体面板真机验证**（2026-10-29）：用户真机确认**已回归**
+  —— 证实根因分析正确（mpv 改会话 → 次要音频 → 面板消失），`reassertPlaybackSession()` 修复有效
 - [ ] **鸿蒙编译验证**（走 CI，Windows 离线；CI 出包即真实编译）
 - [ ] P3 移除 AVPlayer
 - [ ] P4 回归
