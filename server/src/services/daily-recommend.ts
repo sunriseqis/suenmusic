@@ -319,7 +319,19 @@ export async function getDailyRecommend(userId: number): Promise<DailyRecommendR
 
         // 读取路径**重放 clampDisplay**（P0-A 兜底）：任何历史路径漏 clamp 的 reason_for_display
         // 在这里统一收到 12-25 字口径；不合格（空/太短）直接不展示推荐语（歌还在）。
-        const reasonMap = new Map(parsed.picks.map(p => [p.trackId, clampDisplay(cleanAiText(p.reason_for_display || ''))]));
+        //
+        // ⚠️ 兼容存量歌单（2026-10-29 实测发现）：`reason_for_display` 是审核精炼流程新增的字段，
+        // 该流程上线**之前**生成的歌单只有旧字段 `reason`（选歌 AI 的长理由，未过审核）。
+        // 若只读新字段，存量用户下次生成前会**整份歌单没有推荐语**。
+        // 所以这里按「新字段优先、旧字段兜底」读，两者都过同一道 clampDisplay。
+        // 注意：旧 `reason` 未经审核筛选，属于「审核没工作」而非「审核否决」，
+        // 因此兜底展示它符合「只救审核没工作」的口径（与 finalizeReasonVerdicts 一致）。
+        const reasonMap = new Map(
+          parsed.picks.map(p => [
+            p.trackId,
+            clampDisplay(cleanAiText(p.reason_for_display || p.reason || '')),
+          ])
+        );
         const tracksWithReason = filteredTracks.map(t => ({
           ...t,
           recommendReason: reasonMap.get(t.id) || undefined,
