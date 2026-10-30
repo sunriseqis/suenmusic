@@ -791,6 +791,15 @@ export const usePlayerStore = defineStore('player', () => {
       );
       if (seq !== loadSequence) return false;
 
+      /**
+       * 酷狗授权失效（上游把 token 打掉）→ 顶部横幅。
+       *
+       * 服务端只在 invalid 时下发这个位，所以：出现即显示、账号恢复后下一次解析不再带 →
+       * 自动消失。播放**不中断**（已降级到其它音源），这一步纯提示 ——
+       * 用户 2026-10-30 裁定「横幅即可」，不要弹窗、不要重复轰炸。
+       */
+      useUiStore().setKugouInvalid(result.kugouInvalid === true, result.kugouInvalidReason ?? null);
+
       // 服务端回源补全的完整元数据：队列里的曲目可能来自字段不全的搜索召回行
       // （低置信的歌常只有歌名），缺封面/专辑/歌手时用这份现场补上，
       // 播放页与播放条立刻显示完整信息，不必等刷新

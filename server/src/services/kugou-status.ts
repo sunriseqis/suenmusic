@@ -16,7 +16,7 @@
 import crypto from 'node:crypto';
 import { createLogger } from '../logger.ts';
 import { getSetting } from '../db/repo/settings.ts';
-import { getKugouDevice } from './kugou-login.ts';
+import { getKugouDevice, markKugouCredentialInvalid } from './kugou-login.ts';
 import { ensureKugouCheckin, readKugouCheckinState, runKugouCheckin } from './kugou-checkin.ts';
 
 const log = createLogger('kugou:status');
@@ -59,7 +59,12 @@ export function kugouUsable(state: KugouState): boolean {
 
 export interface KugouLoginState {
   state: KugouState;
-  /** 面板直接可显示的中文（客户端不再自己拼文案，避免两端不一致） */
+  /**
+   * 面板直接可显示的中文（客户端不再自己拼文案，避免两端不一致）。
+   *
+   * 形如「已签 · 26.10.31」——**日期部分一律是概念 SVIP 的到期日**
+   * （用户 2026-10-30 裁定「只看 svip」；三端都只显示这个字符串）。
+   */
   label: string;
   userid: string;
   nickname: string;
@@ -79,6 +84,8 @@ export interface KugouLoginState {
   svipActive: boolean;
   /** 概念 SVIP 到期时间 */
   svipEndTime: string;
+  /** 概念 SVIP 到期短日期（YY.MM.DD）—— **label 里那个日期就是它** */
+  svipExpireAt: string;
   /** 账号显示名（昵称优先，回退 userid） */
   accountLabel: string;
   /** 紧凑状态文案（如「会员 27.01.28 · 已签」） */
@@ -99,6 +106,8 @@ interface VipQueryResult {
 
 let cachedVip: { key: string; at: number; result: VipQueryResult } | null = null;
 let lastForceUpgradeAt = 0;
+/** 见 cachedKugouState()：最近一次实际判定出的登录态 */
+let lastKnownState: KugouState | null = null;
 
 /**
  * 最近一次**成功**查到的会员判定（S-19）。
@@ -134,9 +143,23 @@ function snapshotSvipFlags(userid: string): { svipActive: boolean; svipEndTime: 
   return { svipActive: true, svipEndTime: snap.result.svipEndTime };
 }
 
+/**
+ * 最近一次**实际判定**出的登录态（内存，绝不发上游）。
+ *
+ * 给 `/api/resolve` 之类的高频路径拼「酷狗掉登录」提示用：那里不能为了一个提示位
+ * 再去打一次上游（`readKugouLoginState` 重则一次签到 + 一次 get_union_vip）。
+ * 库里的 `invalid` 打标**优先于**内存快照 —— 取流撞 35005/20018 打标之后，紧接着的
+ * 那一次解析就能提示用户，不必等下一次完整查询。
+ */
+export function cachedKugouState(): KugouState | null {
+  if (getSetting('kugou.credentialsInvalidAt')) return 'invalid';
+  return lastKnownState;
+}
+
 export function invalidateKugouStatusCache(): void {
   cachedVip = null;
   transientFailureUntil = 0;
+  lastKnownState = null;
 }
 
 /**
@@ -173,6 +196,7 @@ function unknownState(args: {
     checkinDate: args.checkinDate,
     svipActive: svip.svipActive,
     svipEndTime: svip.svipEndTime,
+    svipExpireAt: shortExpireDate(svip.svipEndTime),
     accountLabel: args.accountLabel,
     statusLabel: '状态未知',
     savedAt: args.savedAt,
@@ -227,6 +251,12 @@ async function queryVip(token: string, userid: string): Promise<VipQueryResult> 
   if (j?.status !== 1) {
     // 20018 / 35005 都意味着 token 不被认可 → 归到「失效」，不是「没会员」
     const rejected = Number(j?.error_code ?? 0) === 20018 || Number(j?.error_code ?? 0) === 35005;
+    /**
+     * ★ 落库打标（2026-10-30）。旧实现只有 `user_verify` 撞 35005 才打标，
+     * get_union_vip 这条路每次都要重新问一遍上游才知道失效 —— 于是"酷狗账号被上游打掉"
+     * 只能靠人工打开设置页撞见，播放侧静默降级到 B 站，用户完全无感（本次报障）。
+     */
+    if (rejected) markKugouCredentialInvalid(`get_union_vip 拒绝 (${Number(j?.error_code ?? 0)})：酷狗授权已过期`);
     return {
       ok: false,
       isVip: false,
@@ -260,9 +290,24 @@ async function queryVip(token: string, userid: string): Promise<VipQueryResult> 
     null,
   );
 
-  // 概念版 SVIP：只在 concept 行里认（上方 candidates 已优先过滤 busi_type === 'concept'），
-  // 避免把非 concept 的畅听 VIP 行误判成 SVIP。
-  const svipRow = activeRows.find(r => CONCEPT_SVIP_PRODUCT_TYPES.includes(r.productType));
+  /**
+   * 概念版 SVIP 选行（2026-10-30 按生产端实测重写）。
+   *
+   * 只在 concept 行里认（上方 candidates 已优先过滤 busi_type === 'concept'），避免把
+   * 非 concept 的畅听 VIP 行误判成 SVIP。在此基础上：
+   *   ① `product_type = tvip` 优先 —— 上游把概念版会员标成 tvip（见白名单注释）；
+   *   ② 同类多行取**最晚到期**那一条。旧写法 `.find()` 取的是上游返回顺序的第一条，
+   *      行序一变「概念 SVIP 至哪天」就跟着漂（两次请求两个日期）；
+   *   ③ 一条 tvip 都没有时才退回历史上的 `svip` 行（兼容老账号），同样取最晚。
+   */
+  const latestOf = (rows: typeof activeRows): (typeof activeRows)[number] | undefined =>
+    rows.reduce<(typeof activeRows)[number] | undefined>(
+      (acc, cur) => (!acc || cur.endMs > acc.endMs ? cur : acc),
+      undefined,
+    );
+  const tvipRows = activeRows.filter(r => r.productType === 'tvip');
+  const legacySvipRows = activeRows.filter(r => r.productType === 'svip');
+  const svipRow = latestOf(tvipRows.length > 0 ? tvipRows : legacySvipRows);
   if (svipRow) {
     log.debug(`命中概念版 SVIP：product_type=${svipRow.productType}，到期 ${svipRow.endTime}`);
   }
@@ -296,6 +341,7 @@ function emptyLoggedOutState(): KugouLoginState {
     checkinDate: checkin.date,
     svipActive: false,
     svipEndTime: '',
+    svipExpireAt: '',
     accountLabel: '未登录',
     statusLabel: '未登录',
     savedAt: 0,
@@ -303,7 +349,18 @@ function emptyLoggedOutState(): KugouLoginState {
   };
 }
 
+/**
+ * 读登录态（会打上游：签到 / get_union_vip，各自有缓存）。
+ *
+ * 外层只做一件事：把结论记进 lastKnownState，供 cachedKugouState() 同步取用。
+ */
 export async function readKugouLoginState(): Promise<KugouLoginState> {
+  const state = await queryLoginState();
+  lastKnownState = state.state;
+  return state;
+}
+
+async function queryLoginState(): Promise<KugouLoginState> {
   const raw = getSetting('kugou.credentials');
   const invalidRaw = getSetting('kugou.credentialsInvalidAt');
   let invalidReason = '';
@@ -347,6 +404,7 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
       checkinDate: checkin.date,
       svipActive: false,
       svipEndTime: '',
+      svipExpireAt: '',
       accountLabel,
       statusLabel: '已失效',
       savedAt,
@@ -411,6 +469,7 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
         checkinDate: checkin.date,
         svipActive: false,
         svipEndTime: '',
+        svipExpireAt: '',
         accountLabel,
         statusLabel: '已失效',
         savedAt,
@@ -435,6 +494,15 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
     }
 
     const vipExpireAt = shortExpireDate(vip.endTime);
+    /**
+     * ★ 前端 label 里的到期日**只认概念 SVIP**（用户 2026-10-30 裁定「只看 svip」）。
+     *
+     * 旧写法用的是 vipExpireAt —— 那是 `bestRow`（**所有**有效行里最晚到期的那个）。
+     * 生产端实测：label 显示 27.02.01（来自一行 2027-02-01 12:20:05 的未知产品），
+     * 而酷狗 App 里概念 SVIP 是 26.10.31、畅听是 27.05.05 —— 三个数互不相同，
+     * 用户看到的"会员到期日"完全不准。三端只显示 label，所以只改这里即可。
+     */
+    const svipExpireAt = shortExpireDate(vip.svipEndTime);
 
     if (!vip.isVip) {
       const expPart = vipExpireAt ? ` · ${vipExpireAt}` : '';
@@ -451,6 +519,7 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
         checkinDate: checkin.date,
         svipActive: false,
         svipEndTime: '',
+        svipExpireAt: '',
         accountLabel,
         statusLabel: `已到期${expPart} · ${finalSignTag}`,
         savedAt,
@@ -458,9 +527,12 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
       };
     }
 
-    const expPart = vipExpireAt ? ` · ${vipExpireAt}` : '';
+    // 日期只认概念 SVIP（见上方 svipExpireAt 注释）；当天没升级成功 → 只有签到状态、不带日期
+    const expPart = svipExpireAt ? ` · ${svipExpireAt}` : '';
     const statusText = `${finalSignTag}${expPart}`;
-    log.debug(`酷狗登录态：会员有效至 ${vip.endTime}（SVIP=${vip.svipActive ? vip.svipEndTime : '未生效'}，${finalSignTag}）`);
+    log.debug(
+      `酷狗登录态：概念 SVIP 至 ${vip.svipEndTime || '未生效'}（畅听最晚 ${vip.endTime || '无'}，${finalSignTag}）`
+    );
     return {
       state: 'ok',
       label: statusText,
@@ -474,6 +546,7 @@ export async function readKugouLoginState(): Promise<KugouLoginState> {
       checkinDate: checkin.date,
       svipActive: vip.svipActive,
       svipEndTime: vip.svipEndTime,
+      svipExpireAt,
       accountLabel,
       statusLabel: statusText,
       savedAt,

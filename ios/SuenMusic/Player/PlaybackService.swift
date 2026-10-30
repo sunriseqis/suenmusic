@@ -228,6 +228,8 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         if let r, r.ok == false, r.reason == "need_verification" {
             promptVerify(r)
         }
+        // 酷狗掉登录：另一类「用户必须动手」的故障 —— 发一次系统通知，账号恢复后复位
+        if let r { noteKugouAccountState(r) }
         guard let r, r.ok else {
             source = ""
             return
@@ -244,6 +246,28 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
                 expiresInSec: Self.directExpirySec(r.directExpiresInSec)
             )
         }
+    }
+
+    // MARK: 酷狗掉登录（kugouInvalid == true）
+
+    /// 「酷狗账号失效」只推一次（用户 2026-10-30 指定：客户端推送一次即可，不用一直推）。
+    /// 服务端在解析结果里带 `kugouInvalid`；账号恢复后任意一次解析不带它 → 这里复位，
+    /// 下次再掉会重新推一次。
+    private var kugouInvalidNotified = false
+
+    /// 从解析结果里读掉登录标记：真失效 → 推一次系统通知；正常 → 复位去重闸。
+    /// 播放不在这里中断：酷狗不可用时服务端早已降级到其它音源，这一步纯提示。
+    private func noteKugouAccountState(_ r: ResolveResponse) {
+        guard r.kugouInvalid == true else {
+            kugouInvalidNotified = false
+            return
+        }
+        guard !kugouInvalidNotified else { return }
+        kugouInvalidNotified = true
+        let reason = (r.kugouInvalidReason ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = reason.isEmpty ? "请重新登录酷狗概念版" : reason
+        Notifier.notify(title: "酷狗账号失效", body: body)
+        NSLog("[Kugou] 授权已失效，已提示用户重新登录：%@", body)
     }
 
     // MARK: 酷狗人工验证（reason == "need_verification"）

@@ -358,6 +358,16 @@ export function registerAdminRoutes(app: FastifyInstance): void {
     deleteSetting('kugou.checkin');
     invalidateKugouStatusCache();
     log.info('酷狗授权已退出（凭据清除）');
+    /**
+     * 审计（2026-10-30）：凭据是**整行删掉**的，而这里是全仓唯一的删除点。
+     * 之前只写进程日志 —— 于是"某台机器上酷狗凭据莫名消失"完全查不出是谁、什么时候点的。
+     */
+    record({
+      dimension: 'cookie',
+      action: 'logout',
+      ok: 1,
+      summary: '酷狗授权已退出（凭据已清除，需重新扫码）',
+    });
     return { ok: true };
   });
 }

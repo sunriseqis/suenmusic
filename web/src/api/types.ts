@@ -327,6 +327,10 @@ export interface ResolveResult {
    * 不需要验证时为 null。见 api/kugou-verify.ts 的 saveVerifyToken。
    */
   verifyUrl?: string | null;
+  /** true = 酷狗授权已失效（上游把 token 打掉）：顶部横幅提示重新登录 */
+  kugouInvalid?: boolean;
+  /** 给用户看的中文（服务端下发，端侧不自己拼）；只在 kugouInvalid 时存在 */
+  kugouInvalidReason?: string | null;
   score: number;
   bvid: string | null;
   matchedTitle: string | null;

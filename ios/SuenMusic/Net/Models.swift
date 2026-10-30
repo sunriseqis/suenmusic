@@ -241,6 +241,12 @@ struct ResolveResponse: Codable {
     /// 同一次验证事件的稳定 id —— 端侧按它去重，避免连播时每首都弹一次通知
     let eventId: String?
 
+    /// true = 酷狗授权已失效（上游把 token 打掉）。服务端只在 invalid 时下发这个位，
+    /// 端侧据此发一条「请重新登录」的系统通知（**一次即可**，见 PlaybackService.applyResolution）
+    let kugouInvalid: Bool?
+    /// 给用户看的中文（服务端下发，端侧不自己拼）
+    let kugouInvalidReason: String?
+
     /// 当前音质档位：lossless / exhigh / high / standard
     let currentQuality: String?
     /// 本曲可用音质档位列表

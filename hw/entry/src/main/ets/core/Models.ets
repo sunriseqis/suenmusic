@@ -208,6 +208,10 @@ export interface ResolveResponse {
   verifyUrl?: string;
   /** 同一次验证事件的稳定 id —— 端侧按它去重，避免每首歌都弹一次通知 */
   eventId?: string;
+  /** true = 酷狗授权已失效（上游把 token 打掉）：发一次系统通知提示重新登录 */
+  kugouInvalid?: boolean;
+  /** 给用户看的中文（服务端下发，端侧不自己拼） */
+  kugouInvalidReason?: string;
 }
 
 export interface StreamSessionToken {

@@ -28,6 +28,7 @@ import {
 import type { ResolveResult } from '../sources/bilibili/stream.ts';
 import { scoreCandidate } from '../sources/bilibili/matcher.ts';
 import { cacheKeyFor, invalidateTrack, resolveTrack, whitelistQuality } from '../services/resolver.ts';
+import { cachedKugouState } from '../services/kugou-status.ts';
 import { getPin, setPin, deletePin } from '../db/repo/pins.ts';
 import { resolveKugouSource } from '../sources/kugou/stream.ts';
 import {
@@ -163,6 +164,17 @@ function shape(
    */
   const verifyRequired =
     !outcome.ok && (outcome.verifyRequired === true || outcome.reason === 'need_verification');
+  /**
+   * 酷狗**掉登录**（上游把 token 打掉）的提示位（2026-10-30）。
+   *
+   * 与 need_verification 同一个出口，但语义不同：那个是"要过人机验证"，这个是"授权没了，
+   * 得重新扫码"。旧实现里这种情况只有人打开设置页才看得见，播放侧静默降级到 B 站，
+   * 用户永远不知道自己的酷狗账号已经掉了。
+   *
+   * 取 cachedKugouState()（同步、不打上游）：解析链本来就会读一次登录态，这里复用它。
+   * 只在 invalid 时下发，其它态（未登录 / 会员到期 / 正常）不带，避免刷噪声。
+   */
+  const kugouInvalid = cachedKugouState() === 'invalid';
   const verifyUrl = verifyRequired && isKugouVerifyPending() ? buildKugouVerifyUrl(signKugouVerifyToken()) : null;
   // 音质只报实际值：拿不准一律 standard（宁可少报，绝不虚报）
   const effectiveQuality = outcome.currentQuality || row?.currentQuality || 'standard';
@@ -277,6 +289,10 @@ function shape(
     currentQuality: effectiveQuality,
     /** 本曲可用音质档位列表（音源层真实产出，未知时只报 standard） */
     availableQualities: effectiveAvailable,
+    /** true = 酷狗授权已失效（上游打掉 token），客户端应提示用户重新登录（横幅 / 系统通知） */
+    kugouInvalid: kugouInvalid || undefined,
+    /** 给用户看的中文（与 need_verification 同口径：文案由服务端给，端侧不自己拼） */
+    kugouInvalidReason: kugouInvalid ? '酷狗账号失效，请重新登录' : undefined,
   };
 }
 

@@ -28,6 +28,7 @@ const REASON_NEED_VERIFICATION = 'need_verification';
 /** 10 分钟窗口：同一事件之外，也压住「短时间连续不同事件」的刷屏 */
 const THROTTLE_MS = 10 * 60 * 1000;
 const TITLE = '酷狗账号需要验证';
+const INVALID_TITLE = '酷狗账号失效';
 const TEXT = '点击前往浏览器完成验证';
 /** 系统浏览器（用户规格指定：华为浏览器）；找不到时退回「任意可看网址的应用」 */
 const BROWSER_BUNDLE = 'com.huawei.hmos.browser';
@@ -41,10 +42,36 @@ let lastPromptAt: number = 0;
 
 export class KugouVerify {
   /**
+   * 「酷狗账号失效」是否已推过。用户 2026-10-30 指定：**只推一次**，不要一直推；
+   * consume() 在解析结果不再带 kugouInvalid 时复位 —— 下次再掉会重新推一次。
+   */
+  private static invalidNotified: boolean = false;
+
+  /** 掉登录提示：系统通知（纯文本，无 WantAgent）+ AppToast 兜底，只推一次 */
+  private static promptInvalid(reason?: string): void {
+    if (KugouVerify.invalidNotified) {
+      return;
+    }
+    KugouVerify.invalidNotified = true;
+    const raw = reason === undefined ? '' : reason.trim();
+    const text = raw.length > 0 ? raw : '请重新登录酷狗概念版';
+    hilog.warn(DOMAIN, TAG, '酷狗授权已失效，提示用户重新登录');
+    Notifier.notify(INVALID_TITLE, text);
+    AppToast.show(text);
+  }
+
+  /**
    * 解析结果的唯一消费入口（refreshSourceLabel / resolveDirect 各调一次）。
    * 非该 reason 立刻返回，等于给主流程挂了个 0 成本判断。
    */
   static consume(r: ResolveResponse): void {
+    // 酷狗掉登录（上游把 token 打掉）：与「需要验证」并列的第二类"用户必须动手"故障，
+    // 走同一个消费口；账号恢复后（任意一次解析不带该位）自动复位去重闸。
+    if (r.kugouInvalid === true) {
+      KugouVerify.promptInvalid(r.kugouInvalidReason);
+      return;
+    }
+    KugouVerify.invalidNotified = false;
     if (r.reason !== REASON_NEED_VERIFICATION) {
       return;
     }

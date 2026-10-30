@@ -175,6 +175,20 @@ export const useUiStore = defineStore('ui', () => {
     serverDown.value = v;
   }
 
+  /**
+   * 酷狗授权失效的顶部横幅文案（空串 = 不显示）。
+   *
+   * 由 player store 从每次解析结果的 `kugouInvalid` 维护 —— 服务端只在掉登录时下发
+   * 这个位，于是"解析一次就出现、账号恢复后自动消失"。与 `need_verification`
+   * （要过人机验证）是两种故障：共用横幅，但文案由服务端给、端侧不自己拼。
+   */
+  const kugouInvalidReason = ref('');
+  function setKugouInvalid(invalid: boolean, reason?: string | null): void {
+    kugouInvalidReason.value = invalid
+      ? (reason && reason.trim()) || '酷狗账号失效，请重新登录'
+      : '';
+  }
+
   function setBaseUrl(url: string): void {
     applyBaseUrl(url);
     baseUrl.value = getBaseUrl();
@@ -234,6 +248,8 @@ export const useUiStore = defineStore('ui', () => {
     setBaseUrl,
     serverDown,
     setServerDown,
+    kugouInvalidReason,
+    setKugouInvalid,
     isDesktop,
     initBreakpoint,
     toasts,

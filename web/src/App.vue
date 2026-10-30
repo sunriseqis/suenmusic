@@ -156,6 +156,13 @@ watch(
 
 <template>
   <NeuToast />
+  <!--
+    酷狗授权失效横幅（2026-10-30）：只在非公开页显示，文案由服务端下发。
+    解析链每次都会带这个位，账号恢复后自然消失，不需要"关闭"按钮。
+  -->
+  <div v-if="!isPublic && ui.kugouInvalidReason" class="kugou-banner" role="status">
+    <span class="kugou-banner-text">{{ ui.kugouInvalidReason }}</span>
+  </div>
   <!-- 音源锚定弹窗：解析失败（低置信/无候选）时自动弹出，全局唯一 -->
   <AnchorDialog />
   <!-- 应用更新弹窗：启动静默检查或设置页手动检查命中新版本时弹出，全局唯一 -->
@@ -174,6 +181,31 @@ watch(
 </template>
 
 <style scoped>
+/* 酷狗授权失效横幅：顶部居中，不挡播放条（播放条在底部）、不挡内容（fixed 浮层） */
+.kugou-banner {
+  position: fixed;
+  top: calc(var(--safe-top, 0px) + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 16px;
+  border-radius: var(--r-pill);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  box-shadow: 0 6px 18px var(--sd);
+  color: var(--t1);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.kugou-banner-text {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bare {
   min-height: 100dvh;
   display: flex;
