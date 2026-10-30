@@ -138,3 +138,44 @@ curl http://127.0.0.1:3210/api/health
   ```bash
   systemctl restart suenmusic
   ```
+
+---
+
+## HTTP 代理出站已废弃（2026-10-30 用户裁定）
+
+### 为什么废弃
+
+代理出站（设置页的 `proxyKind=proxyUrl`）实测对更新通道**没有价值**：
+
+| 路径 | 实测 |
+| :-- | :-- |
+| `api.github.com` 经代理 | 2~5 秒能回（几 KB 的小请求，能用） |
+| release 资产（62 MB fpk）经代理 | **31~52 KB/s** → 33 分钟级，中途必断，`latest.json` 永远写不出来 |
+| 换成 WARP（usque/MASQUE）后 | 仍然 18~25 KB/s，4 并发合计还是 26 KB/s（链路层被压，不是单流问题） |
+| release 资产经**公开镜像直连** | **300 KB/s ~ 1.8 MB/s** |
+
+于是更新通道改成：**API 直连 + 镜像兜底；资产多镜像自动择优**。`SUENMUSIC_UPDATE_MIRRORS`
+可覆盖候选池。
+
+### 现在怎么走
+
+1. **列 release**：`配置的 API 基地址 → api.github.com → 最近择优过的镜像 → 内置候选池`，逐个试；
+   要求响应是 **JSON 数组**（有些镜像对任意路径都回 `ok`，只看 HTTP 200 会误判），成功者缓存 30 分钟。
+   某个出口回 404 **不再**直接判定「无更新」—— 国内直连 api.github.com 经常被污染成 404，
+   只有所有出口都 404 才按无包处理。
+2. **下资产**：先并发探活 81 个候选（80 个镜像 + 直连），再对前 4 名顺序精测，取最快的那条；
+   下载支持**断点续传**，失败或**吞吐低于 100 KB/s 主动换源**，最后做 **sha256 校验**。
+
+### 自检命令
+
+```bash
+cd server
+npm run test:update-mirrors                                   # 纯函数单测
+npm run test:update-mirrors -- --probe <资产直链> --top 10     # 现场排名（会发 81 个 Range 请求）
+```
+
+### 保留的东西
+
+`/api/admin/update-settings` 仍返回 `proxyKind/proxyUrl`（Web 面板回显用），但**不再参与出站**；
+`source=off` 仍然是「关闭更新」的开关。
+

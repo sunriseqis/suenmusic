@@ -20,13 +20,16 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import { config } from '../config.ts';
-import { getUpdateProxySettings, proxyUriSafe } from './update-settings.ts';
-import { updateProxyDispatcher } from '../utils/http-agent.ts';
-import { ProxyAgent } from 'undici';
+// 只保留「更新源是否关闭」这个开关；proxyKind / proxyUrl 已废弃，不再参与出站
+import { getUpdateProxySettings } from './update-settings.ts';
+// ⚠️ HTTP 代理出站已废弃（2026-10-30 用户裁定）：更新通道不再经过任何 HTTP 代理，
+// API 走「直连 + 镜像兜底」，产物走「多镜像自动择优」。update-settings 里的代理配置仅保留
+// 给 Web 面板回显，不再参与出站。
 import { createLogger } from '../logger.ts';
 import { SERVER_VERSION } from '../app.ts';
 import { getDeployMode, type DeployMode } from './deploy-mode.ts';
 import { signUpdateToken } from '../utils/update-token.ts';
+import { apiCandidates, downloadWithMirrors, lastRankedPrefixes, mirrorUrl } from './update-mirrors.ts';
 
 const log = createLogger('update');
 import {
@@ -211,37 +214,85 @@ function githubHeaders(): Record<string, string> {
   return headers;
 }
 
-/** 资产下载地址：可套一层国内代理前缀（只影响下载，不影响 API） */
-/**
- * 出站代理 dispatcher（HTTP / SOCKS5）。
- *
- * 与旧版"URL 前缀镜像"的本质区别：这是**真正的网络层代理**——
- * 所有 GitHub 流量（API + 产物下载）都经由代理服务器出去，
- * 对 GitHub 而言请求方是代理出口；URL 原样不变，没有任何第三方转写。
- */
-function proxyDispatcher(): ProxyAgent | undefined {
-  const uri = proxyUriSafe(getUpdateProxySettings());
-  return uri ? updateProxyDispatcher(uri) : undefined;
+/** API 出口：直连优先，失败自动换镜像（HTTP 代理出站已废弃） */
+const API_ATTEMPT_LIMIT = 12;
+/** 上次成功的 API 出口缓存（避免每次刷新都把候选全试一遍） */
+let apiViaCache: { prefix: string; at: number } | null = null;
+const API_VIA_TTL_MS = 30 * 60_000;
+
+function releasesUrl(): string {
+  return apiBase() + '/repos/' + config.updateGithubRepo + '/releases?per_page=' + PER_PAGE;
 }
 
-async function listReleases(): Promise<GithubRelease[]> {
-  if (!config.updateGithubRepo) throw new Error('未配置 SUENMUSIC_UPDATE_GITHUB_REPO');
-  const res = await fetch(`${apiBase()}/repos/${config.updateGithubRepo}/releases?per_page=${PER_PAGE}`, {
+/**
+ * 从指定出口（'' = 直连）取一次 releases。
+ *
+ * 必须校验响应是 **JSON 数组**：实测有些镜像对任意路径都回 "ok"（2 字节 200），
+ * 只看 res.ok 会把它们当成成功，然后 JSON.parse 抛错、整条链路失败。
+ */
+async function fetchReleasesOnce(
+  prefix: string,
+): Promise<{ status: number; list: GithubRelease[] | null }> {
+  const res = await fetch(mirrorUrl(prefix, releasesUrl()), {
     headers: githubHeaders(),
-    dispatcher: proxyDispatcher(),
+    signal: AbortSignal.timeout(15_000),
   } as never);
-  if (res.status === 404) {
-    // 2026-10-24：仓库**没有 Release**、或仓库是**私有**（未配 token）时 GitHub 都回 404。
-    // 按产品口径「有没有更新由后端管理」：这种情况一律当**无包**处理（返回空列表），
-    // 让 /api/update/check 正常回 available=false（客户端显示「已是最新」），而不是 502 报错。
-    log.warn('GitHub Releases 404（无 Release 或私有仓库未配 token），按无包处理');
+  if (res.status === 404) return { status: 404, list: null };
+  if (!res.ok) return { status: res.status, list: null };
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(await res.text());
+  } catch {
+    parsed = null;
+  }
+  if (!Array.isArray(parsed)) return { status: res.status, list: null };
+  return { status: res.status, list: parsed as GithubRelease[] };
+}
+
+export async function listReleases(): Promise<GithubRelease[]> {
+  if (!config.updateGithubRepo) throw new Error('未配置 SUENMUSIC_UPDATE_GITHUB_REPO');
+
+  // 上次成功的出口排最前（30 分钟内复用），其次用最近一次资产择优的结果，最后是内置候选池
+  const ranked: string[] = [];
+  if (apiViaCache && Date.now() - apiViaCache.at < API_VIA_TTL_MS) ranked.push(apiViaCache.prefix);
+  for (const p of lastRankedPrefixes()) if (!ranked.includes(p)) ranked.push(p);
+  const candidates = apiCandidates({
+    configuredBase: config.updateGithubApiBase,
+    ranked,
+    limit: API_ATTEMPT_LIMIT,
+  });
+
+  let lastError = 'unknown';
+  let sawNotFound = false;
+  for (const prefix of candidates) {
+    const label = prefix || '直连';
+    try {
+      const r = await fetchReleasesOnce(prefix);
+      if (r.status === 404) {
+        // 某个出口回 404 **不等于**「仓库没有 Release」：国内直连 api.github.com 经常被污染成 404。
+        // 记下继续试下一个出口；全部试完仍拿不到列表、且至少见过一个 404 时才算「无包」。
+        sawNotFound = true;
+        lastError = 'HTTP 404';
+        continue;
+      }
+      if (!r.list) {
+        lastError = 'HTTP ' + String(r.status) + ' 或响应不是 JSON 数组';
+        continue;
+      }
+      apiViaCache = { prefix, at: Date.now() };
+      if (prefix) log.info('Releases 查询改走镜像：' + prefix);
+      return r.list.filter(x => !x.draft && Array.isArray(x.assets));
+    } catch (err) {
+      lastError = (err as Error)?.message ?? String(err);
+      log.debug('Releases 出口失败（' + label + '）：' + lastError);
+    }
+  }
+  if (sawNotFound) {
+    // 所有出口都回 404：无 Release 或私有仓库未配 token —— 按无包处理，    // 让 /api/update/check 回 available=false，而不是 502。
+    log.warn('所有出口均回 404（无 Release 或私有仓库未配 token），按无包处理');
     return [];
   }
-  if (!res.ok) {
-    throw new Error(`GitHub Releases 查询失败：HTTP ${res.status}`);
-  }
-  const list = (await res.json()) as GithubRelease[];
-  return list.filter(r => !r.draft && Array.isArray(r.assets));
+  throw new Error('GitHub Releases 查询失败（已试 ' + String(candidates.length) + ' 个出口）：' + lastError);
 }
 
 function isAssetMatch(assetName: string, versionName: string, platform: UpdatePlatform): boolean {
@@ -318,27 +369,25 @@ export async function refreshPlatform(
   const dir = cacheDir(platform);
   mkdirSync(dir, { recursive: true });
   const target = join(dir, fileName);
-  const temp = `${target}.part`;
 
-  const res = await fetch(picked.asset.browser_download_url!, {
-    headers: githubHeaders(),
-    dispatcher: proxyDispatcher(),
-  } as never);
-  if (!res.ok || !res.body) {
-    throw new Error(`产物下载失败：HTTP ${res.status}`);
-  }
-  await pipeline(Readable.fromWeb(res.body as never), createWriteStream(temp));
-
-  const size = statSync(temp).size;
-  if (typeof picked.asset.size === 'number' && picked.asset.size > 0 && size !== picked.asset.size) {
-    rmSync(temp, { force: true });
-    throw new Error(`产物大小不符：期望 ${picked.asset.size}，实际 ${size}`);
-  }
-
-  renameSync(temp, target);
+  /**
+   * 产物下载改走「多镜像自动择优」（services/update-mirrors.ts）。
+   *
+   * 为什么不再直接用 fetch + 代理：API（列 release）是几 KB 的小请求，走现有代理 2 秒能回；
+   * 但 62 MB 的 fpk 走同一条代理实测只有 31~52 KB/s —— 30 分钟级、中途必断，缓存永远建不起来
+   * （生产端实测 /api/update/check 恒返回 latest:null 就是这个原因）。
+   * 镜像只用于下载：先并发探活测速取最快，失败自动换下一条，并做 sha256 校验防投毒。
+   */
+  const digestRaw = typeof picked.asset.digest === 'string' ? picked.asset.digest : '';
+  const expectedSha = digestRaw.startsWith('sha256:') ? digestRaw.slice(7) : null;
+  await downloadWithMirrors(picked.asset.browser_download_url!, target, {
+    expectedSize: typeof picked.asset.size === 'number' ? picked.asset.size : undefined,
+    sha256: expectedSha,
+  });
+  const size = statSync(target).size;
   await pruneOldFiles(platform, fileName);
 
-  const digest = typeof picked.asset.digest === 'string' ? picked.asset.digest : '';
+  const digest = digestRaw;
   const artifact: UpdateArtifact = {
     fileName,
     path: target,
