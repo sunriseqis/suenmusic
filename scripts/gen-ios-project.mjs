@@ -155,11 +155,11 @@ function render(main) {
     o += '\t\t' + cid + ' /* ' + name + ' */ = {\n\t\t\tisa = XCBuildConfiguration;\n\t\t\tbuildSettings = {\n';
     o += '\t\t\t\tASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;\n';
     o += '\t\t\t\tCODE_SIGN_IDENTITY = "Apple Development";\n\t\t\t\tCODE_SIGN_STYLE = Automatic;\n';
-    o += '\t\t\t\tCURRENT_PROJECT_VERSION = 2010000;\n\t\t\t\tDEVELOPMENT_TEAM = VV9F66AH8U;\n';
+    o += '\t\t\t\tCURRENT_PROJECT_VERSION = 2010100;\n\t\t\t\tDEVELOPMENT_TEAM = VV9F66AH8U;\n';
     o += '\t\t\t\tGENERATE_INFOPLIST_FILE = NO;\n\t\t\t\tINFOPLIST_FILE = "../SuenMusic/App/Info.plist";\n';
     o += '\t\t\t\tIPHONEOS_DEPLOYMENT_TARGET = 17.0;\n';
     o += '\t\t\t\tLD_RUNPATH_SEARCH_PATHS = (\n\t\t\t\t\t"$(inherited)",\n\t\t\t\t\t"@executable_path/Frameworks",\n\t\t\t\t);\n';
-    o += '\t\t\t\tMARKETING_VERSION = 2.1.0;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.suenmusic.app;\n';
+    o += '\t\t\t\tMARKETING_VERSION = 2.1.1;\n\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.suenmusic.app;\n';
     o += '\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";\n\t\t\t\tSWIFT_EMIT_LOC_STRINGS = YES;\n\t\t\t\tSWIFT_VERSION = 5.0;\n';
     o += '\t\t\t\tTARGETED_DEVICE_FAMILY = "1,2";\n';
     o += '\t\t\t};\n\t\t\tname = ' + name + ';\n\t\t};\n';

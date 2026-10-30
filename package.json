@@ -1,7 +1,7 @@
 {
   "name": "suenmusic",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "SuenMusic 单仓：服务端 + Web 面板/PC 客户端 + iOS/鸿蒙原生客户端 + fnOS 套件",
   "scripts": {
     "ios:sync": "node scripts/build-ios.mjs --sync-only",

@@ -540,14 +540,44 @@ final class PlaybackService: ObservableObject, AudioEngineEvents {
         }
     }
 
-    /// 强制重装当前曲（修正音源锚定后走新锚点）：丢缓冲重装 → 起播。
-    /// hw `retryCurrent(true)` 同口径：锚定后服务端已清解析缓存，重装即走新音源。
+    /// 强制重装当前曲（换音源后走新锚点 / 新源钉）：丢缓冲重装 → 起播。
+    ///
+    /// ★ 严格对齐 hw `doAnchor`。2026-10-30 真机报障「锚定换了源，iOS 一直放上次那条错音源」，
+    /// 根因是本类原来只调了 `engine.reloadCurrent`，另三件 hw 做了的事一件都没做：
+    ///   ① hw `OfflineCache.remove(t.id)` → 这里 `AudioCacheStore.evict`：
+    ///      本地整首缓存以**曲目 id** 为键，而 `AudioEngine.resolveSource` 的第 ① 级优先放它，
+    ///      不清就永远放旧音源（evict 在本轮之前全工程没有调用点，等于白定义）；
+    ///   ② hw `retryCurrent` 里的 `this.direct = null` → 这里 `setDirect(url: nil)`：
+    ///      内存直链按 id 存着**旧 bvid 的 CDN 地址**，`resolveSource` 第 ② 级会继续用它；
+    ///   ③ hw `loadCurrent` 里「先 resolveDirect 再 createMediaSource」→ 这里先 await 一次
+    ///      `/api/resolve`（服务端在锚定/钉源时已 invalidateTrack，这一发必然是新音源）再重装；
+    ///      不先取就重装，装载瞬间读到的仍然是旧直链，等于白清。
+    ///
+    /// 顺序也不能换：**先掐在飞下载，再 evict**。反过来的话，那次下载会在下面的解析等待
+    /// （冷曲目 2-8s）里把旧音源字节重新落盘，evict 就白做了 —— hw 同样是先
+    /// cancelDownload 再 remove。
     func reloadCurrentTrack(autoplay: Bool) async {
         guard let engine, queue.indices.contains(currentIndex) else { return }
+        let trackId = queue[currentIndex].id
         manualLoad = true
+        // 解析往返也算「在等出声」：先亮 loading，别让用户以为点了没反应
+        loading = true
+
+        // ① 掐掉在飞下载 + 清本地整首缓存（旧音源字节）
+        engine.cancelCacheTasks()
+        AudioCacheStore.shared.evict(trackId)
+        // ② 清掉旧 bvid 的内存直链
+        engine.setDirect(trackId: trackId, url: nil, headers: nil)
+
+        // ③ 先取到新音源再重装（取不到就退回服务端代理流：那条路也已经走新锚点了）
+        resetTrackSourceState()
+        let fresh = try? await APIClient.shared.resolve(trackId: trackId, quality: requestQuality)
+        // 解析期间用户又切了歌：这批结果只属于旧曲，别拿它覆盖新曲的角标/直链
+        guard queue.indices.contains(currentIndex), queue[currentIndex].id == trackId else { return }
+        if let r = fresh { applyResolution(r, trackId: trackId) }
+
         armLoadWatchdog()
         engine.reloadCurrent(index: currentIndex, positionMs: 0, autoplay: autoplay)
-        refreshSource(for: queue[currentIndex].id)
     }
 
     /// 「音源」行取真实解析来源（hw `MediaPlayerCore.refreshSourceLabel` 同口径）：

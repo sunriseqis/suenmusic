@@ -478,6 +478,13 @@ export function registerResolveRoutes(app: FastifyInstance): void {
     if (!meta) throw notFound('曲目不存在');
 
     const keyword = strParam((req.query as any)?.keyword).trim() || buildQuery(meta);
+    /**
+     * ⚠️ 这里**刻意不做**「非录音室版本」过滤（对比 `resolveTrackSource` 的硬过滤）。
+     *
+     * 锚定弹窗是用户手动挑音源的出口：自动解析把直拍/现场都筛掉之后（全被筛掉 = 无候选），
+     * 用户恰恰需要在这里看到完整候选池、自己拍板选一条 live 或直拍。
+     * 在此过滤等于把用户最后的兜底也堵死。
+     */
     const { candidates, rejected } = await searchCandidates(keyword, 10);
 
     if (rejected) {

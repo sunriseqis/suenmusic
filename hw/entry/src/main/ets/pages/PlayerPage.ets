@@ -557,7 +557,15 @@ export struct PlayerPage {
     }
   }
 
-  /** 解除锚定：该曲目回到自动匹配 */
+  /**
+   * 解除锚定：该曲目回到自动匹配。
+   *
+   * 解锚 = **同样换了音源**（回到自动匹配的那一版），所以收尾必须与 doAnchor 同一套：
+   *   ① 掐在飞下载 + 清掉以曲目 id 为键的旧音源字节（fd:// 优先，不清会盖住新音源）；
+   *   ② retryCurrent 内部会把内存直链 `this.direct` 置空，重新解析取新直链；
+   *   ③ 服务端 unanchorTrack 已 invalidateTrack，重装即走自动匹配结果。
+   * 少了这一步，用户会看到「解除了锚定，放的还是那个视频」。
+   */
   private async removeCurrentAnchor(): Promise<void> {
     const id = this.trackId;
     if (id.length === 0 || this.removingAnchor) { return; }
@@ -566,6 +574,14 @@ export struct PlayerPage {
       await APIClient.shared().unanchorTrack(id);
       this.anchorInfo = null;
       this.showToast('已解除锚定，该曲目回到自动匹配');
+      // 请求往返期间切了歌：这批收尾只属于 id 这首，别去重装别人的曲目
+      if (this.trackId !== id) { return; }
+      // 试听中的候选与主播放会叠音：停掉试听再重装
+      this.stopPreview(false);
+      OfflineCache.shared().setProtected('');
+      OfflineCache.shared().remove(id);
+      await MediaPlayerCore.shared().retryCurrent(true);
+      await this.loadCurrentAnchor();
     } catch (e) {
       this.showToast(Copy.describeError(e));
     } finally {

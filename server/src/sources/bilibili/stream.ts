@@ -20,7 +20,12 @@ import { config } from '../../config.ts';
 import { createLogger } from '../../logger.ts';
 import { Cooldown } from '../../utils/backoff.ts';
 import { request, requestJson } from '../../utils/http.ts';
-import { parseDuration, scoreCandidate } from './matcher.ts';
+import {
+  filterStudioCandidates,
+  isNonStudioTitle,
+  parseDuration,
+  scoreCandidate,
+} from './matcher.ts';
 import type { MatchCandidate, MatchTrack } from './matcher.ts';
 
 const log = createLogger('bilibili');
@@ -497,12 +502,34 @@ export async function resolveTrackSource(
   const query = buildQuery(track);
   log.debug(`搜索候选: "${query}" 目标时长 ${Math.round(track.durationMs / 1000)}s`);
 
-  const { candidates, rejected } = await searchCandidates(query, 10);
+  const { candidates: rawCandidates, rejected } = await searchCandidates(query, 10);
   if (rejected) {
     return fail('rejected', 'B 站搜索被风控拦截，请配置 Bilibili Cookie');
   }
+
+  /**
+   * 非录音室版本硬过滤（现场 / 直拍 / 舞台 / 直播 …，实现见 matcher.ts 的 filterStudioCandidates）。
+   *
+   * 为什么放在打分**之前**、而不是给 LIVE_KEYWORDS 加权重：打分器是实测验证过的模型，
+   * 而扣分只能降排名、不能否决 —— 一条标题与时长都刚好对上的直拍，扣完 20 分照样过阈值，
+   * 用户听到的就是一段手机竖屏现场收音（2026-10-30 报障）。
+   * 原曲自身是现场版时不过滤（否则等于自我否决）；全被筛掉属于合法结果，按 no_candidates
+   * 交回上层 —— 客户端会弹锚定弹窗，那里不过滤，真有需要用户可以自己挑一条。
+   */
+  const targetIsLive = isNonStudioTitle(track.name);
+  const candidates = filterStudioCandidates(track.name, rawCandidates);
+  if (candidates.length !== rawCandidates.length) {
+    log.info(
+      `过滤非录音室版本候选 ${rawCandidates.length - candidates.length}/${rawCandidates.length} 首「${track.name}」`
+    );
+  }
   if (!candidates.length) {
-    return fail('no_candidates', `未找到候选视频（搜索词：${query}）`);
+    return fail(
+      'no_candidates',
+      targetIsLive
+        ? `未找到候选视频（搜索词：${query}）`
+        : `候选全部为非录音室版本（现场/直拍/直播…），未找到录音室音源（搜索词：${query}）`
+    );
   }
 
   const matchTrack: MatchTrack = {

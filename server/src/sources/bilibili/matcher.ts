@@ -72,6 +72,76 @@ const NEGATIVE_KEYWORDS = [
 
 const LIVE_KEYWORDS = ['演唱会', 'live', '现场', '音乐节', '跨年'];
 
+/**
+ * 「非录音室版本」标记（现场 / 直拍 / 舞台 / 直播 …）。
+ *
+ * ⚠️ 与上面的 LIVE_KEYWORDS 是**两套东西**，不要合并：
+ *   · LIVE_KEYWORDS 参与 `scoreCandidate` 打分（每命中一项扣 20 分，软惩罚）——
+ *     那段算法是被实测验证过的，一个字节都不改；
+ *   · 这一套只给 `filterStudioCandidates` 的**硬过滤**用。
+ *
+ * 为什么软惩罚不够（2026-10-30 用户报障）：标题完全对得上、时长也刚好卡住的直拍/饭拍，
+ * 40（时长）+ 25（歌名）+ 15（歌手）− 20（live 惩罚）= 60 分，照样压过阈值 ——
+ * 用户点开听到的是一段手机竖屏现场收音。「扣分」永远只能降低排名，不能否决。
+ *
+ * 中文按子串匹配（中文没有词边界），拉丁必须按**词边界**匹配：
+ * Alive / Deliver / Lively / Concerted 这些正常标题不能被 live / concert 误杀。
+ */
+const CN_NON_STUDIO_KEYWORDS = [
+  '演唱会',
+  '现场',
+  '音乐节',
+  '跨年',
+  '直拍',
+  '饭拍',
+  '舞台',
+  '直播',
+  '打歌',
+  '巡演',
+  '返场',
+  '歌友会',
+  '签售会',
+  '彩排',
+  '总决赛',
+  '晚会',
+];
+
+const LATIN_NON_STUDIO_RES = ['live', 'fancam', 'concert', 'livehouse'].map(
+  k => new RegExp(`\\b${k}\\b`, 'i')
+);
+
+/**
+ * 标题是否带「非录音室版本」标记（现场 / 直拍 / 舞台 / 直播 …）。
+ *
+ * 纯函数、零依赖 —— 解析链、锚定弹窗、运维脚本都能直接引用。
+ */
+export function isNonStudioTitle(title: string | null | undefined): boolean {
+  const s = String(title ?? '');
+  if (!s) return false;
+  if (CN_NON_STUDIO_KEYWORDS.some(k => s.includes(k))) return true;
+  return LATIN_NON_STUDIO_RES.some(re => re.test(s));
+}
+
+/**
+ * 从候选池里筛掉非录音室版本，返回「能当录音室音源用」的那批。
+ *
+ * 规则：
+ *   1. **原曲自身就是现场版**（曲名带 live / 现场 / 演唱会…）→ 原样返回。
+ *      不过滤等于自我否决：用户要的就是现场版时，把所有 live 候选筛掉只会永远解析失败。
+ *   2. 否则按标题逐条剔除 —— 只看标题不看作者：UP 主名里带 Live 的搬运号很常见，
+ *      而直拍/饭拍的标记（直拍 / 舞台 / 饭拍…）几乎总写在标题里。
+ *
+ * 全被筛掉是**合法结果**（这首网上只有非录音室版本）：调用方据此按「无候选」处理，
+ * 客户端会弹锚定弹窗、用户可自己挑 —— 所以这里不做兜底回填。
+ */
+export function filterStudioCandidates<T extends { title: string }>(
+  trackName: string,
+  candidates: readonly T[]
+): T[] {
+  if (isNonStudioTitle(trackName)) return candidates.slice();
+  return candidates.filter(c => !isNonStudioTitle(c.title));
+}
+
 const POSITIVE_KEYWORDS = [
   '官方',
   'mv',

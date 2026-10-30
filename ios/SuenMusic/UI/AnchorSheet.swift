@@ -567,6 +567,11 @@ struct AnchorSheet: View {
     }
 
     /// 解除锚定：该曲目回到自动匹配
+    ///
+    /// 解锚 = **同样换了音源**（回到自动匹配的那一版），所以收尾必须与锚定成功同一套三步
+    /// （清本地缓存 / 清旧直链 / 取新音源再重装，见 PlaybackService.reloadCurrentTrack）。
+    /// 少了它，本地整首缓存与旧锚点直链会继续生效 —— 用户看到的就是「解除了锚定，
+    /// 放的还是那个视频」，直到下一次切歌才恢复。
     private func removeAnchor() async {
         guard let id = player.currentTrack?.id, !id.isEmpty, !removing else { return }
         removing = true
@@ -575,6 +580,12 @@ struct AnchorSheet: View {
             try await APIClient.shared.removeAnchor(id)
             anchorInfo = nil
             ToastCenter.shared.show("已解除锚定，该曲目回到自动匹配")
+            // 请求往返期间切了歌：这批收尾只属于 id 这首，别去重装别人的曲目
+            guard player.currentTrack?.id == id else { return }
+            // 试听中的候选与主播放会叠音：停掉试听但**不**恢复主播放（下面直接重装）
+            preview.stop(resumeMain: false, main: player)
+            // 重新解析 + 重装：服务端解锚时已 invalidateTrack，这一发回到自动匹配的音源
+            await player.reloadCurrentTrack(autoplay: true)
         } catch {
             ToastCenter.shared.show((error as? ApiError)?.message ?? "解除失败，请稍后重试")
         }

@@ -823,7 +823,11 @@ final class AudioEngine: NSObject {
     }
 
     /// 作废预约 + 取消在飞下载（规格 3.1 / 3.2 / 3.3）。
-    private func cancelCacheTasks() {
+    ///
+    /// 不只是内部用：换音源（锚定 / 源钉）时 `PlaybackService.reloadCurrentTrack` 要在
+    /// **清本地缓存之前**先掐掉在飞下载（hw `OfflineCache.cancelDownload` 同口径）——
+    /// 否则那次下载会在随后的解析等待里把旧音源字节重新落盘，evict 等于白做。
+    func cancelCacheTasks() {
         cancelCacheDelay()
         cacheDownloadTask?.cancel()
         cacheDownloadTask = nil
