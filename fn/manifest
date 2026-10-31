@@ -1,5 +1,5 @@
 appname               = suenmusic
-version               = 2.1.1
+version               = 2.1.2
 display_name          = SuenMusic
 desc                  = 个人/家庭私有音乐服务，支持多源搜索、流媒体代理、全端离线缓存与单一真相源同步
 platform              = x86
