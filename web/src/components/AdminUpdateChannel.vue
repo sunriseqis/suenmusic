@@ -132,7 +132,10 @@ function downloadFnPackage(): void {
   if (!updResult.value?.artifact?.downloadToken) return;
   const token = updResult.value.artifact.downloadToken;
   const path = updResult.value.artifact.downloadPath || '/api/update/download';
-  const url = `${path}?platform=fnos&token=${encodeURIComponent(token)}`;
+  // 带上真实文件名：外部下载工具按 URL 后缀识别包类型
+  const name = (updResult.value?.artifact?.fileName ?? '').trim();
+  const filePart = name ? '/' + encodeURIComponent(name) : '';
+  const url = `${path}${filePart}?platform=fnos&token=${encodeURIComponent(token)}`;
   window.open(url, '_blank');
 }
 

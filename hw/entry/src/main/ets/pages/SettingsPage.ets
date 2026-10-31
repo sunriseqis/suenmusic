@@ -210,7 +210,8 @@ export struct SettingsPage {
       }
       const ver = r.latest.versionName;
       this.updState = 'new=' + ver;
-      const url = APIClient.shared().buildUpdateDownloadUrl(r.downloadPath, r.downloadToken);
+      // 带上 fileName：浏览器靠 URL 后缀认安装包（见 APIClient.buildUpdateDownloadUrl 注释）
+      const url = APIClient.shared().buildUpdateDownloadUrl(r.downloadPath, r.downloadToken, r.latest.fileName);
       const ctx = this.getUIContext().getHostContext() as common.UIAbilityContext;
       await ctx.startAbility({ action: 'ohos.want.action.viewData', uri: url });
       this.toast('新版本 ' + ver + '：已交给浏览器下载，装好后自行侧载安装');

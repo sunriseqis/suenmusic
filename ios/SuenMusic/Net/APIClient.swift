@@ -491,9 +491,17 @@ final class APIClient {
     }
 
     /// 交给系统浏览器/侧载工具下载的直链（带短期令牌）
-    func updateDownloadURL(path: String, token: String) -> String {
-        baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            + path + "?platform=ios&token=" + token
+    /// 下载地址。**必须把 fileName 拼进路径**（/api/update/download/<fileName>）。
+    ///
+    /// 2026-10-30 真机报障：iOS 侧签工具（AltStore / SideStore / 轻松签）只看 URL 的路径后缀
+    /// 判断文件类型，而 /api/update/download?platform=ios&token=… 的路径里没有 .ipa ——
+    /// 工具把文件名识别成 download，于是拒绝安装。Content-Disposition 只对浏览器有效。
+    func updateDownloadURL(path: String, fileName: String? = nil, token: String) -> String {
+        let root = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let name = (fileName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let filePart = name.isEmpty ? "" : "/" + encoded
+        return root + path + filePart + "?platform=ios&token=" + token
     }
 
     func favorites(limit: Int = 50, cursor: String? = nil) async throws -> FavoritePage {

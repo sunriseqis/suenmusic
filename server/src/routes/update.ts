@@ -124,7 +124,19 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
     };
   });
 
-  app.get('/api/update/download', async (req, reply) => {
+  /**
+   * 下载处理：/api/update/download 与 /api/update/download/:fileName 共用同一个函数。
+   *
+   * 为什么要带文件名的别名路由（2026-10-30 iOS 真机报障）：
+   *   iOS 侧签工具（AltStore / SideStore / 轻松签）**只看 URL 的路径后缀**判断类型，
+   *   而 /api/update/download?platform=ios&token=... 的路径里没有 .ipa，工具把文件名识别成
+   *   "download"（真机表现就是「识别不到 ipa 后缀」），于是拒绝安装。
+   *   Content-Disposition 能救浏览器，救不了这些按 URL 猜类型的工具。
+   *
+   * :fileName 只用于让 URL 看起来像安装包：**实际文件以本地缓存为准**，
+   * 不信任入参（防伪造/穿越），响应头里的 fileName 始终是真实的那个。
+   */
+  const serveDownload = async (req: any, reply: any) => {
     const query = (req.query ?? {}) as Record<string, unknown>;
     const target = platform(query.platform);
 
@@ -201,7 +213,10 @@ export function registerUpdateRoutes(app: FastifyInstance): void {
       if (!local.destroyed) local.destroy();
     });
     return reply.send(local);
-  });
+  };
+
+  app.get('/api/update/download', serveDownload);
+  app.get('/api/update/download/:fileName', serveDownload);
 
   // ---- 更新通道设置（Web 管理页；只认 cookie 会话，与其它管理操作同一渠道闸） ----
 

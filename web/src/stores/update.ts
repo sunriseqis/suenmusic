@@ -123,8 +123,12 @@ export const useUpdateStore = defineStore('update', () => {
     error.value = '';
     try {
       const target = isIOS ? 'ios' : 'android';
+      // 路径里必须带真实文件名：iOS 侧签工具（AltStore / SideStore / 轻松签）只看 URL 后缀
+      // 判断类型，没有 .ipa 时会识别成 download 而拒绝安装（2026-10-30 真机报障）。
+      const fileName = (checked.latest?.fileName ?? '').trim();
+      const filePart = fileName ? '/' + encodeURIComponent(fileName) : '';
       const url = resolveUrl(
-        `${checked.downloadPath}?platform=${target}&token=${encodeURIComponent(checked.downloadToken)}`
+        `${checked.downloadPath}${filePart}?platform=${target}&token=${encodeURIComponent(checked.downloadToken)}`
       );
 
       if (isIOS) {

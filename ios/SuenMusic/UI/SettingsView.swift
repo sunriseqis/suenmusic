@@ -627,7 +627,9 @@ struct SettingsView: View {
             )
             if reply.available, let latest = reply.latest {
                 updState = "new=" + latest.versionName
-                let url = APIClient.shared.updateDownloadURL(path: reply.downloadPath, token: reply.downloadToken)
+                // 带上 fileName：侧签工具靠 URL 后缀认安装包（见 APIClient.updateDownloadURL 注释）
+                let url = APIClient.shared.updateDownloadURL(
+                    path: reply.downloadPath, fileName: latest.fileName, token: reply.downloadToken)
                 openForInstall(url, versionName: latest.versionName)
             } else {
                 updState = "latest"

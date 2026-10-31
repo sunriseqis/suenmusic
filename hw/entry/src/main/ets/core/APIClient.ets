@@ -514,8 +514,15 @@ export class APIClient {
   }
 
   /** 交给系统浏览器下载的直链（带短期令牌；浏览器发不出请求头） */
-  buildUpdateDownloadUrl(downloadPath: string, token: string): string {
-    return this.getBaseUrl() + downloadPath + '?platform=harmony&token=' + encodeURIComponent(token);
+  /**
+   * 下载地址。**必须把 fileName 拼进路径**（/api/update/download/<fileName>）：
+   * 浏览器/侧载工具按 URL 后缀识别安装包类型，路径里没有 .hap 会被当成普通文件。
+   * 服务端新增了 /api/update/download/:fileName 别名路由，实际文件仍以本地缓存为准。
+   */
+  buildUpdateDownloadUrl(downloadPath: string, token: string, fileName: string = ''): string {
+    const name = fileName.trim();
+    const filePart = name.length > 0 ? '/' + encodeURIComponent(name) : '';
+    return this.getBaseUrl() + downloadPath + filePart + '?platform=harmony&token=' + encodeURIComponent(token);
   }
 
   async resolve(trackId: string, quality?: string): Promise<ResolveResponse> {
